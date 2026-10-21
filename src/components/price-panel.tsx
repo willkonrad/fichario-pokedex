@@ -3,16 +3,20 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Line, Polyline, Text as SvgText } from 'react-native-svg';
 
-import { formatBRL, formatWhen } from '@/lib/quotes';
-import type { Condition, Entry } from '@/lib/types';
-import { CONFIDENCE_LABEL, mypCovers, valuation, type Confidence, type SourceId } from '@/lib/valuation';
+import { formatBRL, formatBRLShort, formatWhen } from '@/lib/quotes';
+import { CONDITIONS, VARIANTS, type Condition, type Entry } from '@/lib/types';
+import { CONFIDENCE_LABEL, mypCovers, soldMatchesVariant, valuation, type Confidence, type SourceId } from '@/lib/valuation';
 import { colors, confidenceColors, radius, shadow } from '@/theme';
 
 const LINE = { pt: colors.success, en: colors.blue };
 const CONFIDENCE_COLOR: Record<Confidence, string> = confidenceColors.light;
 const MYP_URL = 'https://mypcards.com';
+const QVMC_URL = 'https://quantovaleminhacarta.com.br';
 
-/** Cartão de preço da carta: valor no MYP Cards (ou "Meu valor"), de onde ele vem e o histórico de 30 dias. */
+/**
+ * Cartão de preço da carta: valor (Meu valor, vendas reais ou MYP Cards), de onde ele vem, as vendas reais por
+ * estado e o histórico de 30 dias do MYP.
+ */
 export function PricePanel({
   entry,
   condition,
@@ -24,10 +28,11 @@ export function PricePanel({
   condition: Condition;
   /** "Meu valor" digitado agora na tela (ainda não salvo). */
   myValue?: number;
-  /** Página da carta na LigaPokemon (só o link; o valor vem do MYP). */
+  /** Página da carta na LigaPokemon (só o link; o valor vem do MYP e das vendas reais). */
   ligaUrl?: string;
 }) {
   const myp = entry?.myp;
+  const sold = entry?.sold;
   // Valor com o estado e o "Meu valor" escolhidos agora na tela.
   const here = entry
     ? {
@@ -41,26 +46,30 @@ export function PricePanel({
   if (!entry) {
     return (
       <View style={styles.card}>
-        <Text style={styles.label}>Valor no MYP Cards</Text>
+        <Text style={styles.label}>Valor da carta</Text>
         <Text style={styles.muted}>Depois de colocar a carta no fichário, o preço chega em alguns minutos.</Text>
         <StoreLinks mypUrl={MYP_URL} ligaUrl={ligaUrl} />
       </View>
     );
   }
 
-  const urlOf = (id: SourceId) => (id === 'manual' ? undefined : (id === 'mypOffer' && entry.mypOffers?.url) || MYP_URL);
+  const urlOf = (id: SourceId) =>
+    id === 'manual' ? undefined : id === 'sold' ? (sold?.url ?? QVMC_URL) : (id === 'mypOffer' && entry.mypOffers?.url) || MYP_URL;
+  const soldHere = sold?.byCondition?.[condition];
   const tone = ref?.confidence ? CONFIDENCE_COLOR[ref.confidence] : colors.textMuted;
   const subtitle =
     ref?.basis === 'manual'
       ? 'meu valor · digitado por você'
       : ref?.basis === 'mypOffer'
-        ? `${CONFIDENCE_LABEL.alta} · menor oferta no seu estado e idioma`
-        : `${CONFIDENCE_LABEL.media} · menor anúncio no idioma da carta, de qualquer estado`;
+        ? `${CONFIDENCE_LABEL.alta} · menor oferta no MYP no seu estado e idioma`
+        : ref?.basis === 'sold'
+          ? `${ref.confidence ? CONFIDENCE_LABEL[ref.confidence] : ''} · mediana de ${soldHere?.count ?? 0} ${soldHere?.count === 1 ? 'venda real finalizada' : 'vendas reais finalizadas'} em ${condition}, sem anúncio no MYP${ref.confidence === 'baixa' ? ' (poucas vendas: referência inicial)' : ''}`
+          : `${CONFIDENCE_LABEL.media} · menor anúncio no MYP no idioma da carta, de qualquer estado`;
 
   return (
     <View style={{ gap: 12 }}>
       <View style={styles.card}>
-        <Text style={styles.label}>Valor no MYP Cards</Text>
+        <Text style={styles.label}>Valor da carta</Text>
         {ref?.value != null ? (
           <>
             <Text style={[styles.main, { color: tone }]}>{formatBRL(ref.value)}</Text>
@@ -71,15 +80,15 @@ export function PricePanel({
           </>
         ) : (
           <Text style={styles.muted}>
-            {!mypCovers(entry.lang)
-              ? 'O MYP Cards não informa preço de cartas japonesas. Preencha "Meu valor" com o valor que você conferiu.'
-              : myp?.checkedAt
-                ? 'Sem anúncio desta carta no MYP Cards agora. Você pode preencher "Meu valor".'
-                : 'Buscando o preço no MYP Cards… chega em alguns minutos.'}
+            {!myp?.checkedAt && !sold?.checkedAt
+              ? 'Buscando o preço… chega em alguns minutos.'
+              : mypCovers(entry.lang)
+                ? 'Sem anúncio no MYP Cards nem vendas registradas desta carta neste estado. Você pode preencher "Meu valor".'
+                : 'Sem vendas registradas desta carta neste estado (o MYP Cards não informa preço de cartas japonesas). Você pode preencher "Meu valor".'}
           </Text>
         )}
 
-        {/* Com mais de um valor (ex.: "Meu valor" e o MYP), lista cada um; o que vale fica destacado. */}
+        {/* Com mais de um valor (ex.: vendas reais e o MYP), lista cada um; o que vale fica destacado. */}
         {ref && ref.sources.length > 1 ? (
           <View style={styles.table}>
             {ref.sources.map((r) => {
@@ -105,14 +114,49 @@ export function PricePanel({
           </View>
         ) : null}
 
+        {/* Vendas reais em cada estado, no idioma da carta (o site pede para preservar idioma e estado). */}
+        {sold?.byCondition && Object.values(sold.byCondition).some((c) => c?.value != null) ? (
+          <>
+            <Text style={[styles.label, { marginTop: 6 }]}>
+              Vendas reais por estado{sold.variant ? ` · ${sold.variant}` : ''}
+            </Text>
+            {!soldMatchesVariant(entry.variant, sold.variant) ? (
+              <Text style={styles.note}>
+                São vendas da versão {sold.variant}; a sua é {VARIANTS.find((v) => v.id === entry.variant)?.label ?? entry.variant}, então elas não
+                entram no valor (só referência).
+              </Text>
+            ) : null}
+            <View style={styles.conds}>
+              {CONDITIONS.map(({ id }) => {
+                const c = sold.byCondition?.[id];
+                if (!c) return null;
+                const active = id === condition;
+                return (
+                  <View key={id} style={[styles.cond, active && styles.condActive]} accessibilityLabel={`${id}: ${c.value != null ? formatBRL(c.value) : 'sem vendas'}`}>
+                    <Text style={[styles.condId, active && { color: colors.primary }]}>{id}</Text>
+                    <Text style={styles.condValue} numberOfLines={1}>
+                      {c.value != null ? formatBRLShort(c.value) : '—'}
+                    </Text>
+                    <Text style={styles.condCount}>{c.count ? `${c.count}×` : ''}</Text>
+                  </View>
+                );
+              })}
+            </View>
+          </>
+        ) : null}
+
         <StoreLinks mypUrl={(ref?.basis === 'mypOffer' && entry.mypOffers?.url) || MYP_URL} ligaUrl={ligaUrl} />
 
         <Text style={styles.source}>
-          Preços do{' '}
+          Anúncios do{' '}
           <Text style={styles.sourceLink} accessibilityRole="link" onPress={() => WebBrowser.openBrowserAsync(MYP_URL)}>
             MYP Cards
+          </Text>{' '}
+          e vendas reais finalizadas do{' '}
+          <Text style={styles.sourceLink} accessibilityRole="link" onPress={() => WebBrowser.openBrowserAsync(sold?.url ?? QVMC_URL)}>
+            Quanto vale minha carta?
           </Text>
-          .{(entry.mypOffers?.checkedAt ?? myp?.checkedAt) ? ` Atualizado em ${formatWhen((entry.mypOffers?.checkedAt ?? myp?.checkedAt)!)}.` : ''}
+          {(entry.mypOffers?.checkedAt ?? myp?.checkedAt) ? ` · atualizado em ${formatWhen((entry.mypOffers?.checkedAt ?? myp?.checkedAt)!)}` : ''}
         </Text>
       </View>
 
@@ -261,6 +305,22 @@ const styles = StyleSheet.create({
   srcDetail: { color: colors.textFaint, fontSize: 11, marginTop: 1 },
   srcValue: { color: colors.text, fontSize: 15, fontWeight: '800' },
   srcRef: { color: colors.textMuted, fontWeight: '600' },
+  conds: { flexDirection: 'row', gap: 4, marginTop: 2 },
+  note: { color: colors.warning, fontSize: 12, lineHeight: 16 },
+  cond: {
+    flexGrow: 1,
+    flexBasis: 0,
+    minWidth: 0,
+    borderRadius: radius.sm,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    paddingVertical: 5,
+    alignItems: 'center',
+  },
+  condActive: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  condId: { color: colors.textMuted, fontSize: 11, fontWeight: '900' },
+  condValue: { color: colors.text, fontSize: 12, fontWeight: '800', marginTop: 1 },
+  condCount: { color: colors.textFaint, fontSize: 10, minHeight: 13 },
   storeRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
   storeButton: {
     flexDirection: 'row',

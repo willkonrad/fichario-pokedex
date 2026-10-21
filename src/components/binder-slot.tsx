@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { formatDex, getSpecies, spriteUrl } from '@/data/pokedex';
 import { CardImage } from '@/components/card-image';
-import { CONFIDENCE_LABEL, mypCovers, valuation } from '@/lib/valuation';
+import { CONFIDENCE_LABEL, pricePending, valuation } from '@/lib/valuation';
 import type { Entry } from '@/lib/types';
 import { binderColors as B, CARD_RATIO, colors, confidenceColors, mono, radius } from '@/theme';
 
@@ -123,8 +123,8 @@ function SlotPrice({ entry, small }: { entry: Entry; small: boolean }) {
   const ref = valuation(entry);
   const h = small ? 15 : 18;
   if (ref.value == null || !ref.confidence) {
-    // Buscando = o servidor ainda não consultou o MYP para esta carta (e ele cobre o idioma dela).
-    const pending = mypCovers(entry.lang) && !entry.myp?.checkedAt;
+    // Buscando = o servidor ainda não consultou nenhuma fonte de preço para esta carta.
+    const pending = pricePending(entry);
     return (
       <View style={[styles.pill, styles.pillPending, { height: h }]}>
         <Text style={[styles.pendingText, { fontSize: size }]} numberOfLines={1}>

@@ -66,13 +66,17 @@ export default function MenuScreen() {
                 .filter(Boolean)
                 .join(' · ')
             : stats.cards
-              ? `Nenhuma das ${stats.cards} cartas tem preço ainda. Os preços do MYP Cards chegam em alguns minutos.`
+              ? `Nenhuma das ${stats.cards} cartas tem preço ainda. Os preços chegam em alguns minutos.`
               : 'Coloque cartas no fichário para ver o valor da coleção.'}
         </Text>
         <Text style={styles.heroSource}>
-          Preços do{' '}
+          Valor de cada carta: anúncios do{' '}
           <Text style={styles.heroLink} accessibilityRole="link" onPress={() => WebBrowser.openBrowserAsync('https://mypcards.com')}>
             MYP Cards
+          </Text>
+          ; sem anúncio, vendas reais finalizadas do{' '}
+          <Text style={styles.heroLink} accessibilityRole="link" onPress={() => WebBrowser.openBrowserAsync('https://quantovaleminhacarta.com.br')}>
+            Quanto vale minha carta?
           </Text>{' '}
           (ou &quot;Meu valor&quot;, quando você preenche).
         </Text>

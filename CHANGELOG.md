@@ -1,5 +1,18 @@
 # Notas da versão
 
+## 2.1.0 — Vendas reais como fonte de valor reserva (21/10/2026)
+
+### Preços
+- **Nova fonte reserva: vendas reais finalizadas** do [Quanto vale minha carta?](https://quantovaleminhacarta.com.br), no estado e idioma da carta. O MYP Cards continua sendo a fonte principal; quando a carta não tem anúncio no MYP, a mediana das vendas reais vira o valor (confiança média com 3 ou mais vendas, baixa com 1 ou 2).
+- **Vendas reais por estado** (M, NM, SP, MP, HP, D) na tela da carta, com o número de vendas de cada um.
+- **Só vale a mesma variação**: vendas de outra versão (ex.: Normal para uma promo carimbada) aparecem com aviso e não entram no valor.
+- Cartas japonesas, que o MYP não cobre, agora podem ter valor pelas vendas reais.
+- O gráfico da coleção usa a mesma regra; o histórico diário passa a guardar as vendas reais.
+- No servidor, a função `myp-sync` virou `price-sync` (MYP + vendas reais, com cache de 7 dias).
+
+### Correções
+- Editar uma carta não apaga mais os dados de vendas reais já buscados.
+
 ## 2.0.0 — Visual Pokédex e revisão completa (21/10/2026)
 
 O app foi revisado de ponta a ponta, em 32 rodadas de verificação e correção. Esta versão traz um visual novo, inspirado na Pokédex e no Nintendo Switch, novos recursos pedidos e várias correções.

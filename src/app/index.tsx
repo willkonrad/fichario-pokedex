@@ -20,7 +20,7 @@ import {
   totalPages,
 } from '@/lib/binder';
 import { collectionTotals, formatBRLTight } from '@/lib/quotes';
-import { mypCovers } from '@/lib/valuation';
+import { pricePending } from '@/lib/valuation';
 import { POKEDEX_BINDER, type BinderSettings, type CustomBinder, type Entry } from '@/lib/types';
 import { customEntryId, entriesOf, entryId, useCollection } from '@/store/collection';
 import { binderColors as B, CARD_RATIO, colors, MAX_WIDTH, mono, radius, shadow } from '@/theme';
@@ -327,7 +327,7 @@ function BinderFrame(props: {
   const rangeLabel = shown.map(props.rangeFor).filter(Boolean).join('  ·  ');
   const progress = props.counter.value / Math.max(1, props.counter.total);
   const showPrices = props.showPrices !== false;
-  const pending = props.entries.filter((e) => mypCovers(e.lang) && !e.myp?.checkedAt).length;
+  const pending = props.entries.filter(pricePending).length;
 
   // Arrastar a página para o lado troca de página, como folhear o fichário.
   const pan = useMemo(

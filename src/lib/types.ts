@@ -41,6 +41,27 @@ export type MypInfo = {
   checkedAt: string;
 };
 
+/**
+ * Vendas reais finalizadas e pagas no Brasil, do "Quanto vale minha carta?" (quantovaleminhacarta.com.br):
+ * mediana por estado, no idioma da carta (gravado pelo servidor, price-sync).
+ */
+export type SoldInfo = {
+  /** Página da carta no site (fonte citada no app). */
+  url?: string;
+  byCondition?: Partial<Record<Condition, { value?: number; count: number }>>;
+  /** Variante a que os valores se referem (ex.: "Normal") e as variantes com vendas. */
+  variant?: string;
+  variants?: { name: string; count: number }[];
+  lastSale?: { price: number; daysAgo: number };
+  /** Vendas recentes (mais recente primeiro): há quantos dias, estado, idioma ("PT-BR"…) e preço. */
+  sales?: { daysAgo: number; condition?: string; lang?: string; price: number }[];
+  summary?: string;
+  /** O site avisa que há poucas vendas (1 ou 2): referência inicial, não valor firme. */
+  lowConfidence?: boolean;
+  notFound?: string;
+  checkedAt: string;
+};
+
 /** Menor oferta no MYP Cards no ESTADO e IDIOMA da carta (gravado pelo servidor, quando a API do MYP fornecer). */
 export type MypOffers = {
   min?: number;
@@ -82,6 +103,10 @@ export type Entry = {
   myp?: MypInfo;
   /** Menor oferta no MYP no estado e idioma da carta (gravado pelo servidor, semanal). */
   mypOffers?: MypOffers;
+  /** Vendas reais por estado, no idioma da carta (gravado pelo servidor, semanal). */
+  sold?: SoldInfo;
+  /** Id da carta na pokemontcg.io, usado pelo "Quanto vale minha carta?" (gravado pelo servidor). */
+  ptcgId?: string;
   /** Valor digitado pelo usuário (ex.: menor anúncio conferido no MYP); tem prioridade sobre o preço do MYP. */
   myValue?: { value: number; setAt: string };
   /** Imagem reserva salva por versões antigas do app (de quando os preços vinham da Liga). */

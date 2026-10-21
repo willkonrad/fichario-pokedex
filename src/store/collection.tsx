@@ -298,7 +298,7 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
         await persistDeleted(rest);
       }
       await remote(() => supabase!.from('entries').upsert(toRow(userId!, e)));
-      // O preço do MYP Cards é buscado só pelo servidor (função myp-sync) e chega aqui na próxima sincronização.
+      // O preço do MYP Cards é buscado só pelo servidor (função price-sync) e chega aqui na próxima sincronização.
     },
     async syncNow() {
       if (!userId) throw new Error('Entre na sua conta primeiro.');

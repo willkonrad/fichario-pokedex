@@ -48,7 +48,7 @@ create table if not exists public.price_history (
   lang text,
   condition text,
   variant text,
-  sources jsonb, -- { manual, mypOffer, myp }
+  sources jsonb, -- { manual, mypOffer, sold, myp }
   created_at timestamptz not null default now(),
   primary key (user_id, entry_id, day)
 );
@@ -66,6 +66,9 @@ returns integer language sql security definer set search_path = '' as $$
       jsonb_strip_nulls(jsonb_build_object(
         'manual', e.data->'myValue',
         'mypOffer', e.data->'mypOffers',
+        -- Vendas reais no estado da carta, com o nome da variação (o app só usa se for a mesma da carta).
+        'sold', (e.data->'sold'->'byCondition'->(e.data->>'condition'))
+          || jsonb_strip_nulls(jsonb_build_object('variant', e.data->'sold'->'variant')),
         'myp', e.data->'myp'->'price'
       ))
     from public.entries e
@@ -76,7 +79,15 @@ returns integer language sql security definer set search_path = '' as $$
 $$;
 revoke all on function public.snapshot_prices() from public, anon, authenticated;
 
--- ===== Preços do MYP Cards (Edge Function myp-sync + pg_cron) =====
+-- ===== Preços: MYP Cards (via Zukan) e vendas reais (Quanto vale minha carta?) — Edge Function price-sync + pg_cron =====
+
+-- Cache das páginas de vendas reais (7 dias), compartilhado entre contas: só o servidor lê e grava.
+create table if not exists public.qvmc_cache (
+  key text primary key,
+  data jsonb,
+  fetched_at timestamptz not null default now()
+);
+alter table public.qvmc_cache enable row level security;
 
 -- Chave aleatória que só o cron conhece (guardada no Vault).
 select vault.create_secret(encode(extensions.gen_random_bytes(32), 'hex'), 'liga_sync_key', 'Chave dos crons de preço')
@@ -90,12 +101,12 @@ revoke all on function public.check_liga_sync_key(text) from public, anon, authe
 grant execute on function public.check_liga_sync_key(text) to service_role;
 
 -- Troque SEU_PROJECT_REF pelo código do projeto.
-select cron.schedule('myp-sync', '5-59/10 * * * *', $$
+select cron.schedule('price-sync', '5-59/10 * * * *', $
   select net.http_post(
-    url := 'https://SEU_PROJECT_REF.supabase.co/functions/v1/myp-sync',
+    url := 'https://SEU_PROJECT_REF.supabase.co/functions/v1/price-sync',
     headers := jsonb_build_object('Content-Type', 'application/json',
       'x-sync-key', (select decrypted_secret from vault.decrypted_secrets where name = 'liga_sync_key')),
-    body := '{}'::jsonb, timeout_milliseconds := 120000);
+    body := '{}'::jsonb, timeout_milliseconds := 150000);
 $$);
 
 -- Foto diária do valor de cada carta, às 23:50 de Brasília.

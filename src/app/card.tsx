@@ -119,8 +119,8 @@ function CardForm({ params }: { params: Params }) {
     const value = parseBRL(e.myValueText);
     const image = detail?.image ?? saved?.image;
     return {
-      // Carta já salva: mantém o que só o servidor grava (preços do MYP, imagem reserva antiga).
-      ...(autoSave && existing ? { myp: existing.myp, mypOffers: existing.mypOffers, ligaImage: existing.ligaImage, ligaQuery: existing.ligaQuery } : {}),
+      // Carta já salva: mantém o que só o servidor grava (preços do MYP, vendas reais, imagem reserva antiga).
+      ...(autoSave && existing ? { myp: existing.myp, mypOffers: existing.mypOffers, sold: existing.sold, ptcgId: existing.ptcgId, ligaImage: existing.ligaImage, ligaQuery: existing.ligaQuery } : {}),
       binderId,
       dex: isExtra ? 0 : dex,
       slot,
