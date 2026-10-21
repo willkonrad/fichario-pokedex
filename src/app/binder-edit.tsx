@@ -180,7 +180,7 @@ function BinderForm() {
       </Section>
 
       <Section title="Exibição">
-        <Toggle label="Mostrar preços da Liga" hint="Cápsula com menor, médio e maior embaixo de cada carta." value={b.showPrices} onChange={(showPrices) => update({ showPrices })} />
+        <Toggle label="Mostrar preços" hint="Valor de cada carta no MYP Cards, embaixo dela." value={b.showPrices} onChange={(showPrices) => update({ showPrices })} />
         <Toggle label="Numerar os bolsos vazios" value={b.showPocketNumbers} onChange={(showPocketNumbers) => update({ showPocketNumbers })} />
       </Section>
 

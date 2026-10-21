@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
 import { useMemo, useState, type ComponentProps } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -21,7 +22,7 @@ export default function MenuScreen() {
     return { cards: list.length, species: new Set(pokedex.map((e) => e.dex)).size, ...collectionTotals(list), ...priceFreshness(list) };
   }, [entries, range.from, range.to]);
   const pct = Math.round((stats.species / range.count) * 1000) / 10;
-  // As 5 cartas mais valiosas (preço médio da Liga).
+  // As 5 cartas mais valiosas.
   const top = useMemo(
     () =>
       Object.values(entries)
@@ -58,22 +59,20 @@ export default function MenuScreen() {
               .join(' · ')}
           </Text>
         ) : null}
-        {stats.priced ? (
-          <Text style={[styles.heroLabel, { marginTop: 14 }]}>Faixa de anúncios na Liga</Text>
-        ) : null}
-        {stats.priced ? (
-          <View style={styles.range}>
-            <RangeCell label="Menor" value={stats.min} color={RANGE.min} />
-            <RangeCell label="Médio" value={stats.avg} color={RANGE.avg} />
-            <RangeCell label="Maior" value={stats.max} color={RANGE.max} />
-          </View>
-        ) : null}
         <Text style={styles.heroNote}>
-          {stats.valued
-            ? 'Valor de referência de cada carta, cruzando Liga, MYP, vendas reais, CardTrader, TCGplayer e Cardmarket.'
-            : stats.cards
-              ? `Nenhuma das ${stats.cards} cartas tem valor ainda. Os valores chegam em algumas horas.`
-              : 'Coloque cartas no fichário para ver o valor da coleção.'}
+          {stats.valued ? (
+            <>
+              Preços do{' '}
+              <Text style={styles.link} accessibilityRole="link" onPress={() => WebBrowser.openBrowserAsync('https://mypcards.com')}>
+                MYP Cards
+              </Text>
+              : menor anúncio de cada carta (ou &quot;Meu valor&quot;, quando você preenche).
+            </>
+          ) : stats.cards ? (
+            `Nenhuma das ${stats.cards} cartas tem valor ainda. Os preços do MYP Cards chegam em algumas horas.`
+          ) : (
+            'Coloque cartas no fichário para ver o valor da coleção.'
+          )}
         </Text>
         {stats.newest ? (
           <Text style={styles.heroNote}>
@@ -150,20 +149,6 @@ export default function MenuScreen() {
 
 type IconName =ComponentProps<typeof Ionicons>['name'];
 
-// Mesmas cores do quadro de preços da carta: menor, médio, maior.
-const RANGE = { min: '#8BD66B', avg: '#E8C25A', max: '#E0D7A8' };
-
-function RangeCell({ label, value, color }: { label: string; value: number; color: string }) {
-  return (
-    <View style={[styles.rangeCell, { borderLeftColor: color }]}>
-      <Text style={styles.rangeLabel}>{label}</Text>
-      <Text style={styles.rangeValue} numberOfLines={1}>
-        {formatBRLTight(value)}
-      </Text>
-    </View>
-  );
-}
-
 function Stat({ icon, label, value, sub }: { icon: IconName; label: string; value: string; sub: string }) {
   return (
     <View style={styles.stat}>
@@ -200,10 +185,7 @@ const styles = StyleSheet.create({
   heroLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' },
   heroValue: { color: colors.gold, fontSize: 32, fontWeight: '800', marginTop: 4 },
   heroNote: { color: colors.textMuted, fontSize: 12, marginTop: 10, lineHeight: 17 },
-  range: { flexDirection: 'row', gap: 8, marginTop: 12 },
-  rangeCell: { flex: 1, borderLeftWidth: 3, paddingLeft: 8 },
-  rangeLabel: { color: colors.textMuted, fontSize: 11 },
-  rangeValue: { color: colors.text, fontSize: 14, fontWeight: '700', marginTop: 2 },
+  link: { color: colors.accent, textDecorationLine: 'underline' },
   stats: { flexDirection: 'row', gap: 12 },
   stat: { flex: 1, backgroundColor: colors.surface, borderRadius: radius.md, padding: 14, borderWidth: 1, borderColor: colors.border },
   statHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },

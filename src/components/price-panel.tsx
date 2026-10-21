@@ -1,92 +1,62 @@
 import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Svg, { Circle, Line, Polyline, Text as SvgText } from 'react-native-svg';
+import Svg, { Line, Polyline, Text as SvgText } from 'react-native-svg';
 
 import { formatBRL, formatWhen } from '@/lib/quotes';
-import { CONDITIONS, LANG_SHORT, type CardLang, type Condition, type Entry, type Price } from '@/lib/types';
-import { CONFIDENCE_LABEL, valuation, type Confidence, type SourceId, type SourceRow } from '@/lib/valuation';
+import type { Condition, Entry } from '@/lib/types';
+import { CONFIDENCE_LABEL, valuation, type Confidence, type SourceId } from '@/lib/valuation';
 import { colors, radius } from '@/theme';
 
-const LINE = { pt: '#5FD69C', en: '#6BB8FF', sale: '#F2CF6B' };
+const LINE = { pt: '#5FD69C', en: '#6BB8FF' };
 const CONFIDENCE_COLOR: Record<Confidence, string> = { alta: '#5FD69C', media: '#F2CF6B', baixa: '#A8A8B0' };
+const MYP_URL = 'https://mypcards.com';
 
-/**
- * Cartão de preço da carta: valor de referência (todas as fontes cruzadas, com grau de confiança), o valor
- * de cada fonte em reais com link, vendas reais por estado, gráfico de 30 dias e últimas vendas.
- */
+/** Cartão de preço da carta: valor no MYP Cards (ou "Meu valor"), de onde ele vem e o histórico de 30 dias. */
 export function PricePanel({
   entry,
   condition,
-  lang,
-  ligaPrice,
-  ligaUrl,
   myValue,
 }: {
   /** Carta salva (os preços chegam pelo servidor depois de salvar). */
   entry?: Entry;
   condition: Condition;
-  lang: CardLang;
-  ligaPrice?: Price;
-  ligaUrl: string;
   /** "Meu valor" digitado agora na tela (ainda não salvo). */
   myValue?: number;
 }) {
   const myp = entry?.myp;
-  const sold = entry?.sold;
-  // Valor de referência com o estado e o "Meu valor" escolhidos agora na tela (todas as fontes cruzadas).
+  // Valor com o estado e o "Meu valor" escolhidos agora na tela.
   const here = entry
     ? {
         ...entry,
         condition,
-        price: ligaPrice ?? entry.price,
         myValue: myValue != null ? { value: myValue, setAt: entry.myValue?.setAt ?? new Date().toISOString() } : undefined,
       }
     : undefined;
   const ref = here ? valuation(here) : undefined;
-  const sourceRows = ref?.sources.filter((r) => r.id !== 'manual') ?? [];
-  // Com valor manual ou da Liga, as outras fontes só conferem; sem Liga, as fora da curva ficam riscadas.
-  const isReference = (r: SourceRow) => !r.used && ref?.basis !== 'median';
-  const detailOf = (r: SourceRow) => (r.used || isReference(r) ? r.detail : 'fora da curva, não entrou no cálculo');
-  const subtitle =
-    ref?.basis === 'manual'
-      ? 'meu valor · as fontes abaixo ficam só de referência'
-      : ref?.basis === 'mypOffer'
-        ? `${ref.confidence ? CONFIDENCE_LABEL[ref.confidence] : ''} · menor oferta no MYP no seu estado e idioma${entry?.mypOffers?.checkedAt ? ` (${formatWhen(entry.mypOffers.checkedAt)})` : ''}`
-        : ref?.basis === 'brasil'
-        ? `${ref.confidence ? CONFIDENCE_LABEL[ref.confidence] : ''} · vendas reais e anúncios no Brasil concordam acima do menor anúncio da Liga (provavelmente uma cópia jogada)`
-        : ref?.basis === 'liga'
-        ? `${ref.confidence ? CONFIDENCE_LABEL[ref.confidence] : ''} · menor anúncio na Liga${ref.check != null ? `, conferido por ${sourceRows.length - 1} ${sourceRows.length - 1 === 1 ? 'fonte' : 'fontes'} (${formatBRL(ref.check)})` : ''}`
-        : `${ref?.confidence ? CONFIDENCE_LABEL[ref.confidence] : ''} · sem anúncio na Liga: mediana de ${sourceRows.filter((r) => r.used).length} de ${sourceRows.length} fontes`;
 
   if (!entry) {
     return (
       <View style={styles.card}>
-        <Text style={styles.label}>Valor de referência</Text>
-        <Text style={styles.muted}>Depois de colocar a carta no fichário, os preços chegam em alguns minutos.</Text>
+        <Text style={styles.label}>Valor no MYP Cards</Text>
+        <Text style={styles.muted}>Depois de colocar a carta no fichário, o preço chega em alguns minutos.</Text>
       </View>
     );
   }
 
-  // Link de cada fonte, quando ela tem página para a carta.
-  const urlOf = (id: SourceId) =>
-    id === 'liga'
-      ? ligaUrl
-      : id === 'mypOffer' || id === 'myp'
-        ? (id === 'mypOffer' && entry.mypOffers?.url) || 'https://mypcards.com'
-      : id === 'sold'
-        ? sold?.url
-        : id === 'tcgplayer' && entry.intl?.tcgplayer?.productId
-          ? `https://www.tcgplayer.com/product/${entry.intl.tcgplayer.productId}`
-          : id === 'cardtrader' && entry.intl?.cardtrader?.blueprintId
-            ? `https://www.cardtrader.com/cards/${entry.intl.cardtrader.blueprintId}`
-            : undefined;
+  const urlOf = (id: SourceId) => (id === 'manual' ? undefined : (id === 'mypOffer' && entry.mypOffers?.url) || MYP_URL);
   const tone = ref?.confidence ? CONFIDENCE_COLOR[ref.confidence] : colors.textMuted;
+  const subtitle =
+    ref?.basis === 'manual'
+      ? 'meu valor · digitado por você'
+      : ref?.basis === 'mypOffer'
+        ? `${CONFIDENCE_LABEL.alta} · menor oferta no seu estado e idioma`
+        : `${CONFIDENCE_LABEL.media} · menor anúncio no idioma da carta, de qualquer estado`;
 
   return (
     <View style={{ gap: 12 }}>
       <View style={styles.card}>
-        <Text style={styles.label}>Valor de referência</Text>
+        <Text style={styles.label}>Valor no MYP Cards</Text>
         {ref?.value != null ? (
           <>
             <Text style={[styles.main, { color: tone }]}>{formatBRL(ref.value)}</Text>
@@ -94,18 +64,14 @@ export function PricePanel({
               <View style={[styles.confDot, { backgroundColor: tone }]} />
               <Text style={styles.mainSource}>{subtitle}</Text>
             </View>
-            {ref.suspect ? (
-              <Text style={styles.warn}>
-                As outras fontes indicam cerca de {formatBRL(ref.check ?? 0)}: o menor anúncio na Liga pode ser de uma carta jogada ou
-                danificada. Confira o menor anúncio no seu estado na Liga e preencha &quot;Meu valor&quot;.
-              </Text>
-            ) : null}
           </>
         ) : (
-          <Text style={styles.muted}>Buscando preços… chegam em até algumas horas.</Text>
+          <Text style={styles.muted}>
+            {myp?.checkedAt ? 'Sem anúncio desta carta no MYP Cards agora. Você pode preencher "Meu valor".' : 'Buscando o preço no MYP Cards…'}
+          </Text>
         )}
 
-        {/* Cada fonte, já em reais; as descartadas (fora da curva) aparecem riscadas. */}
+        {/* Cada valor disponível; o que vale para a carta fica destacado. */}
         {ref?.sources.length ? (
           <View style={styles.table}>
             {ref.sources.map((r) => {
@@ -122,72 +88,38 @@ export function PricePanel({
                       {r.label}
                       {url ? <Text style={styles.srcLink}> ↗</Text> : null}
                     </Text>
-                    <Text style={styles.srcDetail}>{detailOf(r)}</Text>
+                    <Text style={styles.srcDetail}>{r.detail}</Text>
                   </View>
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <Text
-                      style={[
-                        styles.srcValue,
-                        isReference(r) && styles.srcRef,
-                        !r.used && !isReference(r) && styles.srcOut,
-                      ]}>
-                      {formatBRL(r.brl)}
-                    </Text>
-                    {r.original ? <Text style={styles.srcDetail}>{r.original}</Text> : null}
-                  </View>
+                  <Text style={[styles.srcValue, !r.used && styles.srcRef]}>{formatBRL(r.brl)}</Text>
                 </Pressable>
               );
             })}
           </View>
         ) : null}
 
-        {/* Vendas reais em cada estado. */}
-        {sold?.byCondition && Object.values(sold.byCondition).some((c) => c?.value != null) ? (
-          <>
-            <Text style={[styles.label, { marginTop: 6 }]}>Vendas reais por estado ({LANG_SHORT[lang]})</Text>
-            <View style={styles.conds}>
-              {CONDITIONS.map(({ id }) => {
-                const c = sold.byCondition?.[id];
-                if (!c) return null;
-                const active = id === condition;
-                return (
-                  <View key={id} style={[styles.cond, active && styles.condActive]}>
-                    <Text style={[styles.condId, active && { color: colors.accent }]}>{id}</Text>
-                    <Text style={styles.condValue}>{c.value != null ? formatBRL(c.value) : '—'}</Text>
-                  </View>
-                );
-              })}
-            </View>
-          </>
-        ) : null}
-
         <Text style={styles.source}>
-          Valor = menor oferta no MYP no seu estado e idioma, quando houver; senão, menor anúncio na Liga (padrão no Brasil), a não ser que vendas reais e anúncios no Brasil concordem num
-          valor acima dele; as fontes de fora só conferem. Sem Liga, mediana das fontes.
-          Valores de fora convertidos pelo câmbio do dia
-          {entry.intl?.fx ? ` (US$ 1 = ${formatBRL(entry.intl.fx.usd)}, € 1 = ${formatBRL(entry.intl.fx.eur)})` : ''}.
-          {myp?.checkedAt ? ` Atualizado em ${formatWhen(myp.checkedAt)}.` : ''}
+          Preços do{' '}
+          <Text style={styles.sourceLink} accessibilityRole="link" onPress={() => WebBrowser.openBrowserAsync(MYP_URL)}>
+            MYP Cards
+          </Text>
+          .{(entry.mypOffers?.checkedAt ?? myp?.checkedAt) ? ` Atualizado em ${formatWhen((entry.mypOffers?.checkedAt ?? myp?.checkedAt)!)}.` : ''}
         </Text>
       </View>
 
-      <PriceHistory history={myp?.history} sales={sold?.sales} />
-      <RecentSales sales={sold?.sales} />
+      <PriceHistory history={myp?.history} />
     </View>
   );
 }
 
-/** Histórico de 30 dias do menor anúncio no MYP (PT e EN) e vendas reais no mesmo período. */
-function PriceHistory({ history, sales }: { history?: { t: string; p: number; k: 'pt' | 'en' }[]; sales?: { daysAgo: number; price: number }[] }) {
+/** Histórico de 30 dias do menor anúncio no MYP Cards (PT e EN). */
+function PriceHistory({ history }: { history?: { t: string; p: number; k: 'pt' | 'en' }[] }) {
   const [width, setWidth] = useState(0);
   // Momento de referência do gráfico ("hoje"), fixado ao abrir a tela.
   const [now] = useState(() => Date.now());
   if (!history?.length) return null;
   const start = Math.min(...history.map((h) => new Date(h.t).getTime()));
   const end = now;
-  const salePoints = (sales ?? [])
-    .map((s) => ({ t: now - s.daysAgo * 86_400_000, p: s.price }))
-    .filter((s) => s.t >= start);
-  const prices = [...history.map((h) => h.p), ...salePoints.map((s) => s.p)];
+  const prices = history.map((h) => h.p);
   const min = Math.min(...prices);
   const max = Math.max(...prices);
   const pad = (max - min) * 0.15 || max * 0.1 || 1;
@@ -224,7 +156,6 @@ function PriceHistory({ history, sales }: { history?: { t: string; p: number; k:
         <View style={styles.legend}>
           {hasPt ? <Legend color={LINE.pt} label="PT" /> : null}
           {hasEn ? <Legend color={LINE.en} label="EN" /> : null}
-          {salePoints.length ? <Legend color={LINE.sale} label="vendas" /> : null}
         </View>
       </View>
       {width > 0 ? (
@@ -239,9 +170,6 @@ function PriceHistory({ history, sales }: { history?: { t: string; p: number; k:
           ))}
           {line('pt')}
           {line('en')}
-          {salePoints.map((s, i) => (
-            <Circle key={i} cx={x(s.t)} cy={y(s.p)} r={3.5} fill={LINE.sale} />
-          ))}
           <SvgText x={left} y={H - 6} fontSize={10} fill={colors.textFaint}>
             {date(start)}
           </SvgText>
@@ -257,7 +185,7 @@ function PriceHistory({ history, sales }: { history?: { t: string; p: number; k:
         <Text style={styles.sourceLink} accessibilityRole="link" onPress={() => WebBrowser.openBrowserAsync('https://mypcards.com')}>
           MYP Cards
         </Text>{' '}
-        nos últimos 30 dias (via Zukan). Pontos: vendas reais no período.
+        nos últimos 30 dias (via Zukan).
       </Text>
     </View>
   );
@@ -268,27 +196,6 @@ function Legend({ color, label }: { color: string; label: string }) {
     <View style={styles.legendItem}>
       <View style={[styles.legendDot, { backgroundColor: color }]} />
       <Text style={styles.legendText}>{label}</Text>
-    </View>
-  );
-}
-
-/** Últimas vendas reais (data, estado, idioma, preço). */
-function RecentSales({ sales }: { sales?: { daysAgo: number; condition?: string; lang?: string; price: number }[] }) {
-  if (!sales?.length) return null;
-  return (
-    <View style={styles.card}>
-      <Text style={styles.chartTitle}>Últimas vendas</Text>
-      {sales.slice(0, 8).map((s, i) => (
-        <View key={i} style={[styles.saleRow, i > 0 && styles.saleBorder]}>
-          <Text style={styles.saleWhen}>{s.daysAgo === 0 ? 'hoje' : `há ${s.daysAgo} ${s.daysAgo === 1 ? 'dia' : 'dias'}`}</Text>
-          <View style={styles.saleTags}>
-            {s.condition ? <Text style={styles.tag}>{s.condition}</Text> : null}
-            {s.lang ? <Text style={styles.tag}>{s.lang}</Text> : null}
-          </View>
-          <Text style={styles.salePrice}>{formatBRL(s.price)}</Text>
-        </View>
-      ))}
-      <Text style={styles.source}>Vendas finalizadas e pagas no Brasil (Quanto vale minha carta?).</Text>
     </View>
   );
 }

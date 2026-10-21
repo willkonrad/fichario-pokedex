@@ -24,8 +24,8 @@ import { colors, mono, radius } from '@/theme';
 
 const GAP = 8;
 const MAX_WIDTH = 720;
-// Valor da coleção (venda real → MYP → Liga) e quantas cartas têm valor de venda real.
-const TOTAL_COLORS = { value: '#E8C25A', sold: '#5FD69C' };
+// Valor da coleção (MYP Cards) e quantas cartas têm preço.
+const TOTAL_COLORS = { value: '#E8C25A', priced: '#5FD69C' };
 
 export default function BinderScreen() {
   const { ready, settings, activeBinderId, binders } = useCollection();
@@ -290,7 +290,7 @@ function BinderFrame(props: {
                   <Text style={styles.totalLabel}>valor </Text>
                   {formatBRLTight(totals.value)}
                 </Text>
-                <Text style={[styles.total, { borderLeftColor: TOTAL_COLORS.sold }]} numberOfLines={1}>
+                <Text style={[styles.total, { borderLeftColor: TOTAL_COLORS.priced }]} numberOfLines={1}>
                   {totals.valued}
                   <Text style={styles.totalLabel}>/{props.entries.length} com preço</Text>
                 </Text>
@@ -300,9 +300,9 @@ function BinderFrame(props: {
                 {props.entries.length
                   ? props.showPrices === false
                     ? `${props.entries.length} cartas`
-                    : props.entries.every((e) => e.ligaNotFound)
-                      ? 'Liga ainda sem cotação para estas cartas'
-                      : 'Na fila da Liga · cotações às 6h, 13h e 20h'
+                    : props.entries.every((e) => e.myp?.checkedAt)
+                      ? 'MYP Cards ainda sem preço para estas cartas'
+                      : 'Buscando preços no MYP Cards…'
                   : 'Comece colocando sua primeira carta'}
               </Text>
             )}

@@ -1,62 +1,30 @@
 import type { Entry } from './types';
 import { valuation } from './valuation';
 
-/** Faixa de preço real da carta na Liga (menor / médio / maior), do acabamento dela. */
-export function entryRange(e: Entry): { min?: number; avg?: number; max?: number } | undefined {
-  if (e.price && (e.price.avg != null || e.price.min != null)) return e.price;
-  return undefined;
-}
-
-/**
- * Valor de vendas reais da carta no estado dela (mediana do "Quanto vale minha carta?"), quando houver.
- * É o valor mais fiel: vendas concluídas, no idioma e no estado da carta.
- */
-export function soldValue(e: Entry): { value: number; count: number; lowConfidence: boolean } | undefined {
-  const c = e.sold?.byCondition?.[e.condition];
-  if (c?.value == null) return undefined;
-  return { value: c.value, count: c.count, lowConfidence: !!e.sold?.lowConfidence && c.count < 3 };
-}
-
-/** Valor da carta no total da coleção: o valor de referência, que cruza todas as fontes (ver valuation.ts). */
+/** Valor da carta no total da coleção (só MYP Cards; ver valuation.ts). */
 export function entryValue(e: Entry) {
   return valuation(e).value;
 }
 
-/**
- * Totais da coleção. `value` soma o valor de cada carta (venda real ou, sem ela, a média da Liga);
- * `min`/`avg`/`max` somam só a faixa de anúncios da Liga (referência).
- */
+/** Totais da coleção: soma do valor de cada carta e quantas cartas têm valor, por confiança. */
 export function collectionTotals(entries: Entry[]) {
-  let min = 0;
-  let avg = 0;
-  let max = 0;
-  let priced = 0;
   let value = 0;
   let valued = 0;
   const byConfidence = { alta: 0, media: 0, baixa: 0 };
   for (const e of entries) {
-    const v = entryValue(e);
-    if (v != null) {
-      value += v;
-      valued++;
-      const c = valuation(e).confidence;
-      if (c) byConfidence[c]++;
-    }
-    const r = entryRange(e);
-    if (!r) continue;
-    priced++;
-    const mid = r.avg ?? r.min ?? 0;
-    min += r.min ?? mid;
-    avg += mid;
-    max += r.max ?? mid;
+    const ref = valuation(e);
+    if (ref.value == null) continue;
+    value += ref.value;
+    valued++;
+    if (ref.confidence) byConfidence[ref.confidence]++;
   }
-  return { min, avg, max, priced, unpriced: entries.length - priced, value, valued, byConfidence, unvalued: entries.length - valued };
+  return { value, valued, byConfidence, unvalued: entries.length - valued };
 }
 
-/** Cotação mais recente e mais antiga da coleção (ISO), para mostrar quando os valores foram atualizados. */
+/** Atualização mais recente e mais antiga dos preços do MYP na coleção (ISO). */
 export function priceFreshness(entries: Entry[]) {
   const times = entries
-    .map((e) => (e.price?.source === 'site' ? e.price.updatedAt : undefined))
+    .map((e) => e.mypOffers?.checkedAt ?? e.myp?.checkedAt)
     .filter((t): t is string => !!t)
     .sort();
   return { newest: times[times.length - 1], oldest: times[0] };

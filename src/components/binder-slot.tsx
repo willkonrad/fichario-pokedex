@@ -4,19 +4,11 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { formatDex, getSpecies, spriteUrl } from '@/data/pokedex';
 import { CardImage } from '@/components/card-image';
-import { entryRange } from '@/lib/quotes';
 import { CONFIDENCE_LABEL, valuation } from '@/lib/valuation';
 import type { Entry } from '@/lib/types';
 import { CARD_RATIO, colors, mono, radius } from '@/theme';
 
 const SPECIAL = new Set(['holo', 'reverse', 'firstEdition', 'pokeball', 'masterball', 'wPromo', 'shadowless', 'staff']);
-
-// Cores da cápsula de preços (mesmas do quadro da carta): menor, médio, maior.
-const SEGMENT = {
-  min: { bg: 'rgba(139, 214, 107, 0.16)', fg: '#9BE07C' },
-  avg: { bg: 'rgba(232, 194, 90, 0.26)', fg: '#F2CF6B' },
-  max: { bg: 'rgba(224, 215, 168, 0.12)', fg: '#D9D0A2' },
-};
 
 // Valor de referência: a cor diz a confiança (verde alta, âmbar média, cinza baixa).
 const TONE = {
@@ -135,56 +127,29 @@ export function BinderSlot({
   );
 }
 
-/**
- * Menor / médio / maior reais da carta na Liga (do acabamento dela), numa cápsula segmentada:
- * verde (menor), dourado (médio, em destaque com "R$") e bege (maior).
- */
+/** Valor da carta (MYP Cards) numa cápsula; a cor diz a confiança. Sem valor: "na fila" ou "sem preço". */
 function SlotPrices({ entry, small }: { entry: Entry; small: boolean }) {
-  const r = entryRange(entry);
   const size = small ? 7.5 : 10;
-  // Valor de referência (todas as fontes cruzadas); a cor diz a confiança.
   const ref = valuation(entry);
-  if (ref.value != null && ref.confidence) {
-    const tone = TONE[ref.confidence];
-    return (
-      <View
-        style={[styles.pill, styles.single, { height: small ? 14 : 18, backgroundColor: tone.bg }]}
-        accessibilityLabel={`Valor de referência ${ref.value.toFixed(2)} reais, ${CONFIDENCE_LABEL[ref.confidence]}`}>
-        <View style={[styles.dot, { backgroundColor: tone.fg }]} />
-        <Text style={[styles.segmentText, styles.segmentAvg, { fontSize: size, color: tone.fg }]} numberOfLines={1}>
-          <Text style={{ fontSize: size - 2, fontWeight: '600' }}>R$</Text>
-          {formatCompact(ref.value)}
-        </Text>
-      </View>
-    );
-  }
-  if (!r) {
+  if (ref.value == null || !ref.confidence) {
     return (
       <View style={[styles.pill, styles.pillPending, { height: small ? 14 : 18 }]}>
         <Text style={[styles.pendingText, { fontSize: size }]} numberOfLines={1}>
-          {entry.ligaNotFound ? 'sem cotação' : 'na fila'}
+          {entry.myp?.checkedAt ? 'sem preço' : 'na fila'}
         </Text>
       </View>
     );
   }
+  const tone = TONE[ref.confidence];
   return (
-    <View style={[styles.pill, { height: small ? 14 : 18 }]}>
-      {(['min', 'avg', 'max'] as const).map((k, i) => (
-        <View
-          key={k}
-          style={[
-            styles.segment,
-            { backgroundColor: SEGMENT[k].bg, flexGrow: k === 'avg' ? 1.8 : 1 },
-            i > 0 && styles.segmentDivider,
-          ]}>
-          <Text
-            style={[styles.segmentText, { fontSize: size, color: SEGMENT[k].fg }, k === 'avg' && styles.segmentAvg]}
-            numberOfLines={1}>
-            {k === 'avg' ? <Text style={{ fontSize: size - 2, fontWeight: '600' }}>R$</Text> : null}
-            {formatCompact(r[k])}
-          </Text>
-        </View>
-      ))}
+    <View
+      style={[styles.pill, styles.single, { height: small ? 14 : 18, backgroundColor: tone.bg }]}
+      accessibilityLabel={`Valor ${ref.value.toFixed(2)} reais no MYP Cards, ${CONFIDENCE_LABEL[ref.confidence]}`}>
+      <View style={[styles.dot, { backgroundColor: tone.fg }]} />
+      <Text style={[styles.segmentText, styles.segmentAvg, { fontSize: size, color: tone.fg }]} numberOfLines={1}>
+        <Text style={{ fontSize: size - 2, fontWeight: '600' }}>R$</Text>
+        {formatCompact(ref.value)}
+      </Text>
     </View>
   );
 }
@@ -228,10 +193,8 @@ const styles = StyleSheet.create({
   },
   pillPending: { backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
   pendingText: { color: colors.textFaint, fontStyle: 'italic' },
-  segment: { flexBasis: 0, minWidth: 0, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 0.5 },
   single: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6, gap: 4 },
   dot: { width: 5, height: 5, borderRadius: 3 },
-  segmentDivider: { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: 'rgba(0,0,0,0.45)' },
   segmentText: { fontWeight: '600', includeFontPadding: false },
   segmentAvg: { fontWeight: '800' },
 });

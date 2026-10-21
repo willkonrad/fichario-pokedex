@@ -17,16 +17,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CardAttributes, cardAttributeItems, CardMoves } from '@/components/card-facts';
 import { CardImage } from '@/components/card-image';
-import { LigaPrices } from '@/components/liga-prices';
 import { PricePanel } from '@/components/price-panel';
 import { Button, Chip, Input, Section } from '@/components/ui';
 import { formatDex, getSpecies, speciesInCardName } from '@/data/pokedex';
 import { customTotalSlots, indexOfDex, physicalPosition } from '@/lib/binder';
-import { ligaCardUrl, ligaNumberOverride, ligaQuery, priceFromFinishes } from '@/lib/liga-api';
+import { ligaNumberOverride, ligaQuery, priceFromFinishes } from '@/lib/liga-api';
 import { formatWhen } from '@/lib/quotes';
 import { ligaNumbering } from '@/lib/ptcg';
-import { cardDetail, setAbbreviation, type CardDetail } from '@/lib/tcgdex';
-import { CONDITIONS, LANG_LABEL, VARIANTS, type CardLang, type Condition, type Price, type Variant } from '@/lib/types';
+import { cardDetail, type CardDetail } from '@/lib/tcgdex';
+import { CONDITIONS, LANG_LABEL, VARIANTS, type CardLang, type Condition, type Variant } from '@/lib/types';
 import { availableVariants } from '@/lib/variants';
 import { keyOf, useCollection } from '@/store/collection';
 import { CARD_RATIO, colors, radius } from '@/theme';
@@ -106,15 +105,6 @@ function CardForm({ params }: { params: Params }) {
     if (!cardId || lang === 'ja') return;
     ligaNumbering(cardId).then(setLigaNum).catch(() => {});
   }, [cardId, lang]);
-  // Sigla da coleção (ex.: FCO), para o link direto da carta na Liga.
-  const setIdForLink = detail?.set.id ?? existing?.setId;
-  const [abbr, setAbbr] = useState<{ setId: string; code: string | null } | null>(null);
-  useEffect(() => {
-    if (!setIdForLink) return;
-    setAbbreviation(setIdForLink)
-      .then((code) => setAbbr({ setId: setIdForLink, code }))
-      .catch(() => {});
-  }, [setIdForLink]);
   // Imagem reserva (pokemontcg.io) quando a TCGdex não tem imagem desta carta.
   const [resolvedImageUrl, setResolvedImageUrl] = useState<string | undefined>();
   // Carta já salva sem imagem: grava a imagem reserva assim que for encontrada, para aparecer no fichário.
@@ -169,19 +159,6 @@ function CardForm({ params }: { params: Params }) {
     : variantChanged
       ? priceFromFinishes(ligaFinishes, variant, existing?.price)
       : existing?.price;
-  // Link da Liga: o salvo pela cotação; senão a página direta da carta (sigla + número); senão a busca.
-  const localIdForLink = ligaNum
-    ? ligaNum.number.padStart(3, '0')
-    : (override?.number ?? detail?.localId ?? existing?.localId);
-  const directLigaUrl =
-    abbr && abbr.setId === setIdForLink && localIdForLink
-      ? ligaCardUrl(autoQuery, abbr.setId, abbr.code ?? undefined, localIdForLink)
-      : undefined;
-  const ligaUrl =
-    (!isNewCard && existing?.ligaUrl) ||
-    directLigaUrl ||
-    `https://www.ligapokemon.com.br/?view=cards/search&card=${encodeURIComponent(autoQuery || species?.name || '')}`;
-
   // Mesma carta (id + idioma) em outros bolsos ou fichários.
   const copies = Object.values(entries).filter((e) => e.cardId === cardId && e.lang === lang && e.id !== existing?.id);
 
@@ -381,9 +358,6 @@ function CardForm({ params }: { params: Params }) {
         <PricePanel
           entry={isNewCard ? undefined : existing}
           condition={condition}
-          lang={lang}
-          ligaPrice={ligaPrice}
-          ligaUrl={ligaUrl}
           myValue={myValueNum}
         />
         <Section
@@ -391,7 +365,7 @@ function CardForm({ params }: { params: Params }) {
           hint={
             existing?.myValue && existing.myValue.value === myValueNum
               ? `Digitado em ${formatWhen(existing.myValue.setAt)}. É o valor da carta no fichário, no total e nos gráficos; apague para voltar às fontes.`
-              : 'Opcional: o valor que você conferiu (ex.: menor anúncio no seu estado na Liga). Tem prioridade sobre as fontes.'
+              : 'Opcional: o valor que você conferiu (ex.: menor anúncio no seu estado no MYP Cards). Tem prioridade sobre as fontes.'
           }>
           <Input
             value={myValueText}
@@ -411,14 +385,6 @@ function CardForm({ params }: { params: Params }) {
             <CardMoves detail={detail} />
           </>
         ) : null}
-
-        {/* Faixa de anúncios da Liga por acabamento */}
-        <View style={{ height: 24 }} />
-        <Section
-          title="Anúncios na LigaPokemon (R$)"
-          hint={ligaHint(ligaPrice, !!existing, variantChanged && !ligaPrice, !!existing?.ligaNotFound, existing?.ligaMismatch, existing?.ligaCheckedAt)}>
-          <LigaPrices finishes={ligaFinishes} price={ligaPrice} variant={variant} />
-        </Section>
 
         {customBinder && existing && !isNewCard ? (
           <Section
@@ -531,28 +497,6 @@ const styles = StyleSheet.create({
   bottomButton: { width: '100%', maxWidth: 680 },
 });
 
-function ligaHint(
-  price: Price | undefined,
-  saved: boolean,
-  variantChanged: boolean,
-  notFound = false,
-  mismatch?: string,
-  checkedAt?: string,
-) {
-  if (variantChanged) return 'A variação mudou: a cotação é refeita para o novo acabamento depois de salvar.';
-  const checked = checkedAt ? ` Última verificação: ${formatWhen(checkedAt)}.` : '';
-  if (!price?.updatedAt) {
-    if (!saved) return 'Automática: a cotação começa assim que você colocar a carta no fichário.';
-    if (mismatch) {
-      return `A Liga devolveu outra carta (${mismatch}). Por segurança o preço não foi usado; ela é procurada de novo nas próximas cotações.${checked}`;
-    }
-    return notFound
-      ? `A Liga não encontrou esta carta na última cotação. Ela é procurada de novo nas próximas cotações.${checked}`
-      : 'Na fila da Liga: cartas sem valor têm prioridade e são cotadas na próxima janela (6h, 13h ou 20h).';
-  }
-  if (price.source === 'manual') return `Digitada em ${formatWhen(price.updatedAt)}.`;
-  return `Atualizada em ${formatWhen(price.updatedAt)} · valores anunciados, todos os estados e idiomas.`;
-}
 
 /** "37,90", "1.234,56" ou "37.90" → número (undefined se vazio ou inválido). */
 function parseBRL(text: string) {
