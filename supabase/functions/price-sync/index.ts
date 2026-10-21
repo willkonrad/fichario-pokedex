@@ -1,8 +1,10 @@
 // Edge Function: preços das cartas, de duas fontes que autorizam esse uso. Chamada pelo pg_cron a cada 10 min.
 //
 // 1) MYP Cards (https://mypcards.com): menor anúncio por idioma, com histórico de 30 dias, pelo servidor MCP
-//    público do Zukan (zukan.com.br/mcp), feito para apps consultarem preços. Carta com preço: 1×/semana;
-//    sem preço: todo dia. Quando a API oficial do MYP for liberada (chave MYP_API_TOKEN), ela entra aqui.
+//    público do Zukan (zukan.com.br/mcp), feito para apps consultarem preços. Carta com preço: a cada 6 dias
+//    (nunca fica com mais de uma semana); sem preço: todo dia. Quando a API oficial do MYP for liberada
+//    (chave MYP_API_TOKEN), ela entra aqui. Se o MYP passar do "Meu valor" da carta, o "Meu valor" é apagado e o
+//    app volta a usar o MYP.
 // 2) Quanto vale minha carta? (quantovaleminhacarta.com.br, da Leilomania): mediana de VENDAS REAIS finalizadas
 //    e pagas, por idioma e estado. O /llms.txt do site declara o conteúdo público e citável e pede: citar a
 //    fonte, dizer que são vendas reais, preservar idioma e estado e repassar o aviso de poucas vendas (o app
@@ -20,6 +22,8 @@ const CARDS_PER_RUN = 15;
 /** Pausa entre páginas do "Quanto vale minha carta?". */
 const DELAY_MS = 1500;
 const REFRESH_DAYS = 7;
+/** MYP: a cada 6 dias, para o preço nunca ter mais de uma semana. */
+const MYP_REFRESH_DAYS = 6;
 const DAY = 86_400_000;
 
 /** Idioma da carta no app → idioma na URL do "Quanto vale minha carta?". */
@@ -48,7 +52,17 @@ type SoldInfo = {
   notFound?: string;
   checkedAt: string;
 };
-type EntryData = { cardId?: string; lang?: string; localId?: string; ptcgId?: string; myp?: MypInfo; sold?: SoldInfo };
+type EntryData = {
+  cardId?: string;
+  lang?: string;
+  localId?: string;
+  condition?: string;
+  ptcgId?: string;
+  myp?: MypInfo;
+  mypOffers?: { min?: number; condition?: string; lang?: string };
+  myValue?: { value: number; setAt?: string } | null;
+  sold?: SoldInfo;
+};
 type Row = { user_id: string; id: string; data: EntryData };
 
 const json = (body: unknown, status = 200) =>
@@ -74,10 +88,10 @@ Deno.serve(async (req) => {
     groups.set(k, [...(groups.get(k) ?? []), row]);
   }
   const now = Date.now();
-  // MYP (só PT e EN): com preço, 1×/semana; sem preço, todo dia (pode ter ganhado anúncio).
+  // MYP (só PT e EN): com preço, a cada 6 dias; sem preço, todo dia (pode ter ganhado anúncio).
   const mypDue = (g: Row[]) => {
     if (g[0].data.lang !== 'pt' && g[0].data.lang !== 'en') return false;
-    const days = g.some((r) => r.data.myp?.price != null) ? REFRESH_DAYS : 1;
+    const days = g.some((r) => r.data.myp?.price != null) ? MYP_REFRESH_DAYS : 1;
     return now - Math.min(...g.map((r) => time(r.data.myp?.checkedAt))) > days * DAY;
   };
   // Vendas reais: 1×/semana (vendas não mudam tão rápido).
@@ -129,12 +143,26 @@ Deno.serve(async (req) => {
 
     if (!Object.keys(fields).length) continue;
     for (const row of group) {
-      const { error } = await admin.rpc('set_entry_fields', { p_user: row.user_id, p_id: row.id, p_fields: fields });
+      const { error } = await admin.rpc('set_entry_fields', { p_user: row.user_id, p_id: row.id, p_fields: { ...fields, ...replaceMyValue(row.data, fields.myp as MypInfo | undefined) } });
       if (!error) report.entriesUpdated++;
     }
   }
   return json({ ...report, pending: Math.max(0, due.length - CARDS_PER_RUN) });
 });
+
+/**
+ * O MYP passou do "Meu valor"? Então o "Meu valor" é apagado (o app volta a usar o MYP) e fica o registro da troca,
+ * mostrado na tela da carta. Vale o mesmo preço do MYP que o app usaria: a oferta no estado e idioma da carta, se
+ * houver; senão, o menor anúncio no idioma.
+ */
+function replaceMyValue(data: EntryData, myp?: MypInfo): Record<string, unknown> {
+  const mine = data.myValue?.value;
+  if (mine == null || !myp) return {};
+  const offer = data.mypOffers;
+  const mypValue = offer?.min != null && offer.condition === data.condition && offer.lang === data.lang ? offer.min : myp.price;
+  if (mypValue == null || mypValue <= mine) return {};
+  return { myValue: null, myValueReplaced: { value: mine, mypValue, at: new Date().toISOString() } };
+}
 
 // ---------- MYP Cards (via Zukan) ----------
 

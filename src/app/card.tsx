@@ -12,9 +12,10 @@ import { BOTTOM_BAR_SPACE, BottomBar, Button, Card, Chip, EmptyState, GroupLabel
 import { formatDex, getSpecies, speciesInCardName } from '@/data/pokedex';
 import { customTotalSlots, indexOfDex, indexOfExtra, physicalPosition } from '@/lib/binder';
 import { ligaQuery, ligaSearchUrl } from '@/lib/liga';
-import { formatWhen } from '@/lib/quotes';
+import { formatBRL, formatWhen } from '@/lib/quotes';
 import { cardDetail, type CardDetail } from '@/lib/tcgdex';
-import { CONDITIONS, LANG_LABEL, VARIANTS, type CardLang, type Condition, type Entry, type Variant } from '@/lib/types';
+import { CONDITIONS, LANG_LABEL, ORIGINS, VARIANTS, type CardLang, type Condition, type Entry, type Origin, type Variant } from '@/lib/types';
+import { valuation } from '@/lib/valuation';
 import { availableVariants, versionOptions, type VersionOption } from '@/lib/variants';
 import { keyOf, useCollection } from '@/store/collection';
 import { CARD_RATIO, colors, MAX_WIDTH, radius, shadow } from '@/theme';
@@ -23,7 +24,15 @@ import { CARD_RATIO, colors, MAX_WIDTH, radius, shadow } from '@/theme';
 type Params = { dex?: string; binder?: string; slot: string; cardId?: string; lang?: CardLang; dataLang?: CardLang };
 
 /** Campos que o usuário edita nesta tela (o resto vem do catálogo ou do servidor). */
-type Edits = { condition: Condition; variant: Variant; variantNote: string; notes: string; myValueText: string };
+type Edits = {
+  condition: Condition;
+  variant: Variant;
+  variantNote: string;
+  notes: string;
+  myValueText: string;
+  origin: Origin | undefined;
+  purchaseText: string;
+};
 
 export default function CardScreen() {
   const params = useLocalSearchParams<Params>();
@@ -67,6 +76,8 @@ function CardForm({ params }: { params: Params }) {
   const [condition, setCondition] = useState<Condition>(isNewCard ? 'NM' : (existing?.condition ?? 'NM'));
   const [notes, setNotes] = useState(isNewCard ? '' : (existing?.notes ?? ''));
   const [myValueText, setMyValueText] = useState(isNewCard || existing?.myValue == null ? '' : formatInput(existing.myValue.value));
+  const [origin, setOrigin] = useState<Origin | undefined>(isNewCard ? undefined : existing?.origin);
+  const [purchaseText, setPurchaseText] = useState(isNewCard || existing?.purchasePrice == null ? '' : formatInput(existing.purchasePrice));
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [moveTo, setMoveTo] = useState('');
@@ -120,15 +131,21 @@ function CardForm({ params }: { params: Params }) {
   const versionsLoaded = lang === 'ja' ? !!detail : !!enDetail;
   const showVersions = versionsOpen || (isNewCard && versionsLoaded && versions.length > 1 && pickedVariant == null && !versionsDismissed);
   const myValueNum = parseBRL(myValueText);
+  const purchaseNum = parseBRL(purchaseText);
+  // Valor atual da carta (com o estado e o "Meu valor" da tela), para comparar com o valor de compra.
+  const currentValue =
+    existing && !isNewCard
+      ? valuation({ ...existing, condition, myValue: myValueNum != null ? { value: myValueNum, setAt: '' } : undefined }).value
+      : undefined;
 
   /** A carta completa, com as edições atuais (e `patch` por cima, para mudanças feitas agora). */
   function buildEntry(patch: Partial<Edits> = {}): Omit<Entry, 'id' | 'updatedAt'> {
-    const e: Edits = { condition, variant, variantNote, notes, myValueText, ...patch };
+    const e: Edits = { condition, variant, variantNote, notes, myValueText, origin, purchaseText, ...patch };
     const value = parseBRL(e.myValueText);
     const image = detail?.image ?? saved?.image;
     return {
       // Carta já salva: mantém o que só o servidor grava (preços do MYP, vendas reais, imagem reserva antiga).
-      ...(autoSave && existing ? { myp: existing.myp, mypOffers: existing.mypOffers, sold: existing.sold, ptcgId: existing.ptcgId, ligaImage: existing.ligaImage, ligaQuery: existing.ligaQuery } : {}),
+      ...(autoSave && existing ? { myp: existing.myp, mypOffers: existing.mypOffers, sold: existing.sold, ptcgId: existing.ptcgId, myValueReplaced: value == null ? existing.myValueReplaced : undefined, ligaImage: existing.ligaImage, ligaQuery: existing.ligaQuery } : {}),
       binderId,
       dex: isExtra ? 0 : dex,
       slot,
@@ -147,6 +164,8 @@ function CardForm({ params }: { params: Params }) {
       variantNote: e.variantNote.trim() || undefined,
       condition: e.condition,
       notes: e.notes.trim() || undefined,
+      origin: e.origin,
+      purchasePrice: e.origin === 'purchase' ? parseBRL(e.purchaseText) : undefined,
       // Mantém a data de quando o valor foi digitado, se ele não mudou.
       myValue:
         value == null
@@ -163,7 +182,7 @@ function CardForm({ params }: { params: Params }) {
   }
 
   // Textos: salva 700 ms depois da última tecla e, se sair da tela antes disso, ao sair.
-  const textKey = `${variantNote}|${notes}|${myValueText}`;
+  const textKey = `${variantNote}|${notes}|${myValueText}|${purchaseText}`;
   const savedTextKey = useRef(textKey);
   const flush = useRef<() => void>(() => {});
   useEffect(() => {
@@ -402,8 +421,10 @@ function CardForm({ params }: { params: Params }) {
               title="Meu valor"
               hint={
                 existing?.myValue && existing.myValue.value === myValueNum
-                  ? `Digitado em ${formatWhen(existing.myValue.setAt)}. Ele vale no lugar do preço do MYP; apague para voltar ao MYP.`
-                  : 'Opcional: o valor que você conferiu (ex.: menor anúncio no seu estado no MYP Cards). Vale no lugar do preço do MYP.'
+                  ? `Digitado em ${formatWhen(existing.myValue.setAt)}. Vale no lugar do preço do MYP até o MYP passar dele (aí ele é apagado e volta o MYP); apague para voltar ao MYP agora.`
+                  : !myValueText && existing?.myValueReplaced
+                    ? `Seu valor de ${formatBRL(existing.myValueReplaced.value)} foi apagado em ${formatWhen(existing.myValueReplaced.at)}: o MYP passou dele (${formatBRL(existing.myValueReplaced.mypValue)}).`
+                    : 'Opcional: o valor que você conferiu (ex.: menor anúncio no seu estado no MYP Cards). Vale no lugar do preço do MYP até o MYP passar dele.'
               }>
               <Input
                 value={myValueText}
@@ -412,6 +433,40 @@ function CardForm({ params }: { params: Params }) {
                 placeholder="R$ 0,00"
                 accessibilityLabel="Meu valor em reais"
               />
+            </Section>
+            <Section title="Origem" hint="Como a carta chegou à sua coleção (opcional; toque de novo para desmarcar).">
+              <View style={styles.wrap}>
+                {ORIGINS.map((o) => (
+                  <Chip
+                    key={o.id}
+                    label={o.label}
+                    selected={origin === o.id}
+                    onPress={() => {
+                      const next = origin === o.id ? undefined : o.id;
+                      setOrigin(next);
+                      autoPersist({ origin: next }).catch(() => {});
+                    }}
+                  />
+                ))}
+              </View>
+              {origin === 'purchase' ? (
+                <>
+                  <Input
+                    value={purchaseText}
+                    onChangeText={(t) => setPurchaseText(t.replace(/[^\d.,]/g, ''))}
+                    keyboardType="decimal-pad"
+                    placeholder="Valor de compra (R$ 0,00)"
+                    accessibilityLabel="Valor de compra em reais"
+                  />
+                  {purchaseNum != null && currentValue != null ? (
+                    <Text style={[styles.purchaseDiff, { color: currentValue >= purchaseNum ? colors.success : colors.danger }]}>
+                      Valor atual {formatBRL(currentValue)} · {currentValue >= purchaseNum ? '+' : '−'}
+                      {formatBRL(Math.abs(currentValue - purchaseNum))} ({currentValue >= purchaseNum ? '+' : '−'}
+                      {Math.abs(Math.round(((currentValue - purchaseNum) / purchaseNum) * 100))}%) desde a compra
+                    </Text>
+                  ) : null}
+                </>
+              ) : null}
             </Section>
             <Section title="Observações">
               <Input value={notes} onChangeText={setNotes} placeholder="Ex.: comprada no evento, assinada…" multiline accessibilityLabel="Observações" />
@@ -521,6 +576,7 @@ function formatInput(n: number) {
 }
 
 const styles = StyleSheet.create({
+  purchaseDiff: { fontSize: 13, fontWeight: '700', marginTop: 6 },
   screen: { flex: 1, backgroundColor: colors.background },
   band: { position: 'absolute', top: 0, left: 0, right: 0, height: 150, backgroundColor: colors.primary },
   hero: {

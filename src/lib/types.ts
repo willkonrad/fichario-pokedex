@@ -28,6 +28,14 @@ export const VARIANTS = [
 ] as const;
 export type Variant = (typeof VARIANTS)[number]['id'];
 
+/** Como a carta chegou à coleção. */
+export const ORIGINS = [
+  { id: 'trade', label: 'Troca' },
+  { id: 'booster', label: 'Booster' },
+  { id: 'purchase', label: 'Compra' },
+] as const;
+export type Origin = (typeof ORIGINS)[number]['id'];
+
 /** Menor anúncio no MYP Cards no idioma da carta, via servidor MCP público do Zukan (zukan.com.br). */
 export type MypInfo = {
   /** Menor anúncio no idioma da carta. */
@@ -107,8 +115,17 @@ export type Entry = {
   sold?: SoldInfo;
   /** Id da carta na pokemontcg.io, usado pelo "Quanto vale minha carta?" (gravado pelo servidor). */
   ptcgId?: string;
-  /** Valor digitado pelo usuário (ex.: menor anúncio conferido no MYP); tem prioridade sobre o preço do MYP. */
-  myValue?: { value: number; setAt: string };
+  /**
+   * Valor digitado pelo usuário (ex.: menor anúncio conferido no MYP); tem prioridade sobre o preço do MYP.
+   * O servidor apaga (null) quando o MYP passa dele.
+   */
+  myValue?: { value: number; setAt: string } | null;
+  /** Como a carta chegou: troca, booster ou compra. */
+  origin?: Origin;
+  /** Quanto foi pago (só para origem "compra"). */
+  purchasePrice?: number;
+  /** "Meu valor" apagado pelo servidor porque o MYP passou dele (gravado pelo servidor). */
+  myValueReplaced?: { value: number; mypValue: number; at: string };
   /** Imagem reserva salva por versões antigas do app (de quando os preços vinham da Liga). */
   ligaImage?: string;
   /** Busca exata da carta na Liga ("Nome (número/total)"), gravada por versões antigas; usada no link "Ver na Liga". */
