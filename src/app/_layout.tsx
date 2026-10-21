@@ -9,6 +9,10 @@ const theme = {
   colors: { ...DefaultTheme.colors, background: colors.background, card: colors.primary, primary: colors.primary, text: colors.text, border: colors.border },
 };
 
+// O fichário fica sempre por baixo: ao recarregar a página numa carta (ou abrir um link direto), a seta de voltar
+// continua levando de volta ao fichário em vez de sumir.
+export const unstable_settings = { anchor: 'index' };
+
 export default function RootLayout() {
   return (
     <ThemeProvider value={theme}>

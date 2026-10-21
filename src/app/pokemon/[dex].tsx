@@ -48,7 +48,10 @@ function PokemonCards() {
   const visible = cards?.filter((c) => !f || c.setName.toLowerCase().includes(f) || c.name.toLowerCase().includes(f) || c.localId.toLowerCase().includes(f));
 
   function pick(card: CardBrief) {
-    router.push({ pathname: '/card', params: { dex, slot, cardId: card.id, lang: card.lang, dataLang: card.dataLang ?? card.lang } });
+    router.push({
+      pathname: '/card',
+      params: { dex, slot, cardId: card.id, lang: card.lang, dataLang: card.dataLang ?? card.lang, variant: card.stamp?.variant, stamp: card.stamp?.label },
+    });
   }
 
   const header = (

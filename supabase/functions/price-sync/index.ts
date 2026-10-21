@@ -26,6 +26,9 @@ const REFRESH_DAYS = 7;
 const MYP_REFRESH_DAYS = 6;
 const DAY = 86_400_000;
 
+/** Versões que valem outra coisa: o preço do MYP (da versão comum) não vale para elas (mesma lista do app). */
+const SPECIAL_VARIANTS = ['wPromo', 'staff', 'pokeball', 'masterball', 'firstEdition', 'shadowless', 'other'];
+
 /** Idioma da carta no app → idioma na URL do "Quanto vale minha carta?". */
 const SITE_LANG: Record<string, string> = { pt: 'pt', en: 'en', ja: 'jp' };
 const CONDITIONS = ['M', 'NM', 'SP', 'MP', 'HP', 'D'] as const;
@@ -57,6 +60,7 @@ type EntryData = {
   lang?: string;
   localId?: string;
   condition?: string;
+  variant?: string;
   ptcgId?: string;
   myp?: MypInfo;
   mypOffers?: { min?: number; condition?: string; lang?: string };
@@ -157,7 +161,8 @@ Deno.serve(async (req) => {
  */
 function replaceMyValue(data: EntryData, myp?: MypInfo): Record<string, unknown> {
   const mine = data.myValue?.value;
-  if (mine == null || !myp) return {};
+  // Versão especial (selo, Poké Ball…): o preço do MYP é o da versão comum e não serve para comparar.
+  if (mine == null || !myp || SPECIAL_VARIANTS.includes(data.variant ?? 'normal')) return {};
   const offer = data.mypOffers;
   const mypValue = offer?.min != null && offer.condition === data.condition && offer.lang === data.lang ? offer.min : myp.price;
   if (mypValue == null || mypValue <= mine) return {};

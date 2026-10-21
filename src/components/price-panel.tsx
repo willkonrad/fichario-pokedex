@@ -5,7 +5,7 @@ import Svg, { Line, Polyline, Text as SvgText } from 'react-native-svg';
 
 import { formatBRL, formatBRLShort, formatWhen } from '@/lib/quotes';
 import { CONDITIONS, VARIANTS, type Condition, type Entry } from '@/lib/types';
-import { CONFIDENCE_LABEL, mypCovers, soldMatchesVariant, valuation, type Confidence, type SourceId } from '@/lib/valuation';
+import { CONFIDENCE_LABEL, mypCovers, mypFitsVariant, soldMatchesVariant, valuation, type Confidence, type SourceId } from '@/lib/valuation';
 import { colors, confidenceColors, radius, shadow } from '@/theme';
 
 const LINE = { pt: colors.success, en: colors.blue };
@@ -82,11 +82,20 @@ export function PricePanel({
           <Text style={styles.muted}>
             {!myp?.checkedAt && !sold?.checkedAt
               ? 'Buscando o preço… chega em alguns minutos.'
-              : mypCovers(entry.lang)
+              : !mypFitsVariant(entry.variant)
+                ? 'Sem preço desta versão: o MYP Cards (via Zukan) só informa o preço da versão comum, e não há vendas registradas desta versão. Preencha "Meu valor" com o valor que você conferiu.'
+                : mypCovers(entry.lang)
                 ? 'Sem anúncio no MYP Cards nem vendas registradas desta carta neste estado. Você pode preencher "Meu valor".'
                 : 'Sem vendas registradas desta carta neste estado (o MYP Cards não informa preço de cartas japonesas). Você pode preencher "Meu valor".'}
           </Text>
         )}
+
+        {/* Versão especial: o preço do MYP é da versão comum, então aparece só como referência. */}
+        {myp?.price != null && !mypFitsVariant(entry.variant) ? (
+          <Text style={styles.note}>
+            Versão comum no MYP Cards: {formatBRL(myp.price)}. Não entra no valor: a sua versão ({VARIANTS.find((v) => v.id === entry.variant)?.label ?? entry.variant}) vale outra coisa.
+          </Text>
+        ) : null}
 
         {/* Com mais de um valor (ex.: vendas reais e o MYP), lista cada um; o que vale fica destacado. */}
         {ref && ref.sources.length > 1 ? (

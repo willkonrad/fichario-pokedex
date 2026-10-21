@@ -5,7 +5,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { ptcgImage, scrydexImage } from '@/lib/ptcg';
 import { spriteUrl } from '@/data/pokedex';
-import { cardImage } from '@/lib/tcgdex';
+import { cardImage, zukanImage } from '@/lib/tcgdex';
 import { binderColors, colors } from '@/theme';
 
 /**
@@ -13,7 +13,8 @@ import { binderColors, colors } from '@/theme';
  *   1. TCGdex (`image`);
  *   2. `imageUrl` já resolvida antes (reserva salva na carta);
  *   3. Scrydex pelo id da carta (não depende da API da pokemontcg.io, que cai com frequência);
- *   4. pokemontcg.io por nome em inglês + coleção (para coleções com id diferente).
+ *   4. pokemontcg.io por nome em inglês + coleção (para coleções com id diferente);
+ *   5. Zukan (cartas novas que nenhuma das outras tem ainda, ex.: coleção me06).
  * Se a imagem carregada falhar, passa para a próxima fonte.
  */
 export function CardImage({
@@ -66,7 +67,10 @@ export function CardImage({
     let alive = true;
     (async () => {
       const fromScrydex = cardId ? await scrydexImage(cardId, localId, nameEn).catch(() => null) : null;
-      const imgs = fromScrydex ?? (nameEn && setNameEn ? await ptcgImage(nameEn, setNameEn, localId).catch(() => undefined) : undefined);
+      const imgs =
+        fromScrydex ??
+        (nameEn && setNameEn ? await ptcgImage(nameEn, setNameEn, localId).catch(() => undefined) : undefined) ??
+        (cardId ? await zukanImage(cardId).catch(() => null) : null);
       if (!alive) return;
       setFound({ key: searchKey, url: imgs ? (quality === 'high' ? imgs.large : imgs.small) : undefined });
       if (imgs) onResolved?.(imgs.large);

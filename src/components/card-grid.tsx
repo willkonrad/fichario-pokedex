@@ -28,7 +28,7 @@ export function CardGrid({
     <FlatList
       key={cols}
       data={cards}
-      keyExtractor={(c) => `${c.id}|${c.lang}`}
+      keyExtractor={(c) => `${c.id}|${c.lang}|${c.stamp?.label ?? ''}`}
       numColumns={cols}
       columnWrapperStyle={{ gap: GAP }}
       contentContainerStyle={[styles.list, { width: contentWidth + 32 }]}
@@ -40,7 +40,7 @@ export function CardGrid({
           style={({ pressed }) => [{ width: itemWidth }, pressed && { opacity: 0.75, transform: [{ scale: 0.97 }] }]}
           onPress={() => onPick(item)}
           accessibilityRole="button"
-          accessibilityLabel={`${item.name}, ${item.setName}, número ${item.localId}`}>
+          accessibilityLabel={`${item.name}, ${item.setName}, número ${item.localId}${item.stamp ? `, com selo ${item.stamp.label}` : ''}`}>
           <View style={[styles.thumb, { height: itemWidth / CARD_RATIO }]}>
             <CardImage
               image={item.image}
@@ -51,6 +51,11 @@ export function CardGrid({
               dex={dex}
             />
             {owned.has(`${item.id}|${item.lang}`) ? <OwnedBadge /> : null}
+            {item.stamp ? (
+              <View style={styles.stampTag}>
+                <Text style={styles.stampTagText}>Selo</Text>
+              </View>
+            ) : null}
           </View>
           <Text style={styles.name} numberOfLines={1}>
             {item.name}
@@ -58,6 +63,11 @@ export function CardGrid({
           <Text style={styles.set} numberOfLines={1}>
             {item.setName} · {item.localId}
           </Text>
+          {item.stamp ? (
+            <Text style={styles.stamp} numberOfLines={2}>
+              {item.stamp.label}
+            </Text>
+          ) : null}
           {item.dataLang ? (
             <Text style={styles.note} numberOfLines={1}>
               ficha em inglês
@@ -74,5 +84,8 @@ const styles = StyleSheet.create({
   thumb: { borderRadius: radius.sm, overflow: 'hidden', backgroundColor: colors.surfaceAlt, ...shadow },
   name: { color: colors.text, fontSize: 13, fontWeight: '700', marginTop: 6 },
   set: { color: colors.textMuted, fontSize: 11, marginTop: 1 },
+  stamp: { color: colors.warning, fontSize: 10, fontWeight: '700', marginTop: 1 },
+  stampTag: { position: 'absolute', right: 4, bottom: 4, backgroundColor: colors.yellow, borderRadius: 999, paddingHorizontal: 6, paddingVertical: 1 },
+  stampTagText: { color: colors.text, fontSize: 10, fontWeight: '900' },
   note: { color: colors.blue, fontSize: 10, fontWeight: '700', marginTop: 1 },
 });

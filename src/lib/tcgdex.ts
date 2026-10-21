@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { getSpecies } from '@/data/pokedex';
-import type { CardLang } from './types';
+import type { CardLang, Variant } from './types';
+import { versionOptions } from './variants';
 
 const API = 'https://api.tcgdex.net/v2';
 const CACHE_TTL = 1000 * 60 * 60 * 24 * 7; // 7 dias
@@ -21,6 +22,11 @@ export type CardBrief = {
   setNameEn: string;
   /** Idioma de onde vêm os dados/imagem, quando a coleção não existe no catálogo do idioma escolhido. */
   dataLang?: CardLang;
+  /**
+   * Versão com selo da carta (ex.: Bulbasaur Megaevolução 133 com o selo da coleção, da Booster Box), mostrada
+   * como uma carta à parte na lista, como a Liga faz ("133b"). Escolher já marca a variação e o selo.
+   */
+  stamp?: { variant: Variant; label: string; keys: string[] };
 };
 
 export type CardDetail = {
@@ -53,7 +59,7 @@ export type CardDetail = {
   variants?: Partial<Record<'normal' | 'reverse' | 'holo' | 'firstEdition' | 'wPromo', boolean>>;
 };
 
-type SetBrief = { id: string; name: string };
+type SetBrief = { id: string; name: string; logo?: string };
 
 export async function cached<T>(key: string, load: () => Promise<T>, ttl = CACHE_TTL): Promise<T> {
   try {
@@ -77,10 +83,10 @@ export async function cached<T>(key: string, load: () => Promise<T>, ttl = CACHE
 }
 
 /** Prefixos das chaves de cache (dados que podem ser baixados de novo). */
-const CACHE_PREFIXES = ['tcgdex:', 'ptcg:', 'scrydex:'];
+const CACHE_PREFIXES = ['tcgdex:', 'ptcg:', 'scrydex:', 'zukan:'];
 
 /** Chaves de versões antigas do cache, que nunca mais são lidas. */
-const STALE_CACHE = [/^tcgdex:dex:v[1-6]:/, /^tcgdex:search:v1:/, /^scrydex:(?!v5:)/, /^tcgdex:abbr:/];
+const STALE_CACHE = [/^tcgdex:dex:v[1-8]:/, /^tcgdex:search:v1:/, /^scrydex:(?!v5:)/, /^tcgdex:abbr:/];
 
 /** Apaga as chaves de cache de versões antigas (chamada ao abrir o app). */
 export async function pruneStaleCache() {
@@ -153,6 +159,28 @@ function withEnglishImages(list: { id: string; image?: string }[], en: RawCard[]
   for (const c of list) if (!c.image) c.image = enImage.get(c.id);
 }
 
+/** Coleções recentes (Escarlate e Violeta, Megaevolução, 30 anos), onde as promos com selo da coleção existem. */
+const STAMP_ERA = /^(sv|me|30th)/i;
+
+/**
+ * Versões com selo das cartas da lista (uma carta à parte para cada selo), pela ficha em inglês da TCGdex
+ * (que lista as impressões). Só nas coleções recentes, para não abrir a ficha de centenas de cartas antigas.
+ */
+async function stampedVersions(list: CardBrief[]): Promise<CardBrief[]> {
+  const todo = list.filter((c) => STAMP_ERA.test(c.setId));
+  const out: CardBrief[] = [];
+  for (let i = 0; i < todo.length; i += 8) {
+    const batch = todo.slice(i, i + 8);
+    const details = await Promise.all(batch.map((c) => cardDetail(c.id, 'en').catch(() => null)));
+    batch.forEach((c, k) => {
+      for (const o of versionOptions(details[k], details[k])) {
+        if (o.stamp) out.push({ ...c, stamp: { variant: o.variant, label: o.stamp, keys: o.stampKeys ?? [] } });
+      }
+    });
+  }
+  return out;
+}
+
 const setIdOf = (c: RawCard) => c.id.slice(0, c.id.length - c.localId.length - 1); // id = "<setId>-<localId>"
 
 /** Coleções do TCG Pocket (jogo digital): não existem em papel, então ficam fora do fichário. */
@@ -167,7 +195,7 @@ function digitalSets() {
 
 /** Todas as cartas de um Pokémon (número da Pokédex nacional) num idioma, da coleção mais nova para a mais antiga. */
 export async function cardsForDex(dex: number, lang: CardLang): Promise<CardBrief[]> {
-  return cached(`tcgdex:dex:v7:${lang}:${dex}`, async () => {
+  return cached(`tcgdex:dex:v9:${lang}:${dex}`, async () => {
     const [raw, sets, enSets, digital] = await Promise.all([rawCardsFor(dex, lang), setsFor(lang), setsFor('en'), digitalSets()]);
     const isPhysical = (c: RawCard) => !digital.includes(setIdOf(c));
     const cards = raw.filter(isPhysical);
@@ -218,7 +246,10 @@ export async function cardsForDex(dex: number, lang: CardLang): Promise<CardBrie
       }
     }
 
-    return list.sort((a, b) => b.setOrder - a.setOrder || a.localId.localeCompare(b.localId, undefined, { numeric: true }));
+    if (lang !== 'ja') list.push(...(await stampedVersions(list)));
+    return list.sort(
+      (a, b) => b.setOrder - a.setOrder || a.localId.localeCompare(b.localId, undefined, { numeric: true }) || Number(!!a.stamp) - Number(!!b.stamp),
+    );
   }, LIST_TTL);
 }
 
@@ -296,6 +327,17 @@ async function zukan<T>(tool: string, args: Record<string, unknown>): Promise<T 
 async function zukanCardsFor(dex: number, lang: CardLang): Promise<ZukanBrief[]> {
   const r = await zukan<{ cards?: ZukanBrief[] }>('get_pokemon', { query: String(dex), lang: lang === 'en' ? 'en' : 'pt' }).catch(() => undefined);
   return r?.cards ?? [];
+}
+
+/**
+ * Imagem da carta no Zukan: última reserva, para cartas sem arte na TCGdex, na pokemontcg.io e na Scrydex
+ * (ex.: coleção me06, que só o Zukan tem). O Zukan só tem a imagem grande dessas cartas.
+ */
+export function zukanImage(cardId: string) {
+  return cached(`zukan:image:v1:${cardId}`, async () => {
+    const z = await zukan<{ image?: string }>('get_card', { id: cardId, lang: 'pt' });
+    return z?.image ? { small: z.image, large: z.image } : null;
+  });
 }
 
 /** Ficha básica de uma carta pelo Zukan, no formato da TCGdex. */

@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CardAttributes, cardAttributeItems, CardMoves } from '@/components/card-facts';
 import { CardImage } from '@/components/card-image';
+import { ImageLangBadge } from '@/components/lang-flag';
 import { PricePanel } from '@/components/price-panel';
 import { VersionPicker } from '@/components/version-picker';
 import { BOTTOM_BAR_SPACE, BottomBar, Button, Card, Chip, EmptyState, GroupLabel, Input, Loading, Section, Segmented } from '@/components/ui';
@@ -21,7 +22,17 @@ import { keyOf, useCollection } from '@/store/collection';
 import { CARD_RATIO, colors, MAX_WIDTH, radius, shadow } from '@/theme';
 
 /** `binder` = fichário livre (sem ele, é o fichário Pokédex e `dex` diz o Pokémon). */
-type Params = { dex?: string; binder?: string; slot: string; cardId?: string; lang?: CardLang; dataLang?: CardLang };
+type Params = {
+  dex?: string;
+  binder?: string;
+  slot: string;
+  cardId?: string;
+  lang?: CardLang;
+  dataLang?: CardLang;
+  /** Versão com selo escolhida na lista (já marca a variação e o selo). */
+  variant?: Variant;
+  stamp?: string;
+};
 
 /** Campos que o usuário edita nesta tela (o resto vem do catálogo ou do servidor). */
 type Edits = {
@@ -71,8 +82,8 @@ function CardForm({ params }: { params: Params }) {
       : Number(params.dex);
 
   // Variação escolhida (null = ainda não escolheu: usa a primeira que existe para a carta).
-  const [pickedVariant, setPickedVariant] = useState<Variant | null>(isNewCard ? null : (existing?.variant ?? null));
-  const [variantNote, setVariantNote] = useState(isNewCard ? '' : (existing?.variantNote ?? ''));
+  const [pickedVariant, setPickedVariant] = useState<Variant | null>(isNewCard ? (params.variant ?? null) : (existing?.variant ?? null));
+  const [variantNote, setVariantNote] = useState(isNewCard ? (params.stamp ?? '') : (existing?.variantNote ?? ''));
   const [condition, setCondition] = useState<Condition>(isNewCard ? 'NM' : (existing?.condition ?? 'NM'));
   const [notes, setNotes] = useState(isNewCard ? '' : (existing?.notes ?? ''));
   const [myValueText, setMyValueText] = useState(isNewCard || existing?.myValue == null ? '' : formatInput(existing.myValue.value));
@@ -130,6 +141,15 @@ function CardForm({ params }: { params: Params }) {
   // As versões vêm do catálogo em inglês (carta japonesa: só do próprio).
   const versionsLoaded = lang === 'ja' ? !!detail : !!enDetail;
   const showVersions = versionsOpen || (isNewCard && versionsLoaded && versions.length > 1 && pickedVariant == null && !versionsDismissed);
+
+  /** Selos da versão escolhida (para desenhar o selo oficial sobre a arte). */
+  function stampKeysOf(v: Variant, note: string): string[] | undefined {
+    if (v !== 'wPromo' && v !== 'staff') return undefined;
+    // Ficha ainda carregando: mantém os selos já salvos.
+    if (!versions.length) return saved?.variant === v ? saved.stampKeys : undefined;
+    const stamped = versions.filter((o) => o.variant === v && o.stampKeys?.length);
+    return (stamped.find((o) => o.stamp === note.trim()) ?? (stamped.length === 1 ? stamped[0] : undefined))?.stampKeys;
+  }
   const myValueNum = parseBRL(myValueText);
   const purchaseNum = parseBRL(purchaseText);
   // Valor atual da carta (com o estado e o "Meu valor" da tela), para comparar com o valor de compra.
@@ -163,6 +183,7 @@ function CardForm({ params }: { params: Params }) {
       imageUrl: image ? undefined : (resolvedImageUrl ?? (isNewCard ? undefined : saved?.imageUrl)),
       variant: e.variant,
       variantNote: e.variantNote.trim() || undefined,
+      stampKeys: stampKeysOf(e.variant, e.variantNote),
       condition: e.condition,
       notes: e.notes.trim() || undefined,
       origin: e.origin,
@@ -271,6 +292,15 @@ function CardForm({ params }: { params: Params }) {
     autoPersist({ variant: o.variant, variantNote: note }).catch(() => {});
   }
 
+  // Idioma da imagem mostrada: a da TCGdex diz no endereço (/pt/, /en/); as reservas (pokemontcg.io, Scrydex) são
+  // da carta em inglês; o Zukan também diz no endereço.
+  const shownImage = detail?.image ?? enDetail?.image ?? saved?.image ?? resolvedImageUrl ?? (isNewCard ? undefined : saved?.imageUrl);
+  const imageLang: CardLang | undefined = !shownImage
+    ? undefined
+    : lang === 'ja'
+      ? 'ja'
+      : ((shownImage.match(/tcgdex\.net\/(pt|en|ja)\//)?.[1] ?? shownImage.match(/zukan\.com\.br\/cards\/[^/]+\/(pt|en)\//)?.[1] ?? 'en') as CardLang);
+
   const cardImageEl = (fit: 'contain' | 'cover') => (
     <CardImage
       image={detail?.image ?? enDetail?.image ?? saved?.image}
@@ -299,6 +329,7 @@ function CardForm({ params }: { params: Params }) {
           accessibilityRole="imagebutton"
           accessibilityLabel="Ampliar imagem da carta">
           {!detail && !existing && !loadError ? <Loading /> : cardImageEl('contain')}
+          {imageLang ? <ImageLangBadge lang={imageLang} /> : null}
           <View style={styles.zoomHint}>
             <Ionicons name="expand-outline" size={14} color="#fff" />
           </View>

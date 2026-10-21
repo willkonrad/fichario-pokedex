@@ -105,6 +105,8 @@ export type Entry = {
   imageUrl?: string;
   variant: Variant;
   variantNote?: string;
+  /** Selos da versão com selo (TCGdex: "set-logo", "prerelease"…), para desenhar o selo sobre a arte. */
+  stampKeys?: string[];
   condition: Condition;
   notes?: string;
   /** Menor anúncio no MYP Cards no idioma da carta (via Zukan; gravado pelo servidor). */

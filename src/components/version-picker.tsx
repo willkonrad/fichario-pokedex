@@ -119,14 +119,6 @@ function VersionEffect({ option }: { option: VersionOption }) {
           <Text style={styles.markText}>{mark}</Text>
         </View>
       ) : null}
-      {option.stamp ? (
-        <View style={styles.stampBadge}>
-          <Ionicons name="ribbon" size={11} color={colors.text} />
-          <Text style={styles.stampBadgeText} numberOfLines={1}>
-            Selo
-          </Text>
-        </View>
-      ) : null}
     </View>
   );
 }
@@ -154,17 +146,4 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   markText: { color: colors.text, fontSize: 10, fontWeight: '900' },
-  stampBadge: {
-    position: 'absolute',
-    right: 6,
-    top: '42%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    backgroundColor: colors.yellow,
-    borderRadius: radius.pill,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  stampBadgeText: { color: colors.text, fontSize: 10, fontWeight: '900' },
 });

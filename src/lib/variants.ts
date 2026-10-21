@@ -57,7 +57,7 @@ export function availableVariants(detail?: CardDetail | null, enDetail?: CardDet
 }
 
 /** Uma versão visual da carta: a variação do app e, para promos, o selo (ex.: "Logo da coleção (Booster Box)"). */
-export type VersionOption = { variant: Variant; stamp?: string };
+export type VersionOption = { variant: Variant; stamp?: string; /** Selos da TCGdex ("set-logo", "prerelease"…). */ stampKeys?: string[] };
 
 /**
  * Versões visuais que existem para a carta, uma por impressão da TCGdex (ex.: holo comum e holo com o selo da
@@ -77,7 +77,7 @@ export function versionOptions(detail?: CardDetail | null, enDetail?: CardDetail
     else if (p.subtype?.toLowerCase() === 'shadowless') add({ variant: 'shadowless' });
     else if (promo.length) {
       const staff = promo.some((s) => s === 'staff' || s === 'prerelease');
-      add({ variant: staff ? 'staff' : 'wPromo', stamp: promo.map(stampLabel).join(' + ') });
+      add({ variant: staff ? 'staff' : 'wPromo', stamp: promo.map(stampLabel).join(' + '), stampKeys: promo });
     } else if (foil === 'pokeball') add({ variant: 'pokeball' });
     else if (foil === 'masterball') add({ variant: 'masterball' });
     else if (type === 'normal' || type === 'holo' || type === 'reverse') add({ variant: type });

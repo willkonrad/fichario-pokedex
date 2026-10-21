@@ -18,6 +18,16 @@ export type SourceId = 'manual' | 'mypOffer' | 'sold' | 'myp';
 /** Com menos que isto de vendas no estado, o valor das vendas reais é só uma referência inicial (confiança baixa). */
 const FIRM_SALES = 3;
 
+/**
+ * O preço do MYP que chega pelo Zukan é o da carta, sem separar versões: vale para a versão comum (normal, holo,
+ * reverse). Versões especiais (com selo, Poké Ball, Master Ball, 1ª edição, Shadowless) valem outra coisa, então
+ * esse preço não entra no valor delas.
+ */
+export const SPECIAL_VARIANTS = ['wPromo', 'staff', 'pokeball', 'masterball', 'firstEdition', 'shadowless', 'other'];
+export function mypFitsVariant(variant: string) {
+  return !SPECIAL_VARIANTS.includes(variant);
+}
+
 /** O MYP (via Zukan) tem preço de cartas em português e inglês; japonês, não. */
 export function mypCovers(lang: string) {
   return lang === 'pt' || lang === 'en';
@@ -106,7 +116,7 @@ export function priceSources(e: Entry): Omit<SourceRow, 'used'>[] {
           detail: `${sold.count} ${sold.count === 1 ? 'venda finalizada' : 'vendas finalizadas'} em ${e.condition}${sold.count < FIRM_SALES ? ' · poucas vendas' : ''}`,
         }
       : undefined;
-  if (e.myp?.price != null) {
+  if (e.myp?.price != null && mypFitsVariant(e.variant)) {
     rows.push({
       id: 'myp',
       label: SOURCE_LABEL.myp,

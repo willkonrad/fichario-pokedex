@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { soldMatchesVariant } from './valuation';
+import { mypFitsVariant, soldMatchesVariant } from './valuation';
 
 /** Um dia do histórico da coleção: soma do valor das cartas com preço naquele dia. */
 export type HistoryPoint = { day: string; value: number; cards: number };
@@ -19,7 +19,7 @@ function dayValue(s: Record<string, unknown> | null, variant: string | null): nu
   // Vendas reais só da mesma variação da carta (o nome da variação das vendas vem junto).
   const raw = s.sold as { value?: number; count?: number; variant?: string } | undefined;
   const sold = raw && soldMatchesVariant(variant ?? 'normal', raw.variant) ? raw : undefined;
-  if (typeof s.myp === 'number') return s.myp;
+  if (typeof s.myp === 'number' && mypFitsVariant(variant ?? 'normal')) return s.myp;
   return typeof sold?.value === 'number' ? sold.value : undefined;
 }
 
