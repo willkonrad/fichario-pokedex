@@ -17,6 +17,7 @@ import { formatBRL, formatWhen } from '@/lib/quotes';
 import { cardDetail, type CardDetail } from '@/lib/tcgdex';
 import { CONDITIONS, LANG_LABEL, ORIGINS, VARIANTS, type CardLang, type Condition, type Entry, type Origin, type Variant } from '@/lib/types';
 import { valuation } from '@/lib/valuation';
+import { useStampImage } from '@/lib/stamp-image';
 import { availableVariants, versionOptions, type VersionOption } from '@/lib/variants';
 import { keyOf, useCollection } from '@/store/collection';
 import { CARD_RATIO, colors, MAX_WIDTH, radius, shadow } from '@/theme';
@@ -150,6 +151,8 @@ function CardForm({ params }: { params: Params }) {
     const stamped = versions.filter((o) => o.variant === v && o.stampKeys?.length);
     return (stamped.find((o) => o.stamp === note.trim()) ?? (stamped.length === 1 ? stamped[0] : undefined))?.stampKeys;
   }
+  // Foto oficial da versão com selo escolhida (vem da TCGplayer, em inglês): usada pela bandeira do idioma.
+  const stampPhoto = useStampImage(lang === 'ja' ? undefined : cardId, stampKeysOf(variant, variantNote));
   const myValueNum = parseBRL(myValueText);
   const purchaseNum = parseBRL(purchaseText);
   // Valor atual da carta (com o estado e o "Meu valor" da tela), para comparar com o valor de compra.
@@ -295,13 +298,15 @@ function CardForm({ params }: { params: Params }) {
   // Idioma da imagem mostrada: a da TCGdex diz no endereço (/pt/, /en/); as reservas (pokemontcg.io, Scrydex) são
   // da carta em inglês; o Zukan também diz no endereço.
   const shownImage = detail?.image ?? enDetail?.image ?? saved?.image ?? resolvedImageUrl ?? (isNewCard ? undefined : saved?.imageUrl);
-  const imageLang: CardLang | undefined = !shownImage
-    ? undefined
-    : lang === 'ja'
+  const imageLang: CardLang | undefined = stampPhoto
+    ? 'en'
+    : !shownImage
+      ? undefined
+      : lang === 'ja'
       ? 'ja'
       : ((shownImage.match(/tcgdex\.net\/(pt|en|ja)\//)?.[1] ?? shownImage.match(/zukan\.com\.br\/cards\/[^/]+\/(pt|en)\//)?.[1] ?? 'en') as CardLang);
 
-  const cardImageEl = (fit: 'contain' | 'cover') => (
+  const cardImageEl = (fit: 'contain' | 'cover', stampKeys = stampKeysOf(variant, variantNote)) => (
     <CardImage
       image={detail?.image ?? enDetail?.image ?? saved?.image}
       imageUrl={isNewCard ? undefined : (saved?.imageUrl ?? existing?.ligaImage)}
@@ -312,6 +317,7 @@ function CardForm({ params }: { params: Params }) {
       quality="high"
       contentFit={fit}
       dex={dex || undefined}
+      stampKeys={stampKeys}
       onResolved={setResolvedImageUrl}
     />
   );
@@ -338,7 +344,7 @@ function CardForm({ params }: { params: Params }) {
           visible={showVersions}
           options={versions}
           selected={pickedVariant ? { variant, stamp: variantNote || undefined } : undefined}
-          image={() => cardImageEl('cover')}
+          image={(o) => cardImageEl('cover', o.stampKeys)}
           onPick={pickVersion}
           onClose={() => {
             setVersionsOpen(false);

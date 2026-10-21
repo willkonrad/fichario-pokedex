@@ -49,6 +49,7 @@ export function CardGrid({
               setNameEn={item.setNameEn}
               localId={item.localId}
               dex={dex}
+              stampKeys={item.stamp?.keys}
             />
             {owned.has(`${item.id}|${item.lang}`) ? <OwnedBadge /> : null}
             {item.stamp ? (

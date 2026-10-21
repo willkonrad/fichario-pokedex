@@ -28,7 +28,8 @@ export function VersionPicker({
   options: VersionOption[];
   selected?: VersionOption;
   /** Imagem da carta (a TCGdex tem uma imagem por carta, não por versão). */
-  image: () => ReactNode;
+  /** Imagem da carta na versão (a foto oficial da versão com selo, quando existir). */
+  image: (o: VersionOption) => ReactNode;
   onPick: (o: VersionOption) => void;
   onClose: () => void;
 }) {
@@ -57,7 +58,7 @@ export function VersionPicker({
                 accessibilityState={{ selected: same(o) }}
                 accessibilityLabel={`${versionLabel(o)}${o.stamp ? `, selo ${o.stamp}` : ''}`}>
                 <View style={[styles.thumb, { height: tileWidth / CARD_RATIO }, same(o) && styles.thumbSelected]}>
-                  {image()}
+                  {image(o)}
                   <VersionEffect option={o} />
                 </View>
                 <Text style={[styles.label, same(o) && { color: colors.primary }]} numberOfLines={2}>

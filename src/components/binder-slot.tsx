@@ -68,6 +68,7 @@ export function BinderSlot({
             dex={entry.dex || undefined}
             compact
             dark
+            stampKeys={entry.stampKeys}
           />
         </Pressable>
       ) : !dex ? (

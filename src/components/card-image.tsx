@@ -5,6 +5,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { ptcgImage, scrydexImage } from '@/lib/ptcg';
 import { spriteUrl } from '@/data/pokedex';
+import { useStampImage } from '@/lib/stamp-image';
 import { cardImage, zukanImage } from '@/lib/tcgdex';
 import { binderColors, colors } from '@/theme';
 
@@ -15,6 +16,7 @@ import { binderColors, colors } from '@/theme';
  *   3. Scrydex pelo id da carta (não depende da API da pokemontcg.io, que cai com frequência);
  *   4. pokemontcg.io por nome em inglês + coleção (para coleções com id diferente);
  *   5. Zukan (cartas novas que nenhuma das outras tem ainda, ex.: coleção me06).
+ * Versão com selo (`stampKeys`): a foto oficial dela vem antes de todas, quando existir.
  * Se a imagem carregada falhar, passa para a próxima fonte.
  */
 export function CardImage({
@@ -30,6 +32,7 @@ export function CardImage({
   label,
   dex,
   dark = false,
+  stampKeys,
   onResolved,
 }: {
   image?: string;
@@ -50,7 +53,11 @@ export function CardImage({
   dark?: boolean;
   /** Avisa a URL encontrada na reserva, para ser guardada na carta. */
   onResolved?: (url: string) => void;
+  /** Versão com selo: mostra a foto oficial dela (TCGplayer, via TCGCSV) quando existir. */
+  stampKeys?: string[];
 }) {
+  const stampPhoto = useStampImage(cardId, stampKeys);
+  const [stampFailed, setStampFailed] = useState<string | undefined>();
   const primary = image ? cardImage(image, quality) : imageUrl;
   const [failed, setFailed] = useState<string | undefined>();
   const [found, setFound] = useState<{ key: string; url?: string } | undefined>();
@@ -81,7 +88,8 @@ export function CardImage({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- onResolved pode mudar a cada render
   }, [needsFallback, canSearch, searchKey, cardId, nameEn, setNameEn, localId, quality]);
 
-  const src = needsFallback ? fallback : primary;
+  const useStamp = !!stampPhoto && stampFailed !== stampPhoto;
+  const src = useStamp ? stampPhoto : needsFallback ? fallback : primary;
   const faint = dark ? binderColors.textFaint : colors.textFaint;
   if (!src) {
     return (
@@ -102,7 +110,7 @@ export function CardImage({
       style={StyleSheet.absoluteFill}
       contentFit={contentFit}
       transition={150}
-      onError={() => (src === primary ? setFailed(primary) : setFound({ key: searchKey }))}
+      onError={() => (useStamp ? setStampFailed(stampPhoto) : src === primary ? setFailed(primary) : setFound({ key: searchKey }))}
     />
   );
 }

@@ -1,5 +1,16 @@
 # Notas da versão
 
+## 2.3.0 — Todas as cartas, todas as artes (21/10/2026)
+
+- **Cartas que faltavam**: a lista de cada Pokémon completa com o catálogo do Zukan as cartas que a TCGdex ainda não tem (ex.: Nidorina MEP 101 da ETB de 30 anos, coleção me06).
+- **Promos com arte**: cartas em português sem imagem usam a do catálogo em inglês (quase todas as promos SWSH e SM), e as reservas Scrydex e Zukan cobrem o resto (SVP 175+, MEP, me06).
+- **Versões com selo na lista**: aparecem como cartas à parte (ex.: Bulbasaur Megaevolução 133 da Booster Box), já com a variação e o selo marcados.
+- **Foto oficial da versão com selo**: quando a TCGplayer lista a versão à parte (Pokémon Center, campeonatos, concursos), a foto vem do TCGCSV.
+- **Bandeira do idioma da imagem** na tela da carta (ex.: 🇺🇸 EN quando a foto é da carta em inglês).
+- **Valor por versão**: versões especiais (selo, Poké Ball, Master Ball, 1ª edição…) não usam mais o preço do MYP da versão comum.
+- **Voltar**: recarregar a página numa carta não deixa mais sem a seta de voltar ao fichário.
+- Listas de cartas renovadas todo dia (promos novas aparecem logo).
+
 ## 2.2.0 — Versão da carta, origem e "Meu valor" automático (21/10/2026)
 
 - **"Qual é a sua versão?"**: ao escolher uma carta que tem mais de uma versão visual (normal, reverse, holo, Poké Ball, 1ª edição, promo com selo…), aparecem as versões lado a lado para tocar na sua. Promos com selo já preenchem o nome do selo (ex.: Bulbasaur da Megaevolução 133 com o selo da coleção).
