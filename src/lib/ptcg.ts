@@ -111,30 +111,32 @@ async function englishName(cardId: string) {
  *   1. arquivo da coleção da pokemontcg.io no GitHub: carta com o mesmo número E o mesmo nome; se o
  *      número for de outra carta (coleções numeradas de outro jeito, ex.: 30th-c-011 Crobat G = me55c-47),
  *      procura pelo nome na coleção;
- *   2. só se a coleção não existir lá (ex.: promos recentes), a Scrydex pelo número — e nunca para
- *      coleções de numeração diferente (SET_ALIASES).
+ *   2. a Scrydex pelo número, quando a coleção não existe lá OU o arquivo está desatualizado e ainda não tem
+ *      esse número (ex.: SVP Black Star Promos, que no GitHub para na 165 e a svp-218 só está na Scrydex) —
+ *      nunca se o número já for de outra carta, nem para coleções de numeração diferente (SET_ALIASES).
  * Não usa a API da pokemontcg.io, que cai com frequência (502).
  */
 export function scrydexImage(cardId: string, localId?: string, nameEn?: string) {
-  return cached(`scrydex:v4:${cardId}`, async () => {
+  return cached(`scrydex:v5:${cardId}`, async () => {
     const cut = cardId.lastIndexOf('-');
     if (cut <= 0) return null;
     const setId = cardId.slice(0, cut).toLowerCase();
     const num = (localId ?? cardId.slice(cut + 1)).replace(/^0+(?=\w)/, '');
     const name = nameEn ?? (await englishName(cardId));
     const candidates = ptcgSetIds(setId);
-    let anySetFound = false;
+    // O número já é de outra carta em algum arquivo: a coleção é numerada de outro jeito (não chuta pela Scrydex).
+    let numberTaken = false;
     for (const set of candidates) {
       const cards = await setCards(set);
       if (!cards) continue;
-      anySetFound = true;
+      if (cards.some((c) => c.number.toLowerCase() === num.toLowerCase())) numberTaken = true;
       if (!name) continue;
       const hit =
         cards.find((c) => c.number.toLowerCase() === num.toLowerCase() && sameName(c.name, name)) ??
         cards.find((c) => sameName(c.name, name));
       if (hit) return hit.images;
     }
-    if (anySetFound || SET_ALIASES[setId]) return null;
+    if (numberTaken || SET_ALIASES[setId]) return null;
     for (const set of candidates) {
       const base = `${SCRYDEX}/${set}-${num}`;
       if (await scrydexExists(`${base}/small`)) return { small: `${base}/small`, large: `${base}/large` };

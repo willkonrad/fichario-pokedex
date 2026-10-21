@@ -80,7 +80,7 @@ export async function cached<T>(key: string, load: () => Promise<T>, ttl = CACHE
 const CACHE_PREFIXES = ['tcgdex:', 'ptcg:', 'scrydex:'];
 
 /** Chaves de versões antigas do cache, que nunca mais são lidas. */
-const STALE_CACHE = [/^tcgdex:dex:v[1-4]:/, /^scrydex:(?!v4:)/, /^tcgdex:abbr:/];
+const STALE_CACHE = [/^tcgdex:dex:v[1-6]:/, /^tcgdex:search:v1:/, /^scrydex:(?!v5:)/, /^tcgdex:abbr:/];
 
 /** Apaga as chaves de cache de versões antigas (chamada ao abrir o app). */
 export async function pruneStaleCache() {
@@ -144,6 +144,15 @@ async function rawCardsFor(dex: number, lang: CardLang): Promise<RawCard[]> {
   return [...all.values()];
 }
 
+/**
+ * O catálogo em português não tem a imagem de muitas cartas (ex.: quase todas as promos SWSH e SM), mas o inglês
+ * tem, com o mesmo id: usa a imagem em inglês (a arte é a mesma).
+ */
+function withEnglishImages(list: { id: string; image?: string }[], en: RawCard[]) {
+  const enImage = new Map(en.filter((c) => c.image).map((c) => [c.id, c.image]));
+  for (const c of list) if (!c.image) c.image = enImage.get(c.id);
+}
+
 const setIdOf = (c: RawCard) => c.id.slice(0, c.id.length - c.localId.length - 1); // id = "<setId>-<localId>"
 
 /** Coleções do TCG Pocket (jogo digital): não existem em papel, então ficam fora do fichário. */
@@ -158,7 +167,7 @@ function digitalSets() {
 
 /** Todas as cartas de um Pokémon (número da Pokédex nacional) num idioma, da coleção mais nova para a mais antiga. */
 export async function cardsForDex(dex: number, lang: CardLang): Promise<CardBrief[]> {
-  return cached(`tcgdex:dex:v5:${lang}:${dex}`, async () => {
+  return cached(`tcgdex:dex:v7:${lang}:${dex}`, async () => {
     const [raw, sets, enSets, digital] = await Promise.all([rawCardsFor(dex, lang), setsFor(lang), setsFor('en'), digitalSets()]);
     const isPhysical = (c: RawCard) => !digital.includes(setIdOf(c));
     const cards = raw.filter(isPhysical);
@@ -186,7 +195,27 @@ export async function cardsForDex(dex: number, lang: CardLang): Promise<CardBrie
     if (lang === 'pt') {
       const ptIds = new Set(cards.map((c) => c.id));
       const en = await rawCardsFor(dex, 'en').catch(() => []);
+      withEnglishImages(list, en);
       for (const c of en) if (isPhysical(c) && !ptIds.has(c.id)) list.push(toBrief(c, 'en'));
+    }
+
+    // Cartas que a TCGdex ainda não tem (ex.: promos novas como a Nidorina MEP 101): completa com o catálogo do Zukan.
+    if (lang !== 'ja') {
+      const have = new Set(list.map((c) => c.id));
+      for (const z of await zukanCardsFor(dex, lang)) {
+        const setId = z.id.slice(0, z.id.length - z.localId.length - 1);
+        if (have.has(z.id) || !z.id.endsWith(`-${z.localId}`) || digital.includes(setId)) continue;
+        list.push({
+          id: z.id,
+          localId: z.localId,
+          name: z.name,
+          lang,
+          setId,
+          setName: names.get(setId) ?? z.setNamePt ?? setId,
+          setNameEn: enNames.get(setId) ?? setId,
+          setOrder: order.get(setId) ?? -1,
+        });
+      }
     }
 
     return list.sort((a, b) => b.setOrder - a.setOrder || a.localId.localeCompare(b.localId, undefined, { numeric: true }));
@@ -200,7 +229,7 @@ export async function cardsForDex(dex: number, lang: CardLang): Promise<CardBrie
 export async function searchCards(query: string, lang: CardLang): Promise<CardBrief[]> {
   const q = query.trim();
   if (q.length < 2) return [];
-  return cached(`tcgdex:search:v1:${lang}:${q.toLowerCase()}`, async () => {
+  return cached(`tcgdex:search:v2:${lang}:${q.toLowerCase()}`, async () => {
     const byName = (l: CardLang) => getJson<RawCard[]>(`${API}/${l}/cards?name=like:${encodeURIComponent(q)}`);
     const [raw, sets, enSets, digital] = await Promise.all([byName(lang), setsFor(lang), setsFor('en'), digitalSets()]);
     const order = new Map(enSets.map((s, i) => [s.id, i]));
@@ -223,6 +252,7 @@ export async function searchCards(query: string, lang: CardLang): Promise<CardBr
     if (lang === 'pt') {
       const ids = new Set(list.map((c) => c.id));
       const en = await byName('en').catch(() => []);
+      withEnglishImages(list, en);
       for (const c of en) if (isPhysical(c) && !ids.has(c.id)) list.push(toBrief(c, 'en'));
     }
     return list
@@ -232,7 +262,60 @@ export async function searchCards(query: string, lang: CardLang): Promise<CardBr
 }
 
 export function cardDetail(id: string, lang: CardLang) {
-  return cached(`tcgdex:card:${lang}:${id}`, () =>
-    getJson<CardDetail>(`${API}/${lang}/cards/${encodeURIComponent(id)}`),
+  return cached(`tcgdex:card:${lang}:${id}`, async () => {
+    try {
+      return await getJson<CardDetail>(`${API}/${lang}/cards/${encodeURIComponent(id)}`);
+    } catch (e) {
+      // Carta que a TCGdex ainda não tem: a ficha básica do Zukan (a imagem vem da reserva pelo id).
+      if (lang === 'ja' || !/404/.test(String(e))) throw e;
+      const z = await zukanCard(id, lang).catch(() => undefined);
+      if (!z) throw e;
+      return z;
+    }
+  });
+}
+
+// ---------- Zukan (zukan.com.br/mcp): catálogo público, com as cartas mais novas que a TCGdex ainda não tem ----------
+
+const ZUKAN_MCP = 'https://www.zukan.com.br/mcp';
+type ZukanBrief = { id: string; localId: string; name: string; setNamePt?: string };
+
+async function zukan<T>(tool: string, args: Record<string, unknown>): Promise<T | undefined> {
+  const res = await fetch(ZUKAN_MCP, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: tool, arguments: args } }),
+  });
+  if (!res.ok) throw new Error(`Zukan ${res.status}`);
+  const body = await res.json();
+  if (body?.result?.isError) return undefined;
+  return body?.result?.structuredContent ?? JSON.parse(body?.result?.content?.[0]?.text ?? 'null') ?? undefined;
+}
+
+/** Cartas de um Pokémon no Zukan (lista vazia se o Zukan estiver fora do ar: a TCGdex continua valendo). */
+async function zukanCardsFor(dex: number, lang: CardLang): Promise<ZukanBrief[]> {
+  const r = await zukan<{ cards?: ZukanBrief[] }>('get_pokemon', { query: String(dex), lang: lang === 'en' ? 'en' : 'pt' }).catch(() => undefined);
+  return r?.cards ?? [];
+}
+
+/** Ficha básica de uma carta pelo Zukan, no formato da TCGdex. */
+async function zukanCard(id: string, lang: CardLang): Promise<CardDetail | undefined> {
+  const z = await zukan<{ id: string; localId: string; name: string; setNamePt?: string; rarity?: string; illustrator?: string; hp?: string; types?: string; stage?: string }>(
+    'get_card',
+    { id, lang: lang === 'en' ? 'en' : 'pt' },
   );
+  if (!z?.id) return undefined;
+  const setId = z.id.slice(0, z.id.length - z.localId.length - 1);
+  return {
+    id: z.id,
+    localId: z.localId,
+    name: z.name,
+    rarity: z.rarity,
+    illustrator: z.illustrator,
+    category: z.hp ? 'Pokemon' : undefined,
+    hp: z.hp ? Number(z.hp) : undefined,
+    types: z.types ? [z.types] : undefined,
+    stage: z.stage,
+    set: { id: setId, name: z.setNamePt ?? setId },
+  };
 }

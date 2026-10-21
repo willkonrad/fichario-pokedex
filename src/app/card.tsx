@@ -142,7 +142,8 @@ function CardForm({ params }: { params: Params }) {
   function buildEntry(patch: Partial<Edits> = {}): Omit<Entry, 'id' | 'updatedAt'> {
     const e: Edits = { condition, variant, variantNote, notes, myValueText, origin, purchaseText, ...patch };
     const value = parseBRL(e.myValueText);
-    const image = detail?.image ?? saved?.image;
+    // Ficha em português sem imagem: a do catálogo em inglês (mesmo id, mesma arte).
+    const image = detail?.image ?? enDetail?.image ?? saved?.image;
     return {
       // Carta já salva: mantém o que só o servidor grava (preços do MYP, vendas reais, imagem reserva antiga).
       ...(autoSave && existing ? { myp: existing.myp, mypOffers: existing.mypOffers, sold: existing.sold, ptcgId: existing.ptcgId, myValueReplaced: value == null ? existing.myValueReplaced : undefined, ligaImage: existing.ligaImage, ligaQuery: existing.ligaQuery } : {}),
@@ -272,7 +273,7 @@ function CardForm({ params }: { params: Params }) {
 
   const cardImageEl = (fit: 'contain' | 'cover') => (
     <CardImage
-      image={detail?.image ?? saved?.image}
+      image={detail?.image ?? enDetail?.image ?? saved?.image}
       imageUrl={isNewCard ? undefined : (saved?.imageUrl ?? existing?.ligaImage)}
       cardId={lang === 'ja' ? undefined : cardId}
       nameEn={enDetail?.name}
