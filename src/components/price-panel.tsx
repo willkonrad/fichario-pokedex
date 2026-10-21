@@ -72,8 +72,8 @@ export function PricePanel({
   const urlOf = (id: SourceId) =>
     id === 'liga'
       ? ligaUrl
-      : id === 'mypOffer'
-        ? entry.mypOffers?.url
+      : id === 'mypOffer' || id === 'myp'
+        ? (id === 'mypOffer' && entry.mypOffers?.url) || 'https://mypcards.com'
       : id === 'sold'
         ? sold?.url
         : id === 'tcgplayer' && entry.intl?.tcgplayer?.productId
@@ -252,7 +252,13 @@ function PriceHistory({ history, sales }: { history?: { t: string; p: number; k:
       ) : (
         <View style={{ height: H }} />
       )}
-      <Text style={styles.source}>Menor anúncio no MYP Cards nos últimos 30 dias (Zukan). Pontos: vendas reais no período.</Text>
+      <Text style={styles.source}>
+        Menor anúncio no{' '}
+        <Text style={styles.sourceLink} accessibilityRole="link" onPress={() => WebBrowser.openBrowserAsync('https://mypcards.com')}>
+          MYP Cards
+        </Text>{' '}
+        nos últimos 30 dias (via Zukan). Pontos: vendas reais no período.
+      </Text>
     </View>
   );
 }
@@ -318,6 +324,7 @@ const styles = StyleSheet.create({
   condId: { color: colors.textMuted, fontSize: 11, fontWeight: '800' },
   condValue: { color: colors.text, fontSize: 12, fontWeight: '700', marginTop: 1 },
   source: { color: colors.textFaint, fontSize: 11, lineHeight: 15 },
+  sourceLink: { color: colors.accent, textDecorationLine: 'underline' },
   chartHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   chartTitle: { color: colors.text, fontSize: 15, fontWeight: '800' },
   legend: { flexDirection: 'row', gap: 10 },

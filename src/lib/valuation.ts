@@ -4,7 +4,7 @@ import type { Entry } from './types';
  * Valor de referência da carta (em reais), no padrão do mercado brasileiro:
  *
  *   1. "Meu valor" digitado pelo usuário, quando existe;
- *   2. senão, a MENOR OFERTA NO MYP no estado e idioma da carta (lista de ofertas, atualizada toda semana);
+ *   2. senão, a MENOR OFERTA NO MYP no estado e idioma da carta (API do MYP, atualizada toda semana);
  *   3. senão, o MENOR ANÚNCIO NA LIGA no acabamento da carta — a não ser que as fontes brasileiras
  *      (vendas reais, MYP, CardTrader) concordem num valor acima dele (2+ fontes ou 3+ vendas): aí vale o
  *      que elas indicam, porque o mínimo da Liga provavelmente é uma cópia jogada;

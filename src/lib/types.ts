@@ -74,7 +74,7 @@ export type MypInfo = {
   checkedAt: string;
 };
 
-/** Menor oferta no MYP Cards no ESTADO e IDIOMA da carta (lista de ofertas pública; gravado pelo servidor, myp-sync). */
+/** Menor oferta no MYP Cards no ESTADO e IDIOMA da carta (gravado pelo servidor, quando a API do MYP fornecer). */
 export type MypOffers = {
   min?: number;
   count: number;
