@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CardAttributes, cardAttributeItems, CardMoves } from '@/components/card-facts';
 import { CardImage } from '@/components/card-image';
 import { PricePanel } from '@/components/price-panel';
+import { VersionPicker } from '@/components/version-picker';
 import { BOTTOM_BAR_SPACE, BottomBar, Button, Card, Chip, EmptyState, GroupLabel, Input, Loading, Section, Segmented } from '@/components/ui';
 import { formatDex, getSpecies, speciesInCardName } from '@/data/pokedex';
 import { customTotalSlots, indexOfDex, indexOfExtra, physicalPosition } from '@/lib/binder';
@@ -14,7 +15,7 @@ import { ligaQuery, ligaSearchUrl } from '@/lib/liga';
 import { formatWhen } from '@/lib/quotes';
 import { cardDetail, type CardDetail } from '@/lib/tcgdex';
 import { CONDITIONS, LANG_LABEL, VARIANTS, type CardLang, type Condition, type Entry, type Variant } from '@/lib/types';
-import { availableVariants } from '@/lib/variants';
+import { availableVariants, versionOptions, type VersionOption } from '@/lib/variants';
 import { keyOf, useCollection } from '@/store/collection';
 import { CARD_RATIO, colors, MAX_WIDTH, radius, shadow } from '@/theme';
 
@@ -71,6 +72,9 @@ function CardForm({ params }: { params: Params }) {
   const [moveTo, setMoveTo] = useState('');
   const [zoom, setZoom] = useState(false);
   const [showAllVariants, setShowAllVariants] = useState(false);
+  // Seletor de versões: aberto pelo botão "Ver versões"; para carta nova, abre sozinho até a pessoa escolher ou fechar.
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const [versionsDismissed, setVersionsDismissed] = useState(false);
   const [resolvedImageUrl, setResolvedImageUrl] = useState<string | undefined>();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   // Carta ampliada: o maior tamanho que cabe na tela, mantendo a proporção.
@@ -111,6 +115,10 @@ function CardForm({ params }: { params: Params }) {
 
   const avail = availableVariants(detail, enDetail);
   const variant: Variant = pickedVariant ?? avail.ids[0] ?? 'normal';
+  const versions = versionOptions(detail, enDetail);
+  // As versões vêm do catálogo em inglês (carta japonesa: só do próprio).
+  const versionsLoaded = lang === 'ja' ? !!detail : !!enDetail;
+  const showVersions = versionsOpen || (isNewCard && versionsLoaded && versions.length > 1 && pickedVariant == null && !versionsDismissed);
   const myValueNum = parseBRL(myValueText);
 
   /** A carta completa, com as edições atuais (e `patch` por cima, para mudanças feitas agora). */
@@ -233,6 +241,16 @@ function CardForm({ params }: { params: Params }) {
     ]);
   }
 
+  function pickVersion(o: VersionOption) {
+    // Selo de promo: já preenche a descrição da variação com o nome do selo.
+    const note = o.stamp ?? (o.variant === 'other' || o.variant === 'staff' || o.variant === 'wPromo' ? variantNote : '');
+    setPickedVariant(o.variant);
+    setVariantNote(note);
+    setVersionsOpen(false);
+    setVersionsDismissed(true);
+    autoPersist({ variant: o.variant, variantNote: note }).catch(() => {});
+  }
+
   const cardImageEl = (fit: 'contain' | 'cover') => (
     <CardImage
       image={detail?.image ?? saved?.image}
@@ -265,6 +283,17 @@ function CardForm({ params }: { params: Params }) {
             <Ionicons name="expand-outline" size={14} color="#fff" />
           </View>
         </Pressable>
+        <VersionPicker
+          visible={showVersions}
+          options={versions}
+          selected={pickedVariant ? { variant, stamp: variantNote || undefined } : undefined}
+          image={() => cardImageEl('cover')}
+          onPick={pickVersion}
+          onClose={() => {
+            setVersionsOpen(false);
+            setVersionsDismissed(true);
+          }}
+        />
         <Modal visible={zoom} transparent animationType="fade" onRequestClose={() => setZoom(false)}>
           <Pressable style={styles.zoomBackdrop} onPress={() => setZoom(false)} accessibilityLabel="Fechar imagem ampliada">
             <View style={[styles.zoomBox, { width: zoomWidth, height: zoomWidth / CARD_RATIO }]}>{cardImageEl('contain')}</View>
@@ -325,11 +354,19 @@ function CardForm({ params }: { params: Params }) {
             </Section>
             <Section
               title="Variação"
+              right={
+                versions.length > 1 ? (
+                  <Pressable style={styles.moreChip} onPress={() => setVersionsOpen(true)} accessibilityRole="button" accessibilityLabel="Ver as versões desta carta">
+                    <Ionicons name="images-outline" size={14} color={colors.textMuted} />
+                    <Text style={styles.moreChipText}>Ver versões</Text>
+                  </Pressable>
+                ) : undefined
+              }
               hint={
                 !detail && !enDetail && !loadError
                   ? 'Carregando as variações desta carta…'
                   : avail.ids.length
-                    ? `Existem ${avail.ids.length} ${avail.ids.length === 1 ? 'versão' : 'versões'} desta carta${avail.stamps.length ? ` · selos: ${avail.stamps.join(', ')}` : ''}.`
+                    ? `Existem ${Math.max(versions.length, avail.ids.length)} ${Math.max(versions.length, avail.ids.length) === 1 ? 'versão' : 'versões'} desta carta${avail.stamps.length ? ` · selos: ${avail.stamps.join(', ')}` : ''}.`
                     : 'Não sei quais variações existem para esta carta: escolha a sua.'
               }>
               <View style={styles.wrap}>

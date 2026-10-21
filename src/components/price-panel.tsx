@@ -143,6 +143,12 @@ export function PricePanel({
               })}
             </View>
           </>
+        ) : sold?.checkedAt ? (
+          // Já consultado, mas o site não tem venda finalizada desta carta neste idioma (comum em cartas novas ou raras).
+          <Text style={styles.muted}>
+            Vendas reais: nenhuma venda finalizada registrada desta carta neste idioma no Quanto vale minha carta? (consultado em{' '}
+            {formatWhen(sold.checkedAt)}).
+          </Text>
         ) : null}
 
         <StoreLinks mypUrl={(ref?.basis === 'mypOffer' && entry.mypOffers?.url) || MYP_URL} ligaUrl={ligaUrl} />

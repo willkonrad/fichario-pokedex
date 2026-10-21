@@ -55,3 +55,35 @@ export function availableVariants(detail?: CardDetail | null, enDetail?: CardDet
   const ids = VARIANTS.map((v) => v.id).filter((id) => found.has(id));
   return { ids, stamps: [...stamps] };
 }
+
+/** Uma versão visual da carta: a variação do app e, para promos, o selo (ex.: "Logo da coleção (Booster Box)"). */
+export type VersionOption = { variant: Variant; stamp?: string };
+
+/**
+ * Versões visuais que existem para a carta, uma por impressão da TCGdex (ex.: holo comum e holo com o selo da
+ * coleção), na ordem do app. Sem impressões detalhadas, usa as marcações simples.
+ */
+export function versionOptions(detail?: CardDetail | null, enDetail?: CardDetail | null): VersionOption[] {
+  const printings = enDetail?.variants_detailed ?? detail?.variants_detailed ?? [];
+  const out = new Map<string, VersionOption>();
+  const add = (o: VersionOption) => out.set(`${o.variant}|${o.stamp ?? ''}`, o);
+
+  for (const p of printings) {
+    const type = p.type.toLowerCase();
+    const foil = p.foil?.toLowerCase();
+    const pStamps = (p.stamp ?? []).map((s) => s.toLowerCase());
+    const promo = pStamps.filter((s) => s !== '1st-edition');
+    if (pStamps.includes('1st-edition') || p.subtype?.toLowerCase().includes('1st')) add({ variant: 'firstEdition' });
+    else if (p.subtype?.toLowerCase() === 'shadowless') add({ variant: 'shadowless' });
+    else if (promo.length) {
+      const staff = promo.some((s) => s === 'staff' || s === 'prerelease');
+      add({ variant: staff ? 'staff' : 'wPromo', stamp: promo.map(stampLabel).join(' + ') });
+    } else if (foil === 'pokeball') add({ variant: 'pokeball' });
+    else if (foil === 'masterball') add({ variant: 'masterball' });
+    else if (type === 'normal' || type === 'holo' || type === 'reverse') add({ variant: type });
+  }
+  if (!out.size) for (const id of availableVariants(detail, enDetail).ids) add({ variant: id });
+
+  const order = (v: Variant) => VARIANTS.findIndex((x) => x.id === v);
+  return [...out.values()].sort((a, b) => order(a.variant) - order(b.variant));
+}

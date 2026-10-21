@@ -1,5 +1,11 @@
 # Notas da versão
 
+## 2.2.0 — Escolha da versão da carta (21/10/2026)
+
+- **"Qual é a sua versão?"**: ao escolher uma carta que tem mais de uma versão visual (normal, reverse, holo, Poké Ball, 1ª edição, promo com selo…), aparecem as versões lado a lado para tocar na sua. Promos com selo já preenchem o nome do selo (ex.: Bulbasaur da Megaevolução 133 com o selo da coleção).
+- Botão **"Ver versões"** na seção Variação, para rever ou trocar a versão depois.
+- **Vendas reais sem registro**: quando o Quanto vale minha carta? não tem nenhuma venda da carta, a tela agora avisa (antes não aparecia nada).
+
 ## 2.1.0 — Vendas reais como fonte de valor reserva (21/10/2026)
 
 ### Preços
