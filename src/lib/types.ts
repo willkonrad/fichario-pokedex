@@ -86,6 +86,8 @@ export type Entry = {
   myValue?: { value: number; setAt: string };
   /** Imagem reserva salva por versões antigas do app (de quando os preços vinham da Liga). */
   ligaImage?: string;
+  /** Busca exata da carta na Liga ("Nome (número/total)"), gravada por versões antigas; usada no link "Ver na Liga". */
+  ligaQuery?: string;
   updatedAt: string;
 };
 

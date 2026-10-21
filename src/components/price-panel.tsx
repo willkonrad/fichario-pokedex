@@ -1,4 +1,3 @@
-import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -18,12 +17,15 @@ export function PricePanel({
   entry,
   condition,
   myValue,
+  ligaUrl,
 }: {
   /** Carta salva (os preços chegam pelo servidor depois de salvar). */
   entry?: Entry;
   condition: Condition;
   /** "Meu valor" digitado agora na tela (ainda não salvo). */
   myValue?: number;
+  /** Página da carta na LigaPokemon (só o link; o valor vem do MYP). */
+  ligaUrl?: string;
 }) {
   const myp = entry?.myp;
   // Valor com o estado e o "Meu valor" escolhidos agora na tela.
@@ -41,6 +43,7 @@ export function PricePanel({
       <View style={styles.card}>
         <Text style={styles.label}>Valor no MYP Cards</Text>
         <Text style={styles.muted}>Depois de colocar a carta no fichário, o preço chega em alguns minutos.</Text>
+        <StoreLinks mypUrl={MYP_URL} ligaUrl={ligaUrl} />
       </View>
     );
   }
@@ -102,14 +105,7 @@ export function PricePanel({
           </View>
         ) : null}
 
-        <Pressable
-          onPress={() => WebBrowser.openBrowserAsync((ref?.basis === 'mypOffer' && entry.mypOffers?.url) || MYP_URL)}
-          style={({ pressed }) => [styles.mypButton, pressed && { opacity: 0.8 }]}
-          accessibilityRole="link">
-          <Ionicons name="storefront-outline" size={16} color={colors.blue} />
-          <Text style={styles.mypButtonText}>Ver anúncios no MYP Cards</Text>
-          <Ionicons name="open-outline" size={14} color={colors.blue} />
-        </Pressable>
+        <StoreLinks mypUrl={(ref?.basis === 'mypOffer' && entry.mypOffers?.url) || MYP_URL} ligaUrl={ligaUrl} />
 
         <Text style={styles.source}>
           Preços do{' '}
@@ -121,6 +117,34 @@ export function PricePanel({
       </View>
 
       <PriceHistory history={myp?.history} />
+    </View>
+  );
+}
+
+/** Botões para ver a carta nas lojas: anúncios no MYP Cards (fonte do valor) e na LigaPokemon. */
+function StoreLinks({ mypUrl, ligaUrl }: { mypUrl: string; ligaUrl?: string }) {
+  return (
+    <View style={styles.storeRow}>
+      <Pressable
+        onPress={() => WebBrowser.openBrowserAsync(mypUrl)}
+        style={({ pressed }) => [styles.storeButton, pressed && { opacity: 0.8 }]}
+        accessibilityRole="link"
+        accessibilityLabel="Ver anúncios da carta no MYP Cards">
+        <Text style={styles.storeButtonText} numberOfLines={1}>
+          MYP Cards ↗
+        </Text>
+      </Pressable>
+      {ligaUrl ? (
+        <Pressable
+          onPress={() => WebBrowser.openBrowserAsync(ligaUrl)}
+          style={({ pressed }) => [styles.storeButton, pressed && { opacity: 0.8 }]}
+          accessibilityRole="link"
+          accessibilityLabel="Ver a carta na Liga Pokémon">
+          <Text style={styles.storeButtonText} numberOfLines={1}>
+            Liga Pokémon ↗
+          </Text>
+          </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -237,7 +261,8 @@ const styles = StyleSheet.create({
   srcDetail: { color: colors.textFaint, fontSize: 11, marginTop: 1 },
   srcValue: { color: colors.text, fontSize: 15, fontWeight: '800' },
   srcRef: { color: colors.textMuted, fontWeight: '600' },
-  mypButton: {
+  storeRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  storeButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -245,9 +270,10 @@ const styles = StyleSheet.create({
     minHeight: 42,
     borderRadius: radius.pill,
     backgroundColor: 'rgba(47, 91, 211, 0.08)',
-    marginTop: 4,
+    flex: 1,
+    paddingHorizontal: 8,
   },
-  mypButtonText: { color: colors.blue, fontSize: 14, fontWeight: '800' },
+  storeButtonText: { color: colors.blue, fontSize: 13, fontWeight: '800', flexShrink: 1 },
   source: { color: colors.textFaint, fontSize: 11, lineHeight: 15 },
   sourceLink: { color: colors.blue, fontWeight: '700', textDecorationLine: 'underline' },
   chartHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

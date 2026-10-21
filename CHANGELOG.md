@@ -23,6 +23,7 @@ O app foi revisado de ponta a ponta, em 32 rodadas de verificação e correção
 - **Boas-vindas** na primeira vez que o app abre.
 - **Esqueci minha senha** na tela da conta, e mensagens de login em português.
 - **"Vazio"** agora percorre os espaços vazios um por um, a partir da página atual.
+- **Botão "Liga Pokémon"** na tela da carta, ao lado do "MYP Cards": abre a carta na Liga para consulta (o valor continua vindo só do MYP).
 
 ### Preços (MYP Cards)
 - O valor de cada carta vem **só do MYP Cards** ("Meu valor" tem prioridade); carta sem anúncio mostra "sem preço".

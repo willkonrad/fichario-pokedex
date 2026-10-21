@@ -10,6 +10,7 @@ import { PricePanel } from '@/components/price-panel';
 import { BOTTOM_BAR_SPACE, BottomBar, Button, Card, Chip, EmptyState, GroupLabel, Input, Loading, Section, Segmented } from '@/components/ui';
 import { formatDex, getSpecies, speciesInCardName } from '@/data/pokedex';
 import { customTotalSlots, indexOfDex, indexOfExtra, physicalPosition } from '@/lib/binder';
+import { ligaQuery, ligaSearchUrl } from '@/lib/liga';
 import { formatWhen } from '@/lib/quotes';
 import { cardDetail, type CardDetail } from '@/lib/tcgdex';
 import { CONDITIONS, LANG_LABEL, VARIANTS, type CardLang, type Condition, type Entry, type Variant } from '@/lib/types';
@@ -119,7 +120,7 @@ function CardForm({ params }: { params: Params }) {
     const image = detail?.image ?? saved?.image;
     return {
       // Carta já salva: mantém o que só o servidor grava (preços do MYP, imagem reserva antiga).
-      ...(autoSave && existing ? { myp: existing.myp, mypOffers: existing.mypOffers, ligaImage: existing.ligaImage } : {}),
+      ...(autoSave && existing ? { myp: existing.myp, mypOffers: existing.mypOffers, ligaImage: existing.ligaImage, ligaQuery: existing.ligaQuery } : {}),
       binderId,
       dex: isExtra ? 0 : dex,
       slot,
@@ -186,6 +187,12 @@ function CardForm({ params }: { params: Params }) {
   const total = detail?.set.cardCount?.official || saved?.setTotal;
   const number = `${detail?.localId ?? saved?.localId ?? ''}${total ? `/${String(total).padStart(3, '0')}` : ''}`;
   const name = detail?.name ?? saved?.cardName ?? '';
+  // Link da carta na Liga: a busca salva (versões antigas, com os casos especiais de numeração) ou
+  // "Nome em inglês (número/total)"; carta japonesa usa o nome do Pokémon.
+  const ligaName = lang === 'ja' ? (getSpecies(dex)?.name ?? name) : (enDetail?.name ?? name);
+  const ligaUrl = name
+    ? ligaSearchUrl(saved?.ligaQuery ?? ligaQuery(ligaName, detail?.localId ?? saved?.localId, (detail?.set.cardCount?.official || detail?.set.cardCount?.total) ?? saved?.setTotal))
+    : undefined;
   // Mesma carta (id + idioma) em outros bolsos ou fichários.
   const copies = Object.values(entries).filter((e) => e.cardId === cardId && e.lang === lang && e.id !== existing?.id);
 
@@ -299,7 +306,7 @@ function CardForm({ params }: { params: Params }) {
 
           {/* Valor (MYP Cards ou "Meu valor") e histórico */}
           <View style={{ marginTop: 18 }}>
-            <PricePanel entry={isNewCard ? undefined : existing} condition={condition} myValue={myValueNum} />
+            <PricePanel entry={isNewCard ? undefined : existing} condition={condition} myValue={myValueNum} ligaUrl={ligaUrl} />
           </View>
 
           {/* Minha carta: estado, variação, meu valor, observações */}
