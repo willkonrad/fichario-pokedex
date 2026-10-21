@@ -5,6 +5,8 @@ import type { CardLang } from './types';
 
 const API = 'https://api.tcgdex.net/v2';
 const CACHE_TTL = 1000 * 60 * 60 * 24 * 7; // 7 dias
+/** Listas de cartas e coleções: 1 dia, para promos e coleções novas aparecerem logo. */
+const LIST_TTL = 1000 * 60 * 60 * 24;
 
 export type CardBrief = {
   id: string;
@@ -53,12 +55,12 @@ export type CardDetail = {
 
 type SetBrief = { id: string; name: string };
 
-export async function cached<T>(key: string, load: () => Promise<T>): Promise<T> {
+export async function cached<T>(key: string, load: () => Promise<T>, ttl = CACHE_TTL): Promise<T> {
   try {
     const hit = await AsyncStorage.getItem(key);
     if (hit) {
       const { at, data } = JSON.parse(hit) as { at: number; data: T };
-      if (Date.now() - at < CACHE_TTL) return data;
+      if (Date.now() - at < ttl) return data;
     }
   } catch {}
   const data = await load();
@@ -78,7 +80,7 @@ export async function cached<T>(key: string, load: () => Promise<T>): Promise<T>
 const CACHE_PREFIXES = ['tcgdex:', 'ptcg:', 'scrydex:'];
 
 /** Chaves de versões antigas do cache, que nunca mais são lidas. */
-const STALE_CACHE = [/^tcgdex:dex:v[1-3]:/, /^scrydex:(?!v4:)/, /^tcgdex:abbr:/];
+const STALE_CACHE = [/^tcgdex:dex:v[1-4]:/, /^scrydex:(?!v4:)/, /^tcgdex:abbr:/];
 
 /** Apaga as chaves de cache de versões antigas (chamada ao abrir o app). */
 export async function pruneStaleCache() {
@@ -113,7 +115,7 @@ export function cardImage(base: string | undefined, quality: 'low' | 'high' = 'l
 }
 
 function setsFor(lang: CardLang) {
-  return cached(`tcgdex:sets:${lang}`, () => getJson<SetBrief[]>(`${API}/${lang}/sets`));
+  return cached(`tcgdex:sets:${lang}`, () => getJson<SetBrief[]>(`${API}/${lang}/sets`), LIST_TTL);
 }
 
 type RawCard = { id: string; localId: string; name: string; image?: string };
@@ -156,7 +158,7 @@ function digitalSets() {
 
 /** Todas as cartas de um Pokémon (número da Pokédex nacional) num idioma, da coleção mais nova para a mais antiga. */
 export async function cardsForDex(dex: number, lang: CardLang): Promise<CardBrief[]> {
-  return cached(`tcgdex:dex:v4:${lang}:${dex}`, async () => {
+  return cached(`tcgdex:dex:v5:${lang}:${dex}`, async () => {
     const [raw, sets, enSets, digital] = await Promise.all([rawCardsFor(dex, lang), setsFor(lang), setsFor('en'), digitalSets()]);
     const isPhysical = (c: RawCard) => !digital.includes(setIdOf(c));
     const cards = raw.filter(isPhysical);
@@ -188,7 +190,7 @@ export async function cardsForDex(dex: number, lang: CardLang): Promise<CardBrie
     }
 
     return list.sort((a, b) => b.setOrder - a.setOrder || a.localId.localeCompare(b.localId, undefined, { numeric: true }));
-  });
+  }, LIST_TTL);
 }
 
 /**
@@ -226,7 +228,7 @@ export async function searchCards(query: string, lang: CardLang): Promise<CardBr
     return list
       .sort((a, b) => b.setOrder - a.setOrder || a.localId.localeCompare(b.localId, undefined, { numeric: true }))
       .slice(0, 300);
-  });
+  }, LIST_TTL);
 }
 
 export function cardDetail(id: string, lang: CardLang) {
