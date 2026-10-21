@@ -49,11 +49,6 @@ export type CardDetail = {
   variants_detailed?: { type: string; subtype?: string; size?: string; foil?: string; stamp?: string[] }[];
   set: { id: string; name: string; cardCount?: { official?: number; total?: number } };
   variants?: Partial<Record<'normal' | 'reverse' | 'holo' | 'firstEdition' | 'wPromo', boolean>>;
-  /** Preços internacionais (TCGplayer em USD, Cardmarket em EUR). */
-  pricing?: {
-    tcgplayer?: { updated?: string } & Record<string, { marketPrice?: number | null; midPrice?: number | null } | string | undefined>;
-    cardmarket?: { updated?: string; trend?: number | null; avg?: number | null; 'trend-holo'?: number | null; 'avg-holo'?: number | null };
-  } | null;
 };
 
 type SetBrief = { id: string; name: string };
@@ -83,7 +78,7 @@ export async function cached<T>(key: string, load: () => Promise<T>): Promise<T>
 const CACHE_PREFIXES = ['tcgdex:', 'ptcg:', 'scrydex:'];
 
 /** Chaves de versões antigas do cache, que nunca mais são lidas. */
-const STALE_CACHE = [/^tcgdex:dex:v[1-3]:/, /^scrydex:(?!v2:)/];
+const STALE_CACHE = [/^tcgdex:dex:v[1-3]:/, /^scrydex:(?!v4:)/, /^tcgdex:abbr:/];
 
 /** Apaga as chaves de cache de versões antigas (chamada ao abrir o app). */
 export async function pruneStaleCache() {
@@ -119,14 +114,6 @@ export function cardImage(base: string | undefined, quality: 'low' | 'high' = 'l
 
 function setsFor(lang: CardLang) {
   return cached(`tcgdex:sets:${lang}`, () => getJson<SetBrief[]>(`${API}/${lang}/sets`));
-}
-
-/** Sigla oficial da coleção (ex.: xy10 → "FCO"), usada nos links da Liga. */
-export function setAbbreviation(setId: string) {
-  return cached(`tcgdex:abbr:v1:${setId}`, async () => {
-    const set = await getJson<{ abbreviation?: { official?: string } }>(`${API}/en/sets/${encodeURIComponent(setId)}`);
-    return set.abbreviation?.official ?? null;
-  });
 }
 
 type RawCard = { id: string; localId: string; name: string; image?: string };

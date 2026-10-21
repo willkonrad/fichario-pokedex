@@ -1,23 +1,20 @@
+import { Image } from 'expo-image';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
-import { CardImage } from '@/components/card-image';
-import { Button, Chip } from '@/components/ui';
-import { formatDex, getSpecies } from '@/data/pokedex';
+import { CardGrid } from '@/components/card-grid';
+import { Button, Chip, EmptyState, Loading, SearchField } from '@/components/ui';
+import { formatDex, getSpecies, spriteUrl } from '@/data/pokedex';
 import { cardsForDex, type CardBrief } from '@/lib/tcgdex';
 import { LANG_SHORT, type CardLang } from '@/lib/types';
-import { OwnedBadge, useOwnedCards } from '@/components/owned-badge';
 import { useCollection } from '@/store/collection';
-import { CARD_RATIO, colors, mono, radius } from '@/theme';
-
-const COLS = 3;
-const GAP = 10;
+import { colors, MAX_WIDTH, mono, shadow } from '@/theme';
 
 export default function PokemonCardsScreen() {
   const { ready } = useCollection();
   // Espera a configuração: o idioma inicial vem dos idiomas escolhidos pelo usuário.
-  if (!ready) return <ActivityIndicator color={colors.accent} style={{ marginTop: 40 }} />;
+  if (!ready) return <Loading />;
   return <PokemonCards />;
 }
 
@@ -27,7 +24,7 @@ function PokemonCards() {
   const slot = Number(params.slot ?? 0);
   const species = getSpecies(dex);
   const { settings } = useCollection();
-  const languages = settings?.languages ?? ['pt', 'en', 'ja'];
+  const languages: CardLang[] = settings?.languages?.length ? settings.languages : ['pt', 'en', 'ja'];
   const [lang, setLang] = useState<CardLang>(languages[0]);
   const [attempt, setAttempt] = useState(0);
   const key = `${dex}:${lang}:${attempt}`;
@@ -36,9 +33,6 @@ function PokemonCards() {
   const cards = current?.cards ?? null;
   const error = current?.error ?? null;
   const [filter, setFilter] = useState('');
-  const { width } = useWindowDimensions();
-  const owned = useOwnedCards();
-  const itemWidth = (Math.min(width, 720) - 32 - GAP * (COLS - 1)) / COLS;
 
   useEffect(() => {
     let alive = true;
@@ -51,75 +45,60 @@ function PokemonCards() {
   }, [dex, lang, key]);
 
   const f = filter.trim().toLowerCase();
-  const visible = cards?.filter((c) => !f || c.setName.toLowerCase().includes(f) || c.name.toLowerCase().includes(f) || c.localId.includes(f));
+  const visible = cards?.filter((c) => !f || c.setName.toLowerCase().includes(f) || c.name.toLowerCase().includes(f) || c.localId.toLowerCase().includes(f));
+
+  function pick(card: CardBrief) {
+    router.push({ pathname: '/card', params: { dex, slot, cardId: card.id, lang: card.lang, dataLang: card.dataLang ?? card.lang } });
+  }
+
+  const header = (
+    <View style={styles.top}>
+      <View style={styles.speciesRow}>
+        <View style={styles.sprite}>
+          <Image source={spriteUrl(dex)} style={{ width: 64, height: 64 }} contentFit="contain" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.dex}>{formatDex(dex)}</Text>
+          <Text style={styles.speciesName}>{species?.name}</Text>
+          <Text style={styles.speciesJa}>
+            {species?.ja}
+            {settings && settings.slotsPerPokemon > 1 ? ` · espaço ${slot + 1} de ${settings.slotsPerPokemon}` : ''}
+          </Text>
+        </View>
+      </View>
+      <View style={styles.tabs}>
+        {languages.map((l) => (
+          <Chip key={l} label={LANG_SHORT[l]} selected={lang === l} onPress={() => setLang(l)} />
+        ))}
+        {cards ? (
+          <Text style={styles.count}>
+            {visible?.length} {visible?.length === 1 ? 'carta' : 'cartas'}
+          </Text>
+        ) : null}
+      </View>
+      <SearchField value={filter} onChangeText={setFilter} placeholder="Filtrar por coleção, nome ou número" label="Filtrar cartas" icon="filter" />
+    </View>
+  );
 
   return (
     <View style={styles.screen}>
-      <Stack.Screen options={{ title: `${formatDex(dex)} ${species?.name ?? ''}` }} />
-      <View style={styles.top}>
-        <View style={styles.tabs}>
-          {languages.map((l) => (
-            <Chip key={l} label={LANG_SHORT[l]} selected={lang === l} onPress={() => setLang(l)} />
-          ))}
-          {settings && settings.slotsPerPokemon > 1 ? (
-            <Text style={styles.slotInfo}>
-              Espaço {slot + 1} de {settings.slotsPerPokemon}
-            </Text>
-          ) : null}
-        </View>
-        <TextInput
-          value={filter}
-          onChangeText={setFilter}
-          placeholder="Filtrar por coleção, nome ou número"
-          placeholderTextColor={colors.textFaint}
-          style={styles.filter}
-        />
-        {cards ? <Text style={styles.count}>{visible?.length} cartas</Text> : null}
-      </View>
-
+      <Stack.Screen options={{ title: `Escolher ${species?.name ?? 'carta'}` }} />
+      {header}
       {error ? (
-        <View style={styles.retry}>
-          <Text style={styles.error}>Não consegui carregar as cartas ({error}). Confira a internet.</Text>
-          <Button title="Tentar de novo" variant="secondary" onPress={() => setAttempt((n) => n + 1)} />
-        </View>
-      ) : !visible ? (
-        <ActivityIndicator color={colors.accent} style={{ marginTop: 40 }} />
-      ) : visible.length === 0 ? (
-        <Text style={styles.error}>Nenhuma carta encontrada nesse idioma.</Text>
-      ) : (
-        <FlatList
-          data={visible}
-          keyExtractor={(c) => c.id}
-          numColumns={COLS}
-          columnWrapperStyle={{ gap: GAP }}
-          contentContainerStyle={styles.list}
-          renderItem={({ item }) => (
-            <Pressable
-              style={{ width: itemWidth }}
-              onPress={() =>
-                router.push({ pathname: '/card', params: { dex, slot, cardId: item.id, lang: item.lang, dataLang: item.dataLang ?? item.lang } })
-              }>
-              <View style={[styles.thumb, { height: itemWidth / CARD_RATIO }]}>
-                <CardImage
-                  image={item.image}
-                  cardId={item.lang === 'ja' ? undefined : item.id}
-                  nameEn={item.lang === 'en' || item.dataLang === 'en' ? item.name : undefined}
-                  setNameEn={item.setNameEn}
-                  localId={item.localId}
-                  dex={dex}
-                />
-                {owned.has(`${item.id}|${item.lang}`) ? <OwnedBadge /> : null}
-              </View>
-              <Text style={styles.cardName} numberOfLines={1}>
-                {item.name}
-              </Text>
-              <Text style={styles.cardSet} numberOfLines={1}>
-                {item.setName} · {item.localId}
-                {item.dataLang ? ' · dados em inglês' : ''}
-              </Text>
-            </Pressable>
-          )}
+        <EmptyState
+          title="Não consegui carregar as cartas"
+          text={`Confira a internet e tente de novo. (${error})`}
+          action={<Button title="Tentar de novo" variant="secondary" icon="refresh" onPress={() => setAttempt((n) => n + 1)} />}
         />
+      ) : !visible ? (
+        <Loading label="Buscando as cartas…" />
+      ) : visible.length === 0 ? (
+        <EmptyState
+          title={f ? 'Nenhuma carta com esse filtro' : 'Nenhuma carta neste idioma'}
+          text={f ? 'Tente outro nome de coleção ou número.' : 'Tente outro idioma acima.'}
+        />
+      ) : (
+        <CardGrid cards={visible} dex={dex} onPick={pick} />
       )}
     </View>
   );
@@ -127,24 +106,12 @@ function PokemonCards() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
-  top: { padding: 16, gap: 10, maxWidth: 720, width: '100%', alignSelf: 'center' },
+  top: { paddingTop: 16, paddingBottom: 14, paddingHorizontal: 16, gap: 12, maxWidth: MAX_WIDTH, width: '100%', alignSelf: 'center' },
+  speciesRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  sprite: { width: 76, height: 76, borderRadius: 38, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center', ...shadow },
+  dex: { color: colors.primary, fontFamily: mono, fontSize: 13, fontWeight: '800' },
+  speciesName: { color: colors.text, fontSize: 24, fontWeight: '900' },
+  speciesJa: { color: colors.textMuted, fontSize: 13 },
   tabs: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  slotInfo: { color: colors.textMuted, marginLeft: 'auto', fontSize: 13 },
-  filter: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    color: colors.text,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 15,
-  },
-  count: { color: colors.textMuted, fontFamily: mono, fontSize: 12 },
-  list: { paddingHorizontal: 16, paddingBottom: 40, gap: 14, maxWidth: 720, width: '100%', alignSelf: 'center' },
-  thumb: { borderRadius: radius.sm, overflow: 'hidden', backgroundColor: colors.surface, justifyContent: 'center' },
-  cardName: { color: colors.text, fontSize: 13, fontWeight: '600', marginTop: 6 },
-  cardSet: { color: colors.textMuted, fontSize: 11, marginTop: 2 },
-  error: { color: colors.textMuted, textAlign: 'center', padding: 24 },
-  retry: { paddingHorizontal: 24, gap: 4, maxWidth: 480, width: '100%', alignSelf: 'center' },
+  count: { color: colors.textMuted, fontSize: 13, marginLeft: 'auto' },
 });

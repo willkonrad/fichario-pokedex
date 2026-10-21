@@ -1,0 +1,50 @@
+# Notas da versão
+
+## 2.0.0 — Visual Pokédex e revisão completa (21/10/2026)
+
+O app foi revisado de ponta a ponta, em 32 rodadas de verificação e correção. Esta versão traz um visual novo, inspirado na Pokédex e no Nintendo Switch, novos recursos pedidos e várias correções.
+
+### Visual novo
+- **Tema Pokédex**: barras do topo em vermelho Pokémon, fundo claro com cartões brancos (como a interface do Nintendo Switch) e destaques no amarelo e no azul do logo Pokémon.
+- **Páginas do fichário escuras**, como as folhas plásticas de um fichário de verdade; cartas especiais (holo, reverse, promo…) com borda amarela.
+- **Destaque em ciano** (a cor de seleção do Switch) para a busca e o botão "Vazio", diferente do amarelo das cartas especiais.
+- Botões em pílula, controle segmentado para o estado da carta, campos com foco em vermelho, ícones de Poké Ball nos estados de carregando e vazio.
+- **Ícone e tela de abertura novos**: um fichário branco com grade de cartas e uma carta especial em amarelo, sobre o vermelho Pokémon.
+
+### Novidades
+- **Duas páginas abertas no computador**: em tela larga, fichários frente e verso abrem como um fichário de verdade — a página 1 sozinha ao lado da capa, depois 2–3, 4–5… e a última sozinha ao lado da contracapa quando cai do lado esquerdo.
+- **Capa com o nome do fichário** e o progresso, ao lado da primeira página.
+- **Bolsos livres na última página do fichário Pokédex**: os bolsos que sobram depois do último Pokémon ficam livres para cartas especiais (qualquer carta). Elas entram no valor do fichário, mas não contam no progresso da Pokédex.
+- **Folhear arrastando**: arraste a página para o lado para trocar de página; os botões de página também aparecem embaixo da página.
+- **Minha coleção**: valor total em destaque, **gráfico da evolução do valor da coleção** (1M, 3M, 6M, 1A) com a variação no período, e as 5 cartas mais valiosas.
+- **Salvamento automático** na tela da carta: mudar o estado, a variação, o "Meu valor" ou as observações salva na hora (inclusive se você sair da tela logo depois de digitar).
+- **Carta no computador**: imagem grande à esquerda e informações à direita.
+- **Tablet e computador**: a página inteira do fichário cabe na altura da tela.
+- **Boas-vindas** na primeira vez que o app abre.
+- **Esqueci minha senha** na tela da conta, e mensagens de login em português.
+- **"Vazio"** agora percorre os espaços vazios um por um, a partir da página atual.
+
+### Preços (MYP Cards)
+- O valor de cada carta vem **só do MYP Cards** ("Meu valor" tem prioridade); carta sem anúncio mostra "sem preço".
+- **Cartas de Galeria de Treinador e Galeria Galar** (ex.: Gengar TG06) passaram a ter preço.
+- **Cartas em inglês de coleções antigas** (ex.: Wartortle de EX Guardiões do Cristal) passaram a ter preço.
+- Cartas **sem preço** são consultadas de novo todo dia (antes, 1 vez por semana).
+- Cartas japonesas mostram que o MYP não informa preço de cartas japonesas e sugerem "Meu valor", em vez de ficarem "buscando" para sempre.
+- Link "Ver anúncios no MYP Cards" no quadro de preço e na tela Minha coleção.
+
+### Correções
+- Ao **trocar uma carta por outra**, colocar a nova antes da ficha carregar podia salvá-la com o nome, a coleção e a imagem da carta antiga.
+- Cartas sem imagem mostravam o **verso de uma carta Pokémon** no lugar (imagem reserva) no navegador.
+- Os botões de estado (M, NM, SP…) quebravam em duas linhas em celulares de 375 px.
+- Quando a ficha da carta não existe no catálogo, o aviso dizia "confira a internet" e a variação ficava "carregando" para sempre.
+- No navegador, os campos de busca mostravam o contorno de foco padrão (retângulo laranja) dentro da cápsula.
+- Na estante de fichários, o botão de personalizar ficava dentro do botão do fichário (inválido no navegador e confuso para leitores de tela).
+- Energia incolor quase invisível na ficha da carta; capa amarela com texto branco ilegível; prévia do fichário novo com um nome diferente do que seria salvo.
+- Leitores de tela: nomes nos botões de estado, nas cores de capa e nos controles de página.
+
+### Por dentro
+- Removido todo o código das fontes antigas (Liga, vendas reais, TCGplayer, Cardmarket), as imagens padrão do Expo e código sem uso.
+- Componentes visuais compartilhados (`src/components/ui.tsx`), grade de cartas e gráfico reutilizáveis, tema centralizado (`src/theme.ts`).
+- `scripts/make-icons.js` gera o ícone, o ícone adaptativo do Android, o favicon e a imagem de abertura.
+
+O registro de cada rodada de revisão está em [docs/revisoes-2.0.0.md](docs/revisoes-2.0.0.md).

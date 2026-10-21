@@ -15,7 +15,7 @@ const ENERGY: Record<string, { color: string; pt: string }> = {
   metal: { color: '#8D99A6', pt: 'Metal' },
   fairy: { color: '#D6409F', pt: 'Fada' },
   dragon: { color: '#B08D3A', pt: 'Dragão' },
-  colorless: { color: '#D8D8D8', pt: 'Incolor' },
+  colorless: { color: '#C4C8D0', pt: 'Incolor' },
 };
 const PT_TO_EN: Record<string, string> = Object.fromEntries(
   Object.entries(ENERGY).map(([en, v]) => [v.pt.toLowerCase(), en]),
@@ -180,7 +180,7 @@ const styles = StyleSheet.create({
   attackHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   cost: { flexDirection: 'row', gap: 3 },
   damage: { color: colors.text, fontSize: 17, fontWeight: '800' },
-  energy: { borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.55)' },
+  energy: { borderWidth: 1.5, borderColor: 'rgba(0,0,0,0.18)' },
   stats: { flexDirection: 'row', gap: 8 },
   stat: { flex: 1, backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 12 },
   statLabel: { letterSpacing: 0.4, fontSize: 10 },

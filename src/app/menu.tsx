@@ -1,16 +1,26 @@
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import { useMemo, useState, type ComponentProps } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { LineChart } from '@/components/line-chart';
+import { Card, Chip, GroupLabel, type IconName } from '@/components/ui';
 import { TOTAL_SPECIES } from '@/data/pokedex';
 import { dexRange } from '@/lib/binder';
-import { collectionTotals, entryValue, formatBRL, formatBRLTight, formatWhen, priceFreshness } from '@/lib/quotes';
+import { collectionHistory, type HistoryPoint } from '@/lib/history';
+import { collectionTotals, entryValue, formatBRL, formatBRLShort, formatBRLTight, formatWhen, priceFreshness } from '@/lib/quotes';
 import { clearCatalogCache } from '@/lib/tcgdex';
 import { POKEDEX_BINDER, type Entry } from '@/lib/types';
 import { entriesOf, useCollection } from '@/store/collection';
-import { colors, radius } from '@/theme';
+import { colors, MAX_WIDTH, radius, shadow } from '@/theme';
+
+const RANGES = [
+  { id: '1M', label: '1M', days: 30 },
+  { id: '3M', label: '3M', days: 91 },
+  { id: '6M', label: '6M', days: 182 },
+  { id: '1A', label: '1A', days: 365 },
+] as const;
 
 export default function MenuScreen() {
   const { entries, session, syncError, binders, settings, setActiveBinder } = useCollection();
@@ -35,67 +45,57 @@ export default function MenuScreen() {
 
   async function openCard(e: Entry) {
     await setActiveBinder(e.binderId ?? POKEDEX_BINDER);
-    router.push(
-      e.binderId
-        ? { pathname: '/card', params: { binder: e.binderId, slot: e.slot } }
-        : { pathname: '/card', params: { dex: e.dex, slot: e.slot } },
-    );
+    router.push(e.binderId ? { pathname: '/card', params: { binder: e.binderId, slot: e.slot } } : { pathname: '/card', params: { dex: e.dex, slot: e.slot } });
   }
 
   return (
     <ScrollView contentContainerStyle={styles.screen}>
+      {/* Valor da coleção */}
       <View style={styles.hero}>
-        <Text style={styles.heroLabel}>Valor da coleção</Text>
+        <View style={styles.heroTop}>
+          <MaterialCommunityIcons name="pokeball" size={18} color="rgba(255,255,255,0.85)" />
+          <Text style={styles.heroLabel}>Valor da coleção</Text>
+        </View>
         <Text style={styles.heroValue}>{stats.valued ? formatBRL(stats.value) : '—'}</Text>
-        {stats.valued ? (
-          <Text style={styles.heroNote}>
-            {[
-              stats.byConfidence.alta && `${stats.byConfidence.alta} com confiança alta`,
-              stats.byConfidence.media && `${stats.byConfidence.media} média`,
-              stats.byConfidence.baixa && `${stats.byConfidence.baixa} baixa`,
-              stats.unvalued && `${stats.unvalued} ainda sem valor`,
-            ]
-              .filter(Boolean)
-              .join(' · ')}
-          </Text>
-        ) : null}
         <Text style={styles.heroNote}>
-          {stats.valued ? (
-            <>
-              Preços do{' '}
-              <Text style={styles.link} accessibilityRole="link" onPress={() => WebBrowser.openBrowserAsync('https://mypcards.com')}>
-                MYP Cards
-              </Text>
-              : menor anúncio de cada carta (ou &quot;Meu valor&quot;, quando você preenche).
-            </>
-          ) : stats.cards ? (
-            `Nenhuma das ${stats.cards} cartas tem valor ainda. Os preços do MYP Cards chegam em algumas horas.`
-          ) : (
-            'Coloque cartas no fichário para ver o valor da coleção.'
-          )}
+          {stats.valued
+            ? [
+                `${stats.valued} de ${stats.cards} cartas com preço`,
+                stats.newest ? `atualizado em ${formatWhen(stats.newest)}` : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')
+            : stats.cards
+              ? `Nenhuma das ${stats.cards} cartas tem preço ainda. Os preços do MYP Cards chegam em alguns minutos.`
+              : 'Coloque cartas no fichário para ver o valor da coleção.'}
         </Text>
-        {stats.newest ? (
-          <Text style={styles.heroNote}>
-            Última atualização: {formatWhen(stats.newest)}
-            {stats.oldest && stats.oldest !== stats.newest ? ` · mais antiga: ${formatWhen(stats.oldest)}` : ''}
-          </Text>
-        ) : null}
+        <Text style={styles.heroSource}>
+          Preços do{' '}
+          <Text style={styles.heroLink} accessibilityRole="link" onPress={() => WebBrowser.openBrowserAsync('https://mypcards.com')}>
+            MYP Cards
+          </Text>{' '}
+          (ou &quot;Meu valor&quot;, quando você preenche).
+        </Text>
       </View>
 
+      <CollectionChart signedIn={!!session} />
+
       <View style={styles.stats}>
-        <Stat icon="grid-outline" label="Pokémon" value={`${stats.species}`} sub={`de ${range.count} · ${pct}%`} />
+        <Stat icon="grid-outline" label="Pokédex" value={`${stats.species}`} sub={`de ${range.count} · ${pct}%`} />
         <Stat icon="albums-outline" label="Cartas" value={String(stats.cards)} sub={binders.length ? `em ${binders.length + 1} fichários` : 'no fichário'} />
       </View>
 
       {top.length ? (
         <>
-          <Text style={styles.sectionTitle}>Mais valiosas</Text>
+          <GroupLabel>Mais valiosas</GroupLabel>
           <View style={styles.group}>
             {top.map(({ e, value }, i) => (
               <View key={e.id}>
-                {i > 0 ? <View style={[styles.divider, { marginLeft: 14 }]} /> : null}
-                <Pressable style={({ pressed }) => [styles.topRow, pressed && { opacity: 0.7 }]} onPress={() => openCard(e)}>
-                  <Text style={styles.topRank}>{i + 1}</Text>
+                {i > 0 ? <View style={[styles.divider, { marginLeft: 50 }]} /> : null}
+                <Pressable style={({ pressed }) => [styles.topRow, pressed && { opacity: 0.7 }]} onPress={() => openCard(e)} accessibilityRole="button" accessibilityLabel={`${e.cardName}, ${formatBRL(value)}`}>
+                  <View style={[styles.rank, i === 0 && { backgroundColor: colors.yellow }]}>
+                    <Text style={styles.rankText}>{i + 1}</Text>
+                  </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.itemTitle} numberOfLines={1}>
                       {e.cardName}
@@ -112,7 +112,7 @@ export default function MenuScreen() {
         </>
       ) : null}
 
-      <Text style={styles.sectionTitle}>Ajustes</Text>
+      <GroupLabel>Ajustes</GroupLabel>
       <View style={styles.group}>
         <Item
           icon="library-outline"
@@ -126,7 +126,7 @@ export default function MenuScreen() {
         <Item
           icon={session ? 'cloud-done-outline' : 'cloud-offline-outline'}
           title="Conta e sincronização"
-          subtitle={session ? session.user.email ?? 'Conectado' : 'Entre para salvar na nuvem'}
+          subtitle={session ? (session.user.email ?? 'Conectado') : 'Entre para salvar na nuvem'}
           onPress={() => router.push('/account')}
         />
         <View style={styles.divider} />
@@ -147,13 +147,75 @@ export default function MenuScreen() {
   );
 }
 
-type IconName =ComponentProps<typeof Ionicons>['name'];
+/** Valor da coleção ao longo do tempo (histórico diário gravado pelo servidor), com 1M/3M/6M/1A. */
+function CollectionChart({ signedIn }: { signedIn: boolean }) {
+  const [history, setHistory] = useState<HistoryPoint[] | null | undefined>(undefined);
+  const [error, setError] = useState<string | null>(null);
+  const [rangeId, setRangeId] = useState<(typeof RANGES)[number]['id']>('1M');
+
+  useEffect(() => {
+    if (!signedIn) return;
+    let alive = true;
+    collectionHistory()
+      .then((h) => alive && setHistory(h))
+      .catch((e) => alive && setError(e instanceof Error ? e.message : String(e)));
+    return () => {
+      alive = false;
+    };
+  }, [signedIn]);
+
+  const days = RANGES.find((r) => r.id === rangeId)!.days;
+  const points = useMemo(() => {
+    if (!history?.length) return [];
+    const lastDay = new Date(`${history[history.length - 1].day}T12:00:00`).getTime();
+    return history
+      .map((h) => ({ t: new Date(`${h.day}T12:00:00`).getTime(), v: h.value }))
+      .filter((p) => p.t >= lastDay - days * 86_400_000);
+  }, [history, days]);
+  const first = points[0];
+  const last = points[points.length - 1];
+  const change = first && last && first.v > 0 ? ((last.v - first.v) / first.v) * 100 : null;
+
+  return (
+    <Card style={{ gap: 10 }}>
+      <View style={styles.chartHead}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.chartTitle}>Evolução do valor</Text>
+          {change != null && points.length > 1 ? (
+            <Text style={[styles.change, { color: change >= 0 ? colors.success : colors.danger }]}>
+              {change >= 0 ? '▲' : '▼'} {Math.abs(change).toFixed(1).replace('.', ',')}% no período
+            </Text>
+          ) : null}
+        </View>
+        <View style={styles.ranges}>
+          {RANGES.map((r) => (
+            <Chip key={r.id} label={r.label} selected={rangeId === r.id} onPress={() => setRangeId(r.id)} />
+          ))}
+        </View>
+      </View>
+      {!signedIn ? (
+        <Text style={styles.chartNote}>Entre na sua conta (em Conta e sincronização) para guardar o histórico do valor da coleção.</Text>
+      ) : error ? (
+        <Text style={styles.chartNote}>Não consegui carregar o histórico ({error}).</Text>
+      ) : history === undefined ? (
+        <Text style={styles.chartNote}>Carregando o histórico…</Text>
+      ) : points.length < 2 ? (
+        <>
+          {points.length ? <LineChart points={points} format={formatBRLShort} /> : null}
+          <Text style={styles.chartNote}>O valor da coleção é guardado todo dia às 23:50. O gráfico ganha forma a cada dia.</Text>
+        </>
+      ) : (
+        <LineChart points={points} format={formatBRLShort} />
+      )}
+    </Card>
+  );
+}
 
 function Stat({ icon, label, value, sub }: { icon: IconName; label: string; value: string; sub: string }) {
   return (
     <View style={styles.stat}>
       <View style={styles.statHead}>
-        <Ionicons name={icon} size={14} color={colors.textMuted} />
+        <Ionicons name={icon} size={14} color={colors.primary} />
         <Text style={styles.statLabel}>{label}</Text>
       </View>
       <Text style={styles.statValue}>{value}</Text>
@@ -164,9 +226,9 @@ function Stat({ icon, label, value, sub }: { icon: IconName; label: string; valu
 
 function Item({ icon, title, subtitle, onPress }: { icon: IconName; title: string; subtitle: string; onPress: () => void }) {
   return (
-    <Pressable style={({ pressed }) => [styles.item, pressed && { opacity: 0.7 }]} onPress={onPress}>
+    <Pressable style={({ pressed }) => [styles.item, pressed && { opacity: 0.7 }]} onPress={onPress} accessibilityRole="button">
       <View style={styles.itemIcon}>
-        <Ionicons name={icon} size={18} color={colors.accent} />
+        <Ionicons name={icon} size={18} color={colors.primary} />
       </View>
       <View style={{ flex: 1 }}>
         <Text style={styles.itemTitle}>{title}</Text>
@@ -180,42 +242,35 @@ function Item({ icon, title, subtitle, onPress }: { icon: IconName; title: strin
 }
 
 const styles = StyleSheet.create({
-  screen: { padding: 20, gap: 12, maxWidth: 640, width: '100%', alignSelf: 'center' },
-  hero: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: 18, borderWidth: 1, borderColor: colors.border },
-  heroLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' },
-  heroValue: { color: colors.gold, fontSize: 32, fontWeight: '800', marginTop: 4 },
-  heroNote: { color: colors.textMuted, fontSize: 12, marginTop: 10, lineHeight: 17 },
-  link: { color: colors.accent, textDecorationLine: 'underline' },
+  screen: { padding: 16, gap: 12, maxWidth: MAX_WIDTH, width: '100%', alignSelf: 'center', paddingBottom: 40 },
+  hero: { backgroundColor: colors.primary, borderRadius: radius.lg, padding: 20, ...shadow },
+  heroTop: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  heroLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '800', letterSpacing: 1.2, textTransform: 'uppercase' },
+  heroValue: { color: colors.onPrimary, fontSize: 36, fontWeight: '900', marginTop: 6 },
+  heroNote: { color: 'rgba(255,255,255,0.9)', fontSize: 13, marginTop: 6, lineHeight: 18 },
+  heroSource: { color: 'rgba(255,255,255,0.8)', fontSize: 12, marginTop: 8, lineHeight: 17 },
+  heroLink: { color: colors.yellow, fontWeight: '800', textDecorationLine: 'underline' },
+  chartHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, flexWrap: 'wrap' },
+  chartTitle: { color: colors.text, fontSize: 16, fontWeight: '900' },
+  change: { fontSize: 13, fontWeight: '800', marginTop: 2 },
+  ranges: { flexDirection: 'row', gap: 4 },
+  chartNote: { color: colors.textMuted, fontSize: 13, lineHeight: 18 },
   stats: { flexDirection: 'row', gap: 12 },
-  stat: { flex: 1, backgroundColor: colors.surface, borderRadius: radius.md, padding: 14, borderWidth: 1, borderColor: colors.border },
+  stat: { flex: 1, backgroundColor: colors.surface, borderRadius: radius.lg, padding: 14, ...shadow },
   statHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  statLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '600' },
-  statValue: { color: colors.text, fontSize: 24, fontWeight: '800', marginTop: 6 },
-  statSub: { color: colors.textFaint, fontSize: 12, marginTop: 2 },
-  sectionTitle: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-    marginTop: 8,
-  },
-  group: { backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' },
+  statLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1 },
+  statValue: { color: colors.text, fontSize: 26, fontWeight: '900', marginTop: 4 },
+  statSub: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
+  group: { backgroundColor: colors.surface, borderRadius: radius.lg, overflow: 'hidden', ...shadow },
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginLeft: 60 },
   item: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
-  itemIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: colors.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  itemTitle: { color: colors.text, fontSize: 15, fontWeight: '700' },
+  itemIcon: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
+  itemTitle: { color: colors.text, fontSize: 15, fontWeight: '800' },
   itemSub: { color: colors.textMuted, fontSize: 13, marginTop: 2 },
-  error: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
   topRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 11 },
-  topRank: { color: colors.textFaint, fontSize: 14, fontWeight: '800', width: 16, textAlign: 'center' },
-  topValue: { color: colors.gold, fontSize: 14, fontWeight: '800' },
+  rank: { width: 26, height: 26, borderRadius: 13, backgroundColor: colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' },
+  rankText: { color: colors.text, fontSize: 13, fontWeight: '900' },
+  topValue: { color: colors.money, fontSize: 15, fontWeight: '900' },
+  error: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
   errorText: { color: colors.danger, fontSize: 13, flex: 1 },
 });

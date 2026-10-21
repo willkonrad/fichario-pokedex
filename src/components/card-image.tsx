@@ -6,12 +6,12 @@ import { StyleSheet, Text, View } from 'react-native';
 import { ptcgImage, scrydexImage } from '@/lib/ptcg';
 import { spriteUrl } from '@/data/pokedex';
 import { cardImage } from '@/lib/tcgdex';
-import { colors } from '@/theme';
+import { binderColors, colors } from '@/theme';
 
 /**
  * Imagem da carta, na ordem:
  *   1. TCGdex (`image`);
- *   2. `imageUrl` já resolvida antes (reserva salva na carta ou imagem da Liga);
+ *   2. `imageUrl` já resolvida antes (reserva salva na carta);
  *   3. Scrydex pelo id da carta (não depende da API da pokemontcg.io, que cai com frequência);
  *   4. pokemontcg.io por nome em inglês + coleção (para coleções com id diferente).
  * Se a imagem carregada falhar, passa para a próxima fonte.
@@ -28,6 +28,7 @@ export function CardImage({
   compact = false,
   label,
   dex,
+  dark = false,
   onResolved,
 }: {
   image?: string;
@@ -44,6 +45,8 @@ export function CardImage({
   label?: string;
   /** Pokémon da carta: sem imagem, mostra a arte dele esmaecida no lugar. */
   dex?: number;
+  /** Sobre fundo escuro (página do fichário). */
+  dark?: boolean;
   /** Avisa a URL encontrada na reserva, para ser guardada na carta. */
   onResolved?: (url: string) => void;
 }) {
@@ -75,13 +78,14 @@ export function CardImage({
   }, [needsFallback, canSearch, searchKey, cardId, nameEn, setNameEn, localId, quality]);
 
   const src = needsFallback ? fallback : primary;
+  const faint = dark ? binderColors.textFaint : colors.textFaint;
   if (!src) {
     return (
       <View style={[styles.placeholder, dex ? styles.placeholderArt : null]}>
         {dex ? <Image source={spriteUrl(dex)} style={styles.sprite} contentFit="contain" /> : null}
-        <Ionicons name={searching ? 'hourglass-outline' : 'image-outline'} size={compact ? 16 : 22} color={colors.textFaint} />
+        <Ionicons name={searching ? 'hourglass-outline' : 'image-outline'} size={compact ? 16 : 22} color={faint} />
         {label || !compact ? (
-          <Text style={styles.noImg} numberOfLines={3}>
+          <Text style={[styles.noImg, { color: faint }]} numberOfLines={3}>
             {label ?? (searching ? 'Buscando imagem…' : 'Sem imagem')}
           </Text>
         ) : null}

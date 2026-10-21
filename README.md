@@ -7,13 +7,18 @@ App pessoal e gratuito para colecionadores de Pokémon TCG: organize suas cartas
 ## O que o app faz
 
 - **Fichários virtuais** com as mesmas dimensões do seu (bolsos por página, folhas, frente e verso):
-  - **Pokédex**: um espaço por Pokémon, com opção de limitar a uma região (ex.: só Kanto);
+  - **Pokédex**: um espaço por Pokémon, com opção de limitar a uma região (ex.: só Kanto). Os bolsos que sobram na última página ficam **livres para cartas especiais**;
   - **Livres**: coleção, coleção completa, favoritas, trocas, deck, graduadas — você escolhe a carta de cada bolso.
+- **Folheie como um fichário de verdade**: arraste a página para o lado; no computador, fichários frente e verso abrem **duas páginas lado a lado**, com a capa (com o nome do fichário) ao lado da primeira página.
 - **Catálogo completo** em português, inglês e japonês ([TCGdex](https://tcgdex.dev)), com estado (M, NM, SP, MP, HP, D) e variação (holo, reverse, 1ª edição, Poké Ball, promos com selo…).
 - **Valor de cada carta em reais, só do [MYP Cards](https://mypcards.com)**, com link para a loja e o grau de confiança do valor.
-- **Valor da coleção** e **histórico diário** de cada carta, para gráficos de valorização.
+- **Minha coleção**: valor total, **gráfico da evolução do valor** (1M, 3M, 6M, 1A) e as cartas mais valiosas.
 - **"Meu valor"**: o colecionador pode informar o preço que conferiu; ele tem prioridade sobre o MYP.
+- **Salvamento automático**: mudar o estado, a variação, o valor ou as observações de uma carta salva na hora.
+- Visual inspirado na Pokédex e no Nintendo Switch: barras vermelhas, cartões brancos e as páginas do fichário escuras como folhas plásticas.
 - Coleção salva no aparelho e sincronizada na nuvem (Supabase), com login próprio.
+
+As novidades de cada versão estão em [CHANGELOG.md](CHANGELOG.md).
 
 ## Fontes de dados e atribuição
 
@@ -73,7 +78,10 @@ Nenhuma chave ou senha fica no código: todas ficam nos Secrets do Supabase ou n
 - `src/lib/` — TCGdex, Supabase, cálculo das páginas do fichário.
 - `src/store/collection.tsx` — estado da coleção (local + nuvem).
 - `src/components/price-panel.tsx` — quadro de preço do MYP Cards e o histórico.
+- `src/components/ui.tsx` — componentes visuais (botões, campos, cartões, controle segmentado…).
+- `src/theme.ts` — cores e medidas do tema Pokédex.
 - `supabase/` — tabelas, regras de acesso, cron e a Edge Function de preços.
+- `scripts/make-icons.js` — gera o ícone, o ícone adaptativo do Android, o favicon e a imagem de abertura.
 - `src/data/pokedex.json` — os 1025 Pokémon (nomes em PT, EN e JP), gerado a partir da PokéAPI.
 
 ## Licença

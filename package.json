@@ -1,6 +1,6 @@
 {
   "name": "pokedex-binder",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "main": "expo-router/entry",
   "dependencies": {
     "@expo/ui": "~58.0.21",

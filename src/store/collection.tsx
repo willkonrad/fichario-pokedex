@@ -114,7 +114,7 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
   }, [ready, userId]);
 
   // Ao voltar para o app, e a cada 15 min com ele aberto, busca o que mudou na nuvem
-  // (ex.: preços gravados pela cotação automática às 6h, 13h e 20h).
+  // (ex.: preços do MYP Cards gravados pelo servidor).
   useEffect(() => {
     if (!ready || !userId) return;
     const sub = AppState.addEventListener('change', (state) => {

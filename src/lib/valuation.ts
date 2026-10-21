@@ -12,6 +12,11 @@ import type { Entry } from './types';
  */
 
 export type SourceId = 'manual' | 'mypOffer' | 'myp';
+
+/** O MYP (via Zukan) tem preço de cartas em português e inglês; japonês, não. */
+export function mypCovers(lang: string) {
+  return lang === 'pt' || lang === 'en';
+}
 export type Confidence = 'alta' | 'media' | 'baixa';
 
 export type SourceRow = {
@@ -60,7 +65,7 @@ export function priceSources(e: Entry): Omit<SourceRow, 'used'>[] {
       id: 'myp',
       label: SOURCE_LABEL.myp,
       brl: e.myp.price,
-      detail: e.lang === 'en' ? 'menor anúncio NM em inglês' : 'menor anúncio no idioma (qualquer estado)',
+      detail: e.myp.label?.replace(' no MYP Cards', '') ?? (e.lang === 'en' ? 'menor anúncio NM (inglês)' : 'menor anúncio (português)'),
     });
   }
   return rows;

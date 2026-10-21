@@ -1,16 +1,15 @@
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useMemo, type ComponentProps } from 'react';
+import { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { Button } from '@/components/ui';
+import { Button, onCover, type IconName } from '@/components/ui';
+import { TOTAL_SPECIES } from '@/data/pokedex';
 import { customTotalSlots, dexRange } from '@/lib/binder';
 import { collectionTotals, formatBRLTight } from '@/lib/quotes';
 import { BINDER_PURPOSES, POKEDEX_BINDER } from '@/lib/types';
 import { entriesOf, useCollection } from '@/store/collection';
-import { colors, radius } from '@/theme';
-
-type IconName = ComponentProps<typeof Ionicons>['name'];
+import { colors, MAX_WIDTH, radius, shadow } from '@/theme';
 
 /** Estante: todos os fichários do usuário, para abrir, editar ou criar um novo. */
 export default function BindersScreen() {
@@ -23,10 +22,10 @@ export default function BindersScreen() {
       {
         id: POKEDEX_BINDER,
         name: settings?.name || 'Fichário Pokédex',
-        color: settings?.color ?? colors.accent,
-        icon: 'grid-outline' as IconName,
-        kind: range && range.count < 1025 ? `Pokédex ${range.from}–${range.to}` : 'Pokédex completa',
-        filled: new Set(pokedex.map((e) => e.dex)).size,
+        color: settings?.color ?? colors.primary,
+        icon: null as IconName | null,
+        kind: range && range.count < TOTAL_SPECIES ? `Pokédex #${range.from}–#${range.to}` : 'Pokédex completa',
+        filled: new Set(pokedex.filter((e) => !range || (e.dex >= range.from && e.dex <= range.to)).map((e) => e.dex)).size,
         total: range?.count ?? 0,
         unit: 'Pokémon',
         totals: collectionTotals(pokedex),
@@ -40,9 +39,7 @@ export default function BindersScreen() {
           color: b.color,
           icon: purpose.icon as IconName,
           // Descrição; senão a finalidade; e o tamanho quando o nome já diz a finalidade.
-          kind:
-            b.description ||
-            (purpose.label !== b.name ? purpose.label : `${b.rows * b.cols} bolsos por página · ${b.pages} páginas`),
+          kind: b.description || (purpose.label !== b.name ? purpose.label : `${b.rows * b.cols} bolsos por página · ${b.pages} páginas`),
           filled: list.length,
           total: customTotalSlots(b),
           unit: 'bolsos',
@@ -61,14 +58,17 @@ export default function BindersScreen() {
     <ScrollView contentContainerStyle={styles.screen}>
       {rows.map((r) => {
         const active = r.id === activeBinderId;
+        const ink = onCover(r.color);
         return (
+          // Linha com dois botões lado a lado (abrir e personalizar): botão dentro de botão é inválido na web.
+          <View key={r.id} style={[styles.card, active && styles.cardActive]}>
           <Pressable
-            key={r.id}
             onPress={() => open(r.id)}
-            style={({ pressed }) => [styles.card, active && styles.cardActive, pressed && { opacity: 0.8 }]}
-            accessibilityLabel={`Abrir ${r.name}`}>
+            style={({ pressed }) => [styles.main, pressed && { opacity: 0.85 }]}
+            accessibilityRole="button"
+            accessibilityLabel={`Abrir ${r.name}${active ? ' (aberto)' : ''}`}>
             <View style={[styles.spine, { backgroundColor: r.color }]}>
-              <Ionicons name={r.icon} size={20} color="rgba(255,255,255,0.9)" />
+              {r.icon ? <Ionicons name={r.icon} size={22} color={ink} /> : <MaterialCommunityIcons name="pokeball" size={24} color={ink} />}
             </View>
             <View style={styles.body}>
               <View style={styles.titleRow}>
@@ -81,7 +81,9 @@ export default function BindersScreen() {
                   </View>
                 ) : null}
               </View>
-              <Text style={styles.kind}>{r.kind}</Text>
+              <Text style={styles.kind} numberOfLines={1}>
+                {r.kind}
+              </Text>
               <View style={styles.track}>
                 <View style={[styles.fill, { width: `${Math.min(100, (r.filled / Math.max(1, r.total)) * 100)}%`, backgroundColor: r.color }]} />
               </View>
@@ -92,20 +94,20 @@ export default function BindersScreen() {
                 {r.totals?.valued ? <Text style={styles.value}>{formatBRLTight(r.totals.value)}</Text> : null}
               </View>
             </View>
+          </Pressable>
             <Pressable
               hitSlop={10}
               style={styles.edit}
-              onPress={() =>
-                r.id === POKEDEX_BINDER ? router.push('/setup') : router.push({ pathname: '/binder-edit', params: { id: r.id } })
-              }
+              onPress={() => (r.id === POKEDEX_BINDER ? router.push('/setup') : router.push({ pathname: '/binder-edit', params: { id: r.id } }))}
+              accessibilityRole="button"
               accessibilityLabel={`Personalizar ${r.name}`}>
               <Ionicons name="settings-outline" size={20} color={colors.textMuted} />
             </Pressable>
-          </Pressable>
+          </View>
         );
       })}
 
-      <Button title="Novo fichário" onPress={() => router.push('/binder-edit')} />
+      <Button title="Novo fichário" icon="add" onPress={() => router.push('/binder-edit')} />
       <Text style={styles.hint}>
         Fichários livres servem para o que você quiser: coleções completas, favoritas, trocas, deck ou graduadas. Você escolhe a carta de cada
         bolso, a capa, o tamanho e o número de páginas.
@@ -115,29 +117,31 @@ export default function BindersScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { padding: 20, gap: 12, maxWidth: 640, width: '100%', alignSelf: 'center' },
+  screen: { padding: 16, gap: 12, maxWidth: MAX_WIDTH, width: '100%', alignSelf: 'center' },
   card: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
+    borderRadius: radius.lg,
+    borderWidth: 2,
+    borderColor: 'transparent',
     overflow: 'hidden',
+    ...shadow,
   },
-  cardActive: { borderColor: colors.accent },
-  spine: { width: 52, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center' },
-  body: { flex: 1, padding: 14, gap: 4 },
+  cardActive: { borderColor: colors.primary },
+  main: { flex: 1, flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch' },
+  spine: { width: 56, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center' },
+  body: { flex: 1, padding: 14, gap: 3 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  name: { color: colors.text, fontSize: 16, fontWeight: '800', flexShrink: 1 },
-  activeTag: { backgroundColor: colors.accentSoft, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
-  activeText: { color: colors.accent, fontSize: 11, fontWeight: '700' },
+  name: { color: colors.text, fontSize: 17, fontWeight: '900', flexShrink: 1 },
+  activeTag: { backgroundColor: colors.primarySoft, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2 },
+  activeText: { color: colors.primary, fontSize: 11, fontWeight: '800' },
   kind: { color: colors.textMuted, fontSize: 12 },
-  track: { height: 4, backgroundColor: colors.surfaceAlt, borderRadius: 2, overflow: 'hidden', marginTop: 6 },
-  fill: { height: 4, borderRadius: 2 },
+  track: { height: 6, backgroundColor: colors.surfaceAlt, borderRadius: 3, overflow: 'hidden', marginTop: 6 },
+  fill: { height: 6, borderRadius: 3 },
   statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
-  stat: { color: colors.textMuted, fontSize: 12 },
-  value: { color: colors.gold, fontSize: 12, fontWeight: '700' },
-  edit: { padding: 14 },
-  hint: { color: colors.textFaint, fontSize: 12, lineHeight: 17, textAlign: 'center' },
+  stat: { color: colors.textMuted, fontSize: 12, fontWeight: '600' },
+  value: { color: colors.money, fontSize: 13, fontWeight: '800' },
+  edit: { padding: 14, alignSelf: 'stretch', justifyContent: 'center' },
+  hint: { color: colors.textMuted, fontSize: 12, lineHeight: 17, textAlign: 'center' },
 });

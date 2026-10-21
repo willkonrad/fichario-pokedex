@@ -48,7 +48,9 @@ Deno.serve(async (req) => {
     groups.set(k, [...(groups.get(k) ?? []), row]);
   }
   const age = (g: Row[]) => Math.min(...g.map((r) => (r.data.myp?.checkedAt ? new Date(r.data.myp.checkedAt).getTime() : 0)));
-  const due = [...groups.values()].filter((g) => Date.now() - age(g) > REFRESH_DAYS * DAY).sort((a, b) => age(a) - age(b));
+  // Carta sem preço volta a ser consultada todo dia (pode ter ganhado anúncio); com preço, uma vez por semana.
+  const refreshDays = (g: Row[]) => (g.some((r) => r.data.myp?.price != null) ? REFRESH_DAYS : 1);
+  const due = [...groups.values()].filter((g) => Date.now() - age(g) > refreshDays(g) * DAY).sort((a, b) => age(a) - age(b));
   if (!due.length) return json({ next: 'nada para atualizar', groups: groups.size });
 
   const report = { read: 0, priced: 0, failed: 0, entriesUpdated: 0 };
@@ -77,14 +79,11 @@ type ZukanCard = { price?: number | null; priceHistory30d?: { recordedAt: string
  * PT: campo `price` (BRL). EN: o registro mais recente "brl_nm_en" (NM em inglês).
  */
 async function zukanPrice(cardId: string, lang: string): Promise<MypInfo> {
-  const res = await fetch(ZUKAN_MCP, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'User-Agent': USER_AGENT },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'get_card', arguments: { id: cardId, lang: 'pt' } } }),
-  });
-  if (!res.ok) throw new Error(`Zukan ${res.status}`);
-  const body = await res.json();
-  const card: ZukanCard | undefined = body?.result?.structuredContent ?? safeJson(body?.result?.content?.[0]?.text);
+  let card: ZukanCard | undefined;
+  for (const id of zukanIds(cardId)) {
+    card = await zukanCard(id);
+    if (card) break;
+  }
   const checkedAt = new Date().toISOString();
   if (!card) return { checkedAt };
   const history = (card.priceHistory30d ?? [])
@@ -93,15 +92,45 @@ async function zukanPrice(cardId: string, lang: string): Promise<MypInfo> {
     .sort((a, b) => a.t.localeCompare(b.t));
   const pt = card.price ?? undefined;
   const en = [...history].reverse().find((h) => h.k === 'en')?.p;
-  const mine = lang === 'pt' ? pt : en;
+  // Coleções antigas só em inglês não têm o registro "NM em inglês": vale o menor anúncio geral (`price`).
+  const mine = lang === 'pt' ? pt : (en ?? pt);
   return {
     price: mine,
-    label: mine == null ? undefined : lang === 'pt' ? 'menor anúncio no MYP Cards (português)' : 'menor anúncio NM no MYP Cards (inglês)',
+    label:
+      mine == null
+        ? undefined
+        : lang === 'pt'
+          ? 'menor anúncio no MYP Cards (português)'
+          : en != null
+            ? 'menor anúncio NM no MYP Cards (inglês)'
+            : 'menor anúncio no MYP Cards',
     pt,
     en,
     history: history.length ? history : undefined,
     checkedAt,
   };
+}
+
+/**
+ * Ids da carta no Zukan. A TCGdex separa as Galerias de Treinador/Galar em coleções próprias ("swsh11tg-TG06",
+ * "swsh12.5gg-GG01"); o Zukan as deixa na coleção principal ("swsh11-TG06", "swsh12.5-GG01").
+ */
+function zukanIds(cardId: string) {
+  const m = cardId.match(/^(.+?)(tg|gg)-(.+)$/i);
+  return m ? [cardId, `${m[1]}-${m[3]}`] : [cardId];
+}
+
+/** Carta no Zukan (undefined = não encontrada). Erro de rede ou do servidor propaga (a carta fica na fila). */
+async function zukanCard(id: string): Promise<ZukanCard | undefined> {
+  const res = await fetch(ZUKAN_MCP, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'User-Agent': USER_AGENT },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'get_card', arguments: { id, lang: 'pt' } } }),
+  });
+  if (!res.ok) throw new Error(`Zukan ${res.status}`);
+  const body = await res.json();
+  if (body?.result?.isError) return undefined;
+  return body?.result?.structuredContent ?? safeJson(body?.result?.content?.[0]?.text);
 }
 
 function safeJson(s?: string) {

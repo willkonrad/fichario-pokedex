@@ -37,8 +37,12 @@ function cardsNamed(name: string) {
 // ---------- Scrydex (CDN de imagens da pokemontcg.io, acessível direto pelo id) ----------
 
 const SCRYDEX = 'https://images.scrydex.com/pokemon';
-/** A Scrydex responde 200 com o verso da carta para ids que não existem; esse verso tem sempre esta ETag. */
+/**
+ * A Scrydex responde 200 com o verso da carta para ids que não existem; esse verso tem sempre esta ETag e
+ * este tamanho em bytes. No navegador os dois cabeçalhos ficam escondidos (CORS): aí mede a imagem baixada.
+ */
 const SCRYDEX_PLACEHOLDER_ETAG = 'cfl2loWl84E8tUjrC-Q-I0D0Jh';
+const SCRYDEX_PLACEHOLDER_BYTES = '45551';
 /** Coleções com id diferente entre TCGdex e pokemontcg.io que não seguem a regra geral. */
 const SET_ALIASES: Record<string, string[]> = {
   '30th-c': ['me55c'],
@@ -62,8 +66,13 @@ function ptcgSetIds(tcgdexSetId: string) {
 async function scrydexExists(url: string) {
   const res = await fetch(url, { method: 'HEAD' });
   if (res.status >= 500) throw new Error(`Scrydex ${res.status}`);
+  if (!res.ok) return false;
   const etag = res.headers.get('etag') ?? '';
-  return res.ok && !etag.includes(SCRYDEX_PLACEHOLDER_ETAG);
+  const bytes = res.headers.get('content-length') ?? '';
+  if (etag || bytes) return !etag.includes(SCRYDEX_PLACEHOLDER_ETAG) && bytes !== SCRYDEX_PLACEHOLDER_BYTES;
+  // Cabeçalhos escondidos (navegador): baixa a imagem uma vez e mede (o resultado vai para o cache).
+  const body = await fetch(url).then((r) => r.arrayBuffer());
+  return String(body.byteLength) !== SCRYDEX_PLACEHOLDER_BYTES;
 }
 
 /** Dados públicos da pokemontcg.io no GitHub: arquivo estático por coleção, com nome e imagens de cada carta. */
@@ -107,7 +116,7 @@ async function englishName(cardId: string) {
  * Não usa a API da pokemontcg.io, que cai com frequência (502).
  */
 export function scrydexImage(cardId: string, localId?: string, nameEn?: string) {
-  return cached(`scrydex:v2:${cardId}`, async () => {
+  return cached(`scrydex:v4:${cardId}`, async () => {
     const cut = cardId.lastIndexOf('-');
     if (cut <= 0) return null;
     const setId = cardId.slice(0, cut).toLowerCase();
@@ -159,26 +168,4 @@ export async function ptcgImage(cardNameEn: string, setNameEn: string, localId?:
     if (!best || score > best.score) best = { card: c, score };
   }
   return best?.card.images;
-}
-
-/**
- * Coleções em que a LigaPokemon numera as cartas como a pokemontcg.io (e não como a TCGdex),
- * com o total que a Liga mostra. Ex.: Charizard da Coleção Clássica de 30 Anos é 30th-c-001 na
- * TCGdex, mas "Charizard (004/30)" na Liga (ed=30C-C&num=004), igual a me55c-4.
- */
-const LIGA_USES_PTCG_NUMBER: Record<string, string> = { '30th-c': '30' };
-
-/** Número e total da carta como a Liga mostra, quando diferem da TCGdex (senão, null). */
-export async function ligaNumbering(cardId: string, nameEn?: string): Promise<{ number: string; total: string } | null> {
-  const cut = cardId.lastIndexOf('-');
-  const setId = cardId.slice(0, cut).toLowerCase();
-  const total = LIGA_USES_PTCG_NUMBER[setId];
-  if (!total) return null;
-  const name = nameEn ?? (await englishName(cardId));
-  if (!name) return null;
-  for (const set of SET_ALIASES[setId] ?? []) {
-    const hit = (await setCards(set))?.find((c) => sameName(c.name, name));
-    if (hit) return { number: hit.number, total };
-  }
-  return null;
 }

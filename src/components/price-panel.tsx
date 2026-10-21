@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
@@ -5,11 +6,11 @@ import Svg, { Line, Polyline, Text as SvgText } from 'react-native-svg';
 
 import { formatBRL, formatWhen } from '@/lib/quotes';
 import type { Condition, Entry } from '@/lib/types';
-import { CONFIDENCE_LABEL, valuation, type Confidence, type SourceId } from '@/lib/valuation';
-import { colors, radius } from '@/theme';
+import { CONFIDENCE_LABEL, mypCovers, valuation, type Confidence, type SourceId } from '@/lib/valuation';
+import { colors, confidenceColors, radius, shadow } from '@/theme';
 
-const LINE = { pt: '#5FD69C', en: '#6BB8FF' };
-const CONFIDENCE_COLOR: Record<Confidence, string> = { alta: '#5FD69C', media: '#F2CF6B', baixa: '#A8A8B0' };
+const LINE = { pt: colors.success, en: colors.blue };
+const CONFIDENCE_COLOR: Record<Confidence, string> = confidenceColors.light;
 const MYP_URL = 'https://mypcards.com';
 
 /** Cartão de preço da carta: valor no MYP Cards (ou "Meu valor"), de onde ele vem e o histórico de 30 dias. */
@@ -67,12 +68,16 @@ export function PricePanel({
           </>
         ) : (
           <Text style={styles.muted}>
-            {myp?.checkedAt ? 'Sem anúncio desta carta no MYP Cards agora. Você pode preencher "Meu valor".' : 'Buscando o preço no MYP Cards…'}
+            {!mypCovers(entry.lang)
+              ? 'O MYP Cards não informa preço de cartas japonesas. Preencha "Meu valor" com o valor que você conferiu.'
+              : myp?.checkedAt
+                ? 'Sem anúncio desta carta no MYP Cards agora. Você pode preencher "Meu valor".'
+                : 'Buscando o preço no MYP Cards… chega em alguns minutos.'}
           </Text>
         )}
 
-        {/* Cada valor disponível; o que vale para a carta fica destacado. */}
-        {ref?.sources.length ? (
+        {/* Com mais de um valor (ex.: "Meu valor" e o MYP), lista cada um; o que vale fica destacado. */}
+        {ref && ref.sources.length > 1 ? (
           <View style={styles.table}>
             {ref.sources.map((r) => {
               const url = urlOf(r.id);
@@ -96,6 +101,15 @@ export function PricePanel({
             })}
           </View>
         ) : null}
+
+        <Pressable
+          onPress={() => WebBrowser.openBrowserAsync((ref?.basis === 'mypOffer' && entry.mypOffers?.url) || MYP_URL)}
+          style={({ pressed }) => [styles.mypButton, pressed && { opacity: 0.8 }]}
+          accessibilityRole="link">
+          <Ionicons name="storefront-outline" size={16} color={colors.blue} />
+          <Text style={styles.mypButtonText}>Ver anúncios no MYP Cards</Text>
+          <Ionicons name="open-outline" size={14} color={colors.blue} />
+        </Pressable>
 
         <Text style={styles.source}>
           Preços do{' '}
@@ -201,9 +215,9 @@ function Legend({ color, label }: { color: string; label: string }) {
 }
 
 const styles = StyleSheet.create({
-  card: { backgroundColor: colors.surface, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, padding: 14, gap: 8 },
-  label: { color: colors.textFaint, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, textTransform: 'uppercase' },
-  main: { color: colors.success, fontSize: 30, fontWeight: '800' },
+  card: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: 16, gap: 8, ...shadow },
+  label: { color: colors.textMuted, fontSize: 12, fontWeight: '800', letterSpacing: 1.2, textTransform: 'uppercase' },
+  main: { color: colors.success, fontSize: 34, fontWeight: '900' },
   mainSource: { color: colors.textMuted, fontSize: 12, marginTop: -4 },
   muted: { color: colors.textMuted, fontSize: 13, lineHeight: 18 },
   confRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: -2 },
@@ -219,38 +233,27 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   srcName: { color: colors.text, fontSize: 14, fontWeight: '700' },
-  srcLink: { color: colors.accent, fontSize: 13 },
+  srcLink: { color: colors.blue, fontSize: 13 },
   srcDetail: { color: colors.textFaint, fontSize: 11, marginTop: 1 },
   srcValue: { color: colors.text, fontSize: 15, fontWeight: '800' },
-  srcOut: { color: colors.textFaint, textDecorationLine: 'line-through' },
   srcRef: { color: colors.textMuted, fontWeight: '600' },
-  warn: { color: '#F2CF6B', fontSize: 12, lineHeight: 17 },
-  conds: { flexDirection: 'row', gap: 4, marginTop: 4 },
-  cond: { flexGrow: 1, flexBasis: 0, minWidth: 0, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, paddingVertical: 5, alignItems: 'center' },
-  condActive: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
-  condId: { color: colors.textMuted, fontSize: 11, fontWeight: '800' },
-  condValue: { color: colors.text, fontSize: 12, fontWeight: '700', marginTop: 1 },
+  mypButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    minHeight: 42,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(47, 91, 211, 0.08)',
+    marginTop: 4,
+  },
+  mypButtonText: { color: colors.blue, fontSize: 14, fontWeight: '800' },
   source: { color: colors.textFaint, fontSize: 11, lineHeight: 15 },
-  sourceLink: { color: colors.accent, textDecorationLine: 'underline' },
+  sourceLink: { color: colors.blue, fontWeight: '700', textDecorationLine: 'underline' },
   chartHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   chartTitle: { color: colors.text, fontSize: 15, fontWeight: '800' },
   legend: { flexDirection: 'row', gap: 10 },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   legendDot: { width: 8, height: 8, borderRadius: 4 },
   legendText: { color: colors.textMuted, fontSize: 12 },
-  saleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
-  saleBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
-  saleWhen: { color: colors.textMuted, fontSize: 13, width: 92 },
-  saleTags: { flex: 1, flexDirection: 'row', gap: 4 },
-  tag: {
-    color: colors.textMuted,
-    fontSize: 11,
-    fontWeight: '700',
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: 4,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    overflow: 'hidden',
-  },
-  salePrice: { color: colors.text, fontSize: 14, fontWeight: '800' },
 });

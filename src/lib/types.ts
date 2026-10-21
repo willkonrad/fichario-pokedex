@@ -3,7 +3,7 @@ export type CardLang = 'pt' | 'en' | 'ja';
 export const LANG_LABEL: Record<CardLang, string> = { pt: 'Português', en: 'Inglês', ja: 'Japonês' };
 export const LANG_SHORT: Record<CardLang, string> = { pt: 'PT', en: 'EN', ja: 'JP' };
 
-/** Estados de conservação no padrão usado pela LigaPokemon. */
+/** Estados de conservação no padrão do mercado brasileiro (M, NM, SP, MP, HP, D). */
 export const CONDITIONS = [
   { id: 'M', label: 'M', desc: 'Mint — perfeita, nunca jogada' },
   { id: 'NM', label: 'NM', desc: 'Near Mint — quase perfeita' },
@@ -28,39 +28,6 @@ export const VARIANTS = [
 ] as const;
 export type Variant = (typeof VARIANTS)[number]['id'];
 
-export type Price = {
-  min?: number;
-  avg?: number;
-  max?: number;
-  /** Preço médio da última venda concluída. */
-  last?: number;
-  currency: 'BRL';
-  /** 'site' = lido da página; 'manual' = digitado. */
-  source: 'site' | 'manual';
-  updatedAt: string;
-};
-
-/**
- * Valor de vendas reais finalizadas no Brasil, em reais, do "Quanto vale minha carta?"
- * (quantovaleminhacarta.com.br): mediana por estado, no idioma da carta.
- */
-export type SoldInfo = {
-  /** Página da carta no site (fonte citada no app). */
-  url?: string;
-  byCondition?: Partial<Record<Condition, { value?: number; count: number }>>;
-  /** Variante a que os valores se referem (ex.: "Normal") e as variantes com vendas. */
-  variant?: string;
-  variants?: { name: string; count: number }[];
-  lastSale?: { price: number; daysAgo: number };
-  /** Vendas recentes (mais recente primeiro): há quantos dias, estado, idioma ("PT-BR"…) e preço. */
-  sales?: { daysAgo: number; condition?: string; lang?: string; price: number }[];
-  summary?: string;
-  /** Poucas vendas (1 ou 2): referência inicial, não valor firme. */
-  lowConfidence?: boolean;
-  notFound?: string;
-  checkedAt: string;
-};
-
 /** Menor anúncio no MYP Cards no idioma da carta, via servidor MCP público do Zukan (zukan.com.br). */
 export type MypInfo = {
   /** Menor anúncio no idioma da carta. */
@@ -82,16 +49,6 @@ export type MypOffers = {
   lang: string;
   url?: string;
   notFound?: string;
-  checkedAt: string;
-};
-
-/** Preços internacionais da variante da carta, com o câmbio do dia (gravado pelo servidor, qvmc-sync). */
-export type IntlInfo = {
-  tcgplayer?: { market?: number; low?: number; mid?: number; finish?: string; productId?: number };
-  cardmarket?: { trend?: number; avg?: number; low?: number; avg30?: number; idProduct?: number };
-  cardtrader?: { min?: number; currency?: string; count: number; blueprintId: number; condition?: string; language?: string };
-  /** Reais por 1 US$ e por 1 €. */
-  fx?: { usd: number; eur: number; date: string };
   checkedAt: string;
 };
 
@@ -121,32 +78,13 @@ export type Entry = {
   variantNote?: string;
   condition: Condition;
   notes?: string;
-  /** Cotação LigaPokemon (da variação da carta). */
-  price?: Price;
-  /** Faixa de preço da Liga por acabamento, ex.: { Normal: {...}, Foil: {...} }. */
-  ligaFinishes?: Record<string, { min?: number; avg?: number; max?: number }>;
-  ligaUrl?: string;
-  /** Busca de edição exata na Liga, usada pela cotação automática (cron). */
-  ligaQuery?: string;
-  /** A Liga não encontrou esta carta na última cotação (o app mostra "sem cotação"). */
-  ligaNotFound?: string;
-  /** Por que o resultado da Liga foi recusado (ex.: edição diferente) — o app não usa preço de outra carta. */
-  ligaMismatch?: string;
-  /** Última vez que a cotação automática consultou a Liga para esta carta (com ou sem resultado). */
-  ligaCheckedAt?: string;
-  /** Vendas reais por idioma e estado, do "Quanto vale minha carta?" (gravado pelo servidor, qvmc-sync). */
-  sold?: SoldInfo;
   /** Menor anúncio no MYP Cards no idioma da carta (via Zukan; gravado pelo servidor). */
   myp?: MypInfo;
   /** Menor oferta no MYP no estado e idioma da carta (gravado pelo servidor, semanal). */
   mypOffers?: MypOffers;
-  /** Preços internacionais (TCGplayer, Cardmarket, CardTrader) e câmbio; gravado pelo servidor. */
-  intl?: IntlInfo;
-  /** Valor digitado pelo usuário (ex.: menor anúncio no estado conferido na Liga); tem prioridade sobre as fontes. */
+  /** Valor digitado pelo usuário (ex.: menor anúncio conferido no MYP); tem prioridade sobre o preço do MYP. */
   myValue?: { value: number; setAt: string };
-  /** Id da carta na pokemontcg.io (usado pelo site de vendas reais). */
-  ptcgId?: string;
-  /** Imagem da carta na Liga (reserva quando as outras bases não têm foto). */
+  /** Imagem reserva salva por versões antigas do app (de quando os preços vinham da Liga). */
   ligaImage?: string;
   updatedAt: string;
 };
@@ -195,9 +133,6 @@ export const BINDER_PURPOSES = [
 ] as const;
 export type BinderPurpose = (typeof BINDER_PURPOSES)[number]['id'];
 
-/** Cores de capa disponíveis. */
-export const BINDER_COLORS = ['#F5A524', '#E5484D', '#F76B15', '#46A758', '#12A594', '#0090FF', '#6E56CF', '#D6409F', '#8D8D8D', '#1C1C1F'];
-
 /** Fichário livre: o usuário escolhe quais cartas colocar em cada bolso. */
 export type CustomBinder = {
   id: string;
@@ -221,7 +156,7 @@ export type CustomBinder = {
 
 export const DEFAULT_CUSTOM_BINDER: Omit<CustomBinder, 'id' | 'createdAt'> = {
   name: '',
-  color: BINDER_COLORS[5],
+  color: '#2F5BD3', // azul (ver COVER_COLORS em components/ui.tsx)
   purpose: 'collection',
   rows: 3,
   cols: 3,

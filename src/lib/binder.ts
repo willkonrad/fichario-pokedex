@@ -60,6 +60,26 @@ export function slotsOnPage(s: BinderSettings, page: number): SlotRef[] {
   return out;
 }
 
+/**
+ * Bolsos livres do fichário Pokédex: os que sobram na última página depois do último Pokémon
+ * (ex.: 151 Pokémon em páginas de 20 → 9 bolsos livres), para cartas especiais.
+ * A carta de um bolso livre é guardada com `dex: 0` e `slot` = número do bolso livre (0, 1, 2…).
+ */
+export function extraSlots(s: BinderSettings) {
+  const size = pageSize(s);
+  return (size - (totalSlots(s) % size)) % size;
+}
+
+/** Bolsos livres que aparecem na página (só na última). */
+export function extraOnPage(s: BinderSettings, page: number) {
+  return page === totalPages(s) - 1 ? Array.from({ length: extraSlots(s) }, (_, k) => k) : [];
+}
+
+/** Posição (índice corrido) de um bolso livre, logo depois do último Pokémon. */
+export function indexOfExtra(s: BinderSettings, k: number) {
+  return totalSlots(s) + k;
+}
+
 /** Posição física: folha, frente/verso e bolso — útil para achar a carta no fichário. */
 export function physicalPosition(s: Grid, index: number) {
   const size = pageSize(s);

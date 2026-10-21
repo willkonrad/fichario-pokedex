@@ -4,24 +4,18 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { formatDex, getSpecies, spriteUrl } from '@/data/pokedex';
 import { CardImage } from '@/components/card-image';
-import { CONFIDENCE_LABEL, valuation } from '@/lib/valuation';
+import { CONFIDENCE_LABEL, mypCovers, valuation } from '@/lib/valuation';
 import type { Entry } from '@/lib/types';
-import { CARD_RATIO, colors, mono, radius } from '@/theme';
+import { binderColors as B, CARD_RATIO, colors, confidenceColors, mono, radius } from '@/theme';
 
 const SPECIAL = new Set(['holo', 'reverse', 'firstEdition', 'pokeball', 'masterball', 'wPromo', 'shadowless', 'staff']);
 
-// Valor de referência: a cor diz a confiança (verde alta, âmbar média, cinza baixa).
-const TONE = {
-  alta: { bg: 'rgba(76, 195, 138, 0.18)', fg: '#5FD69C' },
-  media: { bg: 'rgba(232, 194, 90, 0.18)', fg: '#F2CF6B' },
-  baixa: { bg: 'rgba(138, 138, 147, 0.16)', fg: '#A8A8B0' },
-};
-
-/** Altura reservada para os preços embaixo de cada espaço (vazio ou não), para as linhas ficarem alinhadas. */
-export function priceBlockHeight(width: number) {
+/** Altura reservada para o preço embaixo de cada bolso (vazio ou não), para as linhas ficarem alinhadas. */
+function priceBlockHeight(width: number) {
   return width < 80 ? 18 : 22;
 }
 
+/** Um bolso da página do fichário (página escura): a carta, ou o Pokémon/número do bolso quando vazio. */
 export function BinderSlot({
   dex,
   pocket,
@@ -29,6 +23,7 @@ export function BinderSlot({
   entry,
   highlighted,
   showPrices = true,
+  free = false,
   onPress,
 }: {
   /** Fichário Pokédex: Pokémon deste espaço (mostra o sprite quando vazio). */
@@ -38,14 +33,17 @@ export function BinderSlot({
   width: number;
   entry?: Entry;
   highlighted?: boolean;
-  /** Reserva o espaço e mostra a cápsula de preços embaixo da carta. */
+  /** Reserva o espaço e mostra o preço embaixo da carta. */
   showPrices?: boolean;
+  /** Bolso livre do fichário Pokédex (sobra da última página, para cartas especiais). */
+  free?: boolean;
   onPress: () => void;
 }) {
   const species = dex ? getSpecies(dex) : undefined;
   const height = Math.floor(width / CARD_RATIO);
   const small = width < 80;
   const tiny = width < 66;
+  const special = entry && SPECIAL.has(entry.variant);
 
   return (
     <View style={{ width }}>
@@ -56,13 +54,9 @@ export function BinderSlot({
           accessibilityLabel={`${entry.cardName}, ${entry.setName}${pocket != null ? `, bolso ${pocket}` : ''}`}
           style={({ pressed }) => [
             styles.slot,
-            {
-              width,
-              height,
-              borderColor: SPECIAL.has(entry.variant) ? colors.gold : colors.border,
-              borderWidth: SPECIAL.has(entry.variant) ? 2 : 1,
-            },
-            pressed && { opacity: 0.75 },
+            { width, height },
+            special && styles.special,
+            pressed && styles.pressed,
             highlighted && styles.highlight,
           ]}>
           <CardImage
@@ -73,22 +67,18 @@ export function BinderSlot({
             label={entry.cardName}
             dex={entry.dex || undefined}
             compact
+            dark
           />
         </Pressable>
       ) : !dex ? (
         <Pressable
           onPress={onPress}
           accessibilityRole="button"
-          accessibilityLabel={pocket != null ? `Bolso ${pocket} vazio, escolher carta` : 'Bolso vazio, escolher carta'}
-          style={({ pressed }) => [
-            styles.slot,
-            styles.pocket,
-            { width, height },
-            pressed && { opacity: 0.6 },
-            highlighted && styles.highlight,
-          ]}>
+          accessibilityLabel={free ? 'Bolso livre para carta especial, escolher carta' : pocket != null ? `Bolso ${pocket} vazio, escolher carta` : 'Bolso vazio, escolher carta'}
+          style={({ pressed }) => [styles.slot, styles.pocket, free && styles.free, { width, height }, pressed && styles.pressed, highlighted && styles.highlight]}>
           {pocket != null ? <Text style={[styles.dex, styles.pocketNumber, small && { fontSize: 9 }]}>{pocket}</Text> : null}
-          <Ionicons name="add" size={small ? 18 : 24} color={colors.textFaint} />
+          <Ionicons name={free ? 'star-outline' : 'add'} size={small ? 18 : 24} color={free ? colors.yellow : B.textFaint} />
+          {free && !tiny ? <Text style={[styles.freeText, small && { fontSize: 9 }]}>bolso livre</Text> : null}
         </Pressable>
       ) : (
         <Pressable
@@ -99,13 +89,13 @@ export function BinderSlot({
             styles.slot,
             styles.empty,
             { width, height, paddingVertical: small ? 4 : 8 },
-            pressed && { opacity: 0.6 },
+            pressed && styles.pressed,
             highlighted && styles.highlight,
           ]}>
           <Text style={[styles.dex, small && { fontSize: 9 }]}>{formatDex(dex)}</Text>
           <Image
             source={spriteUrl(dex)}
-            style={{ width: width * (small ? 0.5 : 0.6), height: width * (small ? 0.5 : 0.6), opacity: 0.35 }}
+            style={{ width: width * (small ? 0.55 : 0.65), height: width * (small ? 0.55 : 0.65), opacity: 0.4 }}
             contentFit="contain"
           />
           <View style={styles.names}>
@@ -121,80 +111,65 @@ export function BinderSlot({
         </Pressable>
       )}
       {showPrices ? (
-        <View style={{ height: priceBlockHeight(width), paddingTop: 3 }}>{entry ? <SlotPrices entry={entry} small={small} /> : null}</View>
+        <View style={{ height: priceBlockHeight(width), paddingTop: 3 }}>{entry ? <SlotPrice entry={entry} small={small} /> : null}</View>
       ) : null}
     </View>
   );
 }
 
-/** Valor da carta (MYP Cards) numa cápsula; a cor diz a confiança. Sem valor: "na fila" ou "sem preço". */
-function SlotPrices({ entry, small }: { entry: Entry; small: boolean }) {
-  const size = small ? 7.5 : 10;
+/** Valor da carta numa cápsula; a cor diz a confiança. Sem valor: "buscando" ou "sem preço". */
+function SlotPrice({ entry, small }: { entry: Entry; small: boolean }) {
+  const size = small ? 8 : 10;
   const ref = valuation(entry);
+  const h = small ? 15 : 18;
   if (ref.value == null || !ref.confidence) {
+    // Buscando = o servidor ainda não consultou o MYP para esta carta (e ele cobre o idioma dela).
+    const pending = mypCovers(entry.lang) && !entry.myp?.checkedAt;
     return (
-      <View style={[styles.pill, styles.pillPending, { height: small ? 14 : 18 }]}>
+      <View style={[styles.pill, styles.pillPending, { height: h }]}>
         <Text style={[styles.pendingText, { fontSize: size }]} numberOfLines={1}>
-          {entry.myp?.checkedAt ? 'sem preço' : 'na fila'}
+          {pending ? 'buscando…' : 'sem preço'}
         </Text>
       </View>
     );
   }
-  const tone = TONE[ref.confidence];
+  const tone = confidenceColors.dark[ref.confidence];
   return (
     <View
-      style={[styles.pill, styles.single, { height: small ? 14 : 18, backgroundColor: tone.bg }]}
-      accessibilityLabel={`Valor ${ref.value.toFixed(2)} reais no MYP Cards, ${CONFIDENCE_LABEL[ref.confidence]}`}>
-      <View style={[styles.dot, { backgroundColor: tone.fg }]} />
-      <Text style={[styles.segmentText, styles.segmentAvg, { fontSize: size, color: tone.fg }]} numberOfLines={1}>
-        <Text style={{ fontSize: size - 2, fontWeight: '600' }}>R$</Text>
+      style={[styles.pill, { height: h, backgroundColor: tone.bg }]}
+      accessibilityLabel={`Valor ${ref.value.toFixed(2)} reais, ${CONFIDENCE_LABEL[ref.confidence]}`}>
+      <Text style={[styles.priceText, { fontSize: size, color: tone.fg }]} numberOfLines={1}>
+        <Text style={{ fontSize: size - 2, fontWeight: '700' }}>R$ </Text>
         {formatCompact(ref.value)}
       </Text>
     </View>
   );
 }
 
-/** Valor curto para caber na cápsula: "0,8", "83", "1,2k". */
-function formatCompact(n?: number) {
-  if (n == null) return '—';
-  if (n < 10) return n.toFixed(1).replace('.', ',');
+/** Valor curto para caber na cápsula: "0,80", "83", "1,2 mil". */
+function formatCompact(n: number) {
+  if (n < 10) return n.toFixed(2).replace('.', ',');
   if (n < 1000) return String(Math.round(n));
-  return `${(n / 1000).toFixed(1).replace('.', ',')}k`;
+  return `${(n / 1000).toFixed(1).replace('.', ',')} mil`;
 }
 
 const styles = StyleSheet.create({
-  slot: { borderRadius: radius.sm, overflow: 'hidden', backgroundColor: colors.surface },
-  empty: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 3,
-  },
-  highlight: { borderColor: colors.accent, borderWidth: 2 },
-  pocket: {
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  slot: { borderRadius: radius.sm, overflow: 'hidden', backgroundColor: B.pocket, borderWidth: 1, borderColor: B.pocketBorder },
+  special: { borderColor: colors.yellow, borderWidth: 2 },
+  pressed: { opacity: 0.75, transform: [{ scale: 0.97 }] },
+  empty: { alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 3 },
+  // Destaque de busca/"Vazio": ciano de seleção do Nintendo Switch (diferente do amarelo das cartas especiais).
+  highlight: { borderColor: '#2EE6F2', borderWidth: 3 },
+  pocket: { borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center' },
   pocketNumber: { position: 'absolute', top: 6, right: 4 },
-  dex: { alignSelf: 'flex-end', color: colors.textFaint, fontFamily: mono, fontSize: 12, paddingRight: 3 },
+  free: { borderColor: 'rgba(255, 203, 5, 0.45)', gap: 4 },
+  freeText: { color: B.textMuted, fontSize: 11, fontWeight: '700' },
+  dex: { alignSelf: 'flex-end', color: B.textFaint, fontFamily: mono, fontSize: 12, paddingRight: 3 },
   names: { alignItems: 'center', width: '100%' },
-  name: { color: colors.textMuted, fontWeight: '600', fontSize: 13 },
-  sub: { color: colors.textFaint, fontSize: 10, marginTop: 1 },
-  pill: {
-    flexDirection: 'row',
-    borderRadius: 999,
-    overflow: 'hidden',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.border,
-  },
-  pillPending: { backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
-  pendingText: { color: colors.textFaint, fontStyle: 'italic' },
-  single: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6, gap: 4 },
-  dot: { width: 5, height: 5, borderRadius: 3 },
-  segmentText: { fontWeight: '600', includeFontPadding: false },
-  segmentAvg: { fontWeight: '800' },
+  name: { color: B.textMuted, fontWeight: '700', fontSize: 13 },
+  sub: { color: B.textFaint, fontSize: 10, marginTop: 1 },
+  pill: { borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
+  pillPending: { backgroundColor: 'rgba(255,255,255,0.05)' },
+  pendingText: { color: B.textFaint, fontStyle: 'italic' },
+  priceText: { fontWeight: '800', includeFontPadding: false },
 });
