@@ -13,6 +13,7 @@ import { BOTTOM_BAR_SPACE, BottomBar, Button, Card, Chip, EmptyState, GroupLabel
 import { formatDex, getSpecies, speciesInCardName } from '@/data/pokedex';
 import { customTotalSlots, indexOfDex, indexOfExtra, physicalPosition } from '@/lib/binder';
 import { ligaQuery, ligaSearchUrl } from '@/lib/liga';
+import { mypApiDue, prioritizeMypPrice } from '@/lib/myp-api';
 import { formatBRL, formatWhen } from '@/lib/quotes';
 import { cardDetail, type CardDetail } from '@/lib/tcgdex';
 import { CONDITIONS, LANG_LABEL, ORIGINS, VARIANTS, type CardLang, type Condition, type Entry, type Origin, type Variant } from '@/lib/types';
@@ -69,6 +70,10 @@ function CardForm({ params }: { params: Params }) {
   const autoSave = !!existing && !isNewCard;
   // Dados salvos da MESMA carta (reserva enquanto a ficha carrega). Ao trocar de carta, a antiga não serve.
   const saved = autoSave ? existing : undefined;
+  // Carta aberta sem o preço em dia: a busca do MYP (no celular) passa ela na frente da fila.
+  useEffect(() => {
+    if (saved && mypApiDue(saved, Date.now())) prioritizeMypPrice(saved.id);
+  }, [saved]);
   const cardId = params.cardId ?? existing?.cardId;
   const lang = (params.lang ?? existing?.lang ?? 'pt') as CardLang;
   // Idioma do catálogo de onde vêm os dados (pode ser inglês para coleções que não existem em PT).

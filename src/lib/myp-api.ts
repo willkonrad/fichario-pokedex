@@ -17,8 +17,9 @@ export const MYP_API_REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
 /**
  * Versão da regra de reconhecimento do produto. Cartas "não encontradas" (e versões promo) por uma regra mais antiga
  * são buscadas de novo, sem esperar os 7 dias. 2: nomes "X-EX", promos "079a", coleções clássicas, promos sem selo.
+ * 3: "Nidoran♀" buscada também como "Nidoran Fêmea" (o MYP escreve "Nidoran F").
  */
-export const MYP_MATCHER = 2;
+export const MYP_MATCHER = 3;
 
 /**
  * Coleções da TCGdex que o MYP cadastra com outra sigla e com o número da carta original (ex.: Charizard da coleção
@@ -32,11 +33,16 @@ const MYP_EDITION: Record<string, string> = {
 /** Coleção de promos (MEP, SVP, SWSHP…): o produto do MYP é a própria promo. */
 const isPromoSet = (setId: string) => /p$/i.test(setId);
 
-/** O MYP escreve "Alakazam-EX" onde a TCGdex escreve "Alakazam EX" (e o contrário em outras coleções). */
+/**
+ * Outros jeitos de escrever o nome no MYP: "Alakazam-EX" onde a TCGdex escreve "Alakazam EX" (e o contrário em outras
+ * coleções); "Nidoran F"/"Nidoran Female" onde a TCGdex escreve "Nidoran♀" (a busca pelo nome em português, "Nidoran
+ * Fêmea", traz todos).
+ */
 function nameVariants(name: string) {
   const out = [name];
   if (/\s(EX|GX)$/i.test(name)) out.push(name.replace(/\s(EX|GX)$/i, '-$1'));
   else if (/-(EX|GX)$/i.test(name)) out.push(name.replace(/-(EX|GX)$/i, ' $1'));
+  if (/♀|♂/.test(name)) out.push(name.replace(/\s*♀/, ' Fêmea').replace(/\s*♂/, ' Macho'));
   return out;
 }
 
@@ -112,6 +118,23 @@ export async function fetchMypPrice(e: Entry, consult: (name: string) => Promise
     };
   }
   return { ...base, notFound: `${keys.names[0] ?? 'carta'} ${keys.localId} (${keys.abbr}) não encontrada no MYP` };
+}
+
+/**
+ * Cartas que a pessoa está vendo (tela da carta): a busca em segundo plano (myp-refresher) passa elas na frente da fila
+ * e acorda na hora, em vez de esperar a vez delas.
+ */
+const priority = new Set<string>();
+let wakeRefresher: () => void = () => {};
+export function prioritizeMypPrice(entryId: string) {
+  priority.add(entryId);
+  wakeRefresher();
+}
+export function mypPriority() {
+  return priority;
+}
+export function onMypPriority(wake: () => void) {
+  wakeRefresher = wake;
 }
 
 /** Selo da carta que importa para achar o produto do MYP (só nas versões promo/staff). */

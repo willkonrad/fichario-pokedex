@@ -1,7 +1,17 @@
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 
-import { fetchMypPrice, MYP_API_INTERVAL_MS, mypApiDue, mypApiMatches, mypApiNote, MypRateLimited, searchMypByName } from '@/lib/myp-api';
+import {
+  fetchMypPrice,
+  MYP_API_INTERVAL_MS,
+  mypApiDue,
+  mypApiMatches,
+  mypApiNote,
+  mypPriority,
+  MypRateLimited,
+  onMypPriority,
+  searchMypByName,
+} from '@/lib/myp-api';
 import type { MypProduct } from '@/lib/myp-match';
 import type { Entry } from '@/lib/types';
 import { useCollection } from '@/store/collection';
@@ -85,23 +95,32 @@ export function MypRefresher() {
       return products;
     };
 
+    // A tela de uma carta sem preço pede a vez dela: acorda a busca, se estiver ociosa.
+    onMypPriority(() => wakeRef.current());
+
     (async () => {
       while (alive) {
         const now = Date.now();
+        const urgent = mypPriority();
         const due = Object.values(entriesRef.current).filter((e) => {
           if (!mypApiDue(e, now)) return false;
           const f = failures.get(groupKey(e));
-          return !f || (f.count < MAX_FAILS && f.until <= now);
+          // Carta aberta na tela tenta de novo sem esperar a pausa de uma falha.
+          return !f || (f.count < MAX_FAILS && (f.until <= now || urgent.has(e.id)));
         });
         if (!due.length) {
+          urgent.clear();
           await idle(IDLE_MS);
           continue;
         }
-        // Nunca buscadas (ou de outra carta/versão/selo) primeiro; depois, a busca mais antiga.
-        const order = (e: Entry) => (e.mypApi && mypApiMatches(e, e.mypApi) ? new Date(e.mypApi.checkedAt).getTime() : 0);
+        // Carta aberta na tela primeiro; depois as nunca buscadas (ou de outra carta/versão/selo); depois a busca
+        // mais antiga.
+        const order = (e: Entry) =>
+          urgent.has(e.id) ? -1 : e.mypApi && mypApiMatches(e, e.mypApi) ? new Date(e.mypApi.checkedAt).getTime() : 0;
         due.sort((a, b) => order(a) - order(b));
         const key = groupKey(due[0]);
         const group = due.filter((e) => groupKey(e) === key);
+        for (const e of group) urgent.delete(e.id);
         try {
           const price = await fetchMypPrice(group[0], consult);
           if (!alive) break;
@@ -131,6 +150,7 @@ export function MypRefresher() {
       alive = false;
       for (const t of timers) clearTimeout(t);
       wakeRef.current = () => {};
+      onMypPriority(() => {});
     };
   }, [canRun]);
 

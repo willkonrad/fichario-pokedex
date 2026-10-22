@@ -1,5 +1,11 @@
 # Notas da versão
 
+## 2.6.1 — Preços que faltavam (22/10/2026)
+
+- **A carta aberta na tela passa na frente da fila** de busca do MYP no celular: abriu uma carta sem preço, ela é buscada na hora.
+- "Nidoran♀"/"Nidoran♂" também são buscadas como "Nidoran Fêmea"/"Nidoran Macho" (o MYP escreve "Nidoran F").
+- Carta que falhou na busca tenta de novo assim que é aberta, sem esperar a pausa de 1 hora.
+
 ## 2.6.0 — Valor por mínimo, média e máximo (22/10/2026)
 
 - **O valor da carta é a faixa do MYP**: mínimo, média e máximo dos anúncios, como a API do MYP informa, lado a lado na tela da carta (a média em destaque).
