@@ -47,10 +47,14 @@ export function PricePanel({
   const apiFits = !!api && mypApiFitsVariant(entry, api);
   const versionLabel = VARIANTS.find((v) => v.id === entry.variant)?.label ?? entry.variant;
   const tone = ref?.confidence ? CONFIDENCE_COLOR[ref.confidence] : colors.textMuted;
+  const qty = api?.qty != null ? ` · ${api.qty} un. à venda` : '';
   const subtitle =
     ref?.basis === 'manual'
       ? 'meu valor · digitado por você (fixo até a média do MYP passar dele)'
-      : `${CONFIDENCE_LABEL.media} · anúncios no MYP Cards, todos os estados e idiomas${api?.qty != null ? ` · ${api.qty} un. à venda` : ''}`;
+      : apiFits
+        ? `${CONFIDENCE_LABEL.media} · anúncios no MYP Cards, todos os estados e idiomas${qty}`
+        : // Versão especial que o MYP não vende à parte: preço da carta base (valor parecido).
+          `${CONFIDENCE_LABEL.baixa} · preço da carta base no MYP Cards (o MYP não vende a versão ${versionLabel} à parte), todos os estados e idiomas${qty}`;
 
   return (
     <View style={styles.card}>
@@ -84,18 +88,16 @@ export function PricePanel({
                 : 'Buscando o preço no MYP Cards… chega em alguns minutos.'
               : api.notFound
                 ? `Não achei esta carta no MYP Cards (${api.notFound}). Você pode preencher "Meu valor".`
-                : api.avg == null
-                  ? 'Sem anúncios desta carta no MYP Cards agora. Você pode preencher "Meu valor".'
-                  : 'Sem preço desta versão no MYP Cards: os preços abaixo são do produto comum. Preencha "Meu valor" com o valor que você conferiu.'}
+                : 'Sem anúncios desta carta no MYP Cards agora. Você pode preencher "Meu valor".'}
         </Text>
       )}
 
-      {/* Com "Meu valor" (ou versão sem produto próprio no MYP): mínimo, média e máximo do MYP só como referência. */}
+      {/* Com "Meu valor": mínimo, média e máximo do MYP só como referência. */}
       {api?.avg != null && ref?.basis !== 'myp' ? (
         <>
           <Pressable onPress={() => api.url && WebBrowser.openBrowserAsync(api.url)} accessibilityRole="link" disabled={!api.url}>
             <Text style={[styles.label, { marginTop: 6 }]}>
-              MYP Cards{api.ownVersion ? ` · ${versionLabel.toLowerCase()}` : ''}
+              MYP Cards{api.ownVersion ? ` · ${versionLabel.toLowerCase()}` : apiFits ? '' : ' · carta base'}
               {api.url ? <Text style={styles.link}> ↗</Text> : null}
             </Text>
           </Pressable>
@@ -118,11 +120,6 @@ export function PricePanel({
           <Text style={styles.detail}>
             {api.qty != null ? `${api.qty} un. à venda · ` : ''}todos os estados e idiomas juntos
           </Text>
-          {!apiFits && ref?.value != null ? (
-            <Text style={styles.note}>
-              São preços do produto comum no MYP; a sua versão ({versionLabel}) vale outra coisa, então eles não entram no valor (só referência).
-            </Text>
-          ) : null}
         </>
       ) : null}
 
@@ -177,7 +174,6 @@ const styles = StyleSheet.create({
   confDot: { width: 8, height: 8, borderRadius: 4 },
   link: { color: colors.blue, fontSize: 13 },
   detail: { color: colors.textFaint, fontSize: 11, marginTop: 1 },
-  note: { color: colors.warning, fontSize: 12, lineHeight: 16 },
   cells: { flexDirection: 'row', gap: 4, marginTop: 2 },
   cell: {
     flexGrow: 1,

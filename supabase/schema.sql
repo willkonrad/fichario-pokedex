@@ -136,10 +136,9 @@ begin
   avg := nullif(p_myp->>'avg', '')::numeric;
   v := coalesce(cur->>'variant', 'normal');
   note := case when v in ('wPromo', 'staff') then coalesce(btrim(cur->>'variantNote'), '') else '' end;
+  -- Vale para toda versão: versão especial que o MYP não vende à parte usa o preço da carta base (valor parecido).
   if mine is not null and avg is not null and avg > mine
-     and p_myp->>'cardId' = cur->>'cardId' and p_myp->>'variant' = v and coalesce(p_myp->>'note', '') = note
-     and (coalesce((p_myp->>'ownVersion')::boolean, false)
-          or v not in ('wPromo', 'staff', 'pokeball', 'masterball', 'firstEdition', 'shadowless', 'other')) then
+     and p_myp->>'cardId' = cur->>'cardId' and p_myp->>'variant' = v and coalesce(p_myp->>'note', '') = note then
     nxt := nxt || jsonb_build_object(
       'myValue', null,
       'myValueReplaced', jsonb_build_object('value', mine, 'mypValue', avg, 'at', p_myp->>'checkedAt'));

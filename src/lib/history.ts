@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { mypFitsVariant, type ValueRange } from './valuation';
+import type { ValueRange } from './valuation';
 
 /** Um dia do histórico da coleção: soma dos mínimos, das médias (`value`) e dos máximos das cartas com preço. */
 export type HistoryPoint = { day: string; value: number; min: number; max: number; cards: number };
@@ -8,16 +8,16 @@ type Row = { entry_id: string; day: string; variant: string | null; sources: Rec
 
 /**
  * Valor de uma carta num dia, pela mesma regra do app (src/lib/valuation.ts): "Meu valor" (mínimo, média e máximo
- * iguais), senão mínimo/média/máximo do MYP. Fontes antigas gravadas nas fotos (vendas reais, menor anúncio, oferta
- * por estado) não entram.
+ * iguais), senão mínimo/média/máximo do MYP (da carta base, para versão especial que o MYP não vende à parte). Fontes
+ * antigas gravadas nas fotos (vendas reais, menor anúncio, oferta por estado) não entram.
  */
-function dayRange(s: Record<string, unknown> | null, variant: string | null): ValueRange | undefined {
+function dayRange(s: Record<string, unknown> | null): ValueRange | undefined {
   if (!s) return undefined;
   const manual = (s.manual as { value?: number } | undefined)?.value;
   if (typeof manual === 'number') return { min: manual, avg: manual, max: manual };
-  // Produto no MYP: vale para a versão comum, ou para a versão com selo quando o produto é dela.
-  const api = s.mypApi as { min?: number; avg?: number; max?: number; own?: boolean } | undefined;
-  if (typeof api?.avg !== 'number' || !(api.own || mypFitsVariant(variant ?? 'normal'))) return undefined;
+  // Produto no MYP: o da versão, ou o da carta base para versão especial que o MYP não vende à parte (valor parecido).
+  const api = s.mypApi as { min?: number; avg?: number; max?: number } | undefined;
+  if (typeof api?.avg !== 'number') return undefined;
   const avg = api.avg;
   return {
     min: typeof api.min === 'number' ? Math.min(api.min, avg) : avg,
@@ -48,7 +48,7 @@ export async function collectionHistory(): Promise<HistoryPoint[] | null> {
   }
   const byDay = new Map<string, HistoryPoint>();
   for (const r of rows) {
-    const v = dayRange(r.sources, r.variant);
+    const v = dayRange(r.sources);
     if (!v) continue;
     const p = byDay.get(r.day) ?? { day: r.day, value: 0, min: 0, max: 0, cards: 0 };
     p.value += v.avg;

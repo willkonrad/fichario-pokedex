@@ -46,7 +46,7 @@ Os preços vêm de uma fonte só, o **MYP Cards** (ou do "Meu valor" digitado pe
 Em `src/lib/valuation.ts`, só duas fontes:
 
 1. **"Meu valor"** informado pelo colecionador: o único valor fixo (mínimo, média e máximo iguais a ele). Quando a **média do MYP** passa dele, ele é apagado (fica o registro da troca) e a carta volta a usar o MYP;
-2. o **mínimo, a média e o máximo dos anúncios do produto no MYP** (API pública), como a API informa — confiança média, porque juntam todos os estados e idiomas. Versões especiais (selo, Poké Ball…) só usam o produto próprio da versão no MYP; o preço do produto comum aparece só como referência.
+2. o **mínimo, a média e o máximo dos anúncios do produto no MYP** (API pública), como a API informa — confiança média, porque juntam todos os estados e idiomas. Versões especiais (selo, Poké Ball…) usam o produto próprio da versão no MYP; quando o MYP não vende a versão à parte, usam o da carta base, que tem valor parecido (confiança baixa).
 
 O valor da carta é essa faixa: os totais somam os mínimos, as médias e os máximos. A média é o ponto do meio: ordena as mais valiosas, aparece nos bolsos do fichário e mede a variação do gráfico. Sem nenhuma das duas fontes, a carta fica **sem preço** — o app não estima valores (ex.: preço americano convertido com desconto fixo por estado).
 

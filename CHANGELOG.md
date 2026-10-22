@@ -5,6 +5,7 @@
 - **A carta aberta na tela passa na frente da fila** de busca do MYP no celular: abriu uma carta sem preço, ela é buscada na hora.
 - "Nidoran♀"/"Nidoran♂" também são buscadas como "Nidoran Fêmea"/"Nidoran Macho" (o MYP escreve "Nidoran F").
 - Carta que falhou na busca tenta de novo assim que é aberta, sem esperar a pausa de 1 hora.
+- **Versão especial sem produto próprio no MYP usa o preço da carta base** (ex.: Bulbasaur 133 com o selo da Booster Box = Bulbasaur 133 comum), que tem valor parecido: mínimo/média/máximo entram no valor e nos totais, com confiança baixa e o aviso "preço da carta base". A regra do "Meu valor" vale igual para essas versões.
 
 ## 2.6.0 — Valor por mínimo, média e máximo (22/10/2026)
 

@@ -6,7 +6,8 @@ import type { Entry, MypApiPrice } from './types';
  *   1. "Meu valor" digitado pelo usuário: o único valor fixo (mínimo, média e máximo iguais a ele). Quando a média do
  *      MYP passa dele, ele é apagado e a carta volta a usar o MYP (ver myValuePatch);
  *   2. o MÍNIMO, a MÉDIA e o MÁXIMO dos anúncios do produto no MYP Cards (API pública do MYP), como a API informa —
- *      confiança média, porque juntam todos os estados e idiomas.
+ *      confiança média, porque juntam todos os estados e idiomas. Versão especial (selo, Poké Ball…) que o MYP não
+ *      vende à parte usa o produto da carta base, que tem valor parecido — confiança baixa.
  *
  * A faixa (mín/méd/máx) é o valor da carta e entra nos totais da coleção e no gráfico de rendimento; a média é o ponto
  * do meio (ordena as mais valiosas e aparece nos bolsos). Sem nenhuma das duas fontes, a carta fica sem valor.
@@ -15,8 +16,8 @@ import type { Entry, MypApiPrice } from './types';
 export type SourceId = 'manual' | 'myp';
 
 /**
- * Versões especiais (com selo, Poké Ball, Master Ball, 1ª edição, Shadowless) valem outra coisa que a versão comum:
- * preços do produto comum no MYP não entram no valor delas (só quando o MYP tem um produto próprio da versão).
+ * Versões especiais (com selo, Poké Ball, Master Ball, 1ª edição, Shadowless): o preço exato é o do produto próprio da
+ * versão no MYP; sem ele, vale o da carta base (valor parecido), com confiança baixa.
  */
 export const SPECIAL_VARIANTS = ['wPromo', 'staff', 'pokeball', 'masterball', 'firstEdition', 'shadowless', 'other'];
 export function mypFitsVariant(variant: string) {
@@ -41,7 +42,10 @@ export function mypApiFor(e: Entry): MypApiPrice | undefined {
   return s;
 }
 
-/** Os preços do produto no MYP valem para a versão da carta? (produto comum só para as versões comuns) */
+/**
+ * Os preços do produto no MYP são exatamente desta versão (produto próprio, ou versão comum)? Senão, são da carta base
+ * (versão especial que o MYP não vende à parte): valem como valor, com confiança baixa.
+ */
 export function mypApiFitsVariant(e: Entry, s: MypApiPrice) {
   return !!s.ownVersion || mypFitsVariant(e.variant);
 }
@@ -52,7 +56,7 @@ export function mypApiFitsVariant(e: Entry, s: MypApiPrice) {
  */
 export function myValuePatch(e: Entry, s: MypApiPrice): Partial<Entry> {
   const mine = e.myValue?.value;
-  if (mine == null || s.avg == null || !mypApiFitsVariant(e, s) || s.avg <= mine) return {};
+  if (mine == null || s.avg == null || s.avg <= mine) return {};
   return { myValue: null, myValueReplaced: { value: mine, mypValue: s.avg, at: s.checkedAt } };
 }
 
@@ -101,15 +105,17 @@ export function priceSources(e: Entry): Omit<SourceRow, 'used'>[] {
   if (e.myValue?.value != null) {
     rows.push({ id: 'manual', label: SOURCE_LABEL.manual, brl: e.myValue.value, detail: 'digitado por você' });
   }
-  // Média dos anúncios do produto no MYP (API pública), com mínimo e máximo.
+  // Média dos anúncios do produto no MYP (API pública), com mínimo e máximo (de versão especial sem produto próprio,
+  // os da carta base).
   const api = mypApiFor(e);
-  if (api?.avg != null && mypApiFitsVariant(e, api)) {
+  if (api?.avg != null) {
     const parts = [
       api.min != null ? `mín ${brl(api.min)}` : null,
       api.max != null ? `máx ${brl(api.max)}` : null,
       api.qty != null ? `${api.qty} un. à venda` : null,
     ].filter(Boolean);
-    rows.push({ id: 'myp', label: SOURCE_LABEL.myp, brl: api.avg, detail: `${parts.join(' · ')} (todos os estados e idiomas)` });
+    const scope = mypApiFitsVariant(e, api) ? 'todos os estados e idiomas' : 'carta base, todos os estados e idiomas';
+    rows.push({ id: 'myp', label: SOURCE_LABEL.myp, brl: api.avg, detail: `${parts.join(' · ')} (${scope})` });
   }
   return rows;
 }
@@ -123,7 +129,8 @@ export function valuation(e: Entry): Valuation {
   return {
     value: best.brl,
     range: { min: Math.min(api?.min ?? best.brl, best.brl), avg: best.brl, max: Math.max(api?.max ?? best.brl, best.brl) },
-    confidence: best.id === 'manual' ? 'alta' : 'media',
+    // Preço da carta base para uma versão especial: confiança baixa.
+    confidence: best.id === 'manual' ? 'alta' : api && !mypApiFitsVariant(e, api) ? 'baixa' : 'media',
     basis: best.id,
     sources: all.map((r) => ({ ...r, used: r === best })),
   };
