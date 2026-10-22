@@ -36,41 +36,6 @@ export const ORIGINS = [
 ] as const;
 export type Origin = (typeof ORIGINS)[number]['id'];
 
-/** Menor anúncio no MYP Cards no idioma da carta, via servidor MCP público do Zukan (zukan.com.br). */
-export type MypInfo = {
-  /** Menor anúncio no idioma da carta. */
-  price?: number;
-  label?: string;
-  /** Menor anúncio em português e NM em inglês, para comparar idiomas. */
-  pt?: number;
-  en?: number;
-  /** Histórico de 30 dias (BRL): t = data ISO, p = preço, k = idioma. */
-  history?: { t: string; p: number; k: 'pt' | 'en' }[];
-  checkedAt: string;
-};
-
-/**
- * Vendas reais finalizadas e pagas no Brasil, do "Quanto vale minha carta?" (quantovaleminhacarta.com.br):
- * mediana por estado, no idioma da carta (gravado pelo servidor, price-sync).
- */
-export type SoldInfo = {
-  /** Página da carta no site (fonte citada no app). */
-  url?: string;
-  byCondition?: Partial<Record<Condition, { value?: number; count: number }>>;
-  /** Variante a que os valores se referem (ex.: "Normal") e as variantes com vendas. */
-  variant?: string;
-  variants?: { name: string; count: number }[];
-  lastSale?: { price: number; daysAgo: number };
-  /** Vendas recentes (mais recente primeiro): há quantos dias, estado, idioma ("PT-BR"…) e preço. */
-  sales?: { daysAgo: number; condition?: string; lang?: string; price: number }[];
-  summary?: string;
-  /** O site avisa que há poucas vendas (1 ou 2): referência inicial, não valor firme. */
-  lowConfidence?: boolean;
-  notFound?: string;
-  checkedAt: string;
-};
-
-/** Menor oferta no MYP Cards no ESTADO e IDIOMA da carta (gravado pelo servidor, quando a API do MYP fornecer). */
 /**
  * Preços do produto da carta na API pública do MYP Cards (mypcards.com/api/v1): menor, médio e maior anúncio, de
  * todos os estados e idiomas juntos (a API não separa). Buscados pelo app no celular (sem token, a API só atende
@@ -93,31 +58,6 @@ export type MypApiPrice = {
   qty?: number;
   /** Produto próprio da versão com selo (ex.: "Pokemon Day 2026"): os preços são só dessa versão. */
   ownVersion?: boolean;
-  /** Motivo de não achar a carta no MYP. */
-  notFound?: string;
-  checkedAt: string;
-};
-
-/** Estados do MYP Cards (não tem "M": a melhor categoria é NM; "D" do app é "DM" lá). */
-export type MypCondition = 'NM' | 'SP' | 'MP' | 'HP' | 'DM';
-
-/**
- * Ofertas do MYP Cards da carta, lidas da página do produto pelo servidor (função myp-scan, 1×/semana e logo depois
- * do cadastro): menor preço por estado, só no idioma e na versão (acabamento ou produto do selo) da carta.
- */
-export type MypOffers = {
-  /** Carta, idioma e versão para os quais a leitura foi feita (se mudarem, o servidor lê de novo). */
-  cardId: string;
-  lang: string;
-  variant: string;
-  note?: string;
-  productId?: number;
-  /** Página do produto no MYP. */
-  url?: string;
-  byCondition?: Partial<Record<MypCondition, { min: number; count: number }>>;
-  /** Ofertas que entraram na conta / ofertas na página. */
-  offers?: number;
-  total?: number;
   /** Motivo de não achar a carta no MYP. */
   notFound?: string;
   checkedAt: string;
@@ -153,19 +93,11 @@ export type Entry = {
   stampPhoto?: string;
   condition: Condition;
   notes?: string;
-  /** Menor anúncio no MYP Cards no idioma da carta (via Zukan; gravado pelo servidor). */
-  myp?: MypInfo;
-  /** Menor oferta no MYP no estado e idioma da carta (gravado pelo servidor, semanal). */
-  mypOffers?: MypOffers;
   /** Menor, médio e maior preço do produto no MYP Cards (API pública; ver MypApiPrice). */
   mypApi?: MypApiPrice;
-  /** Vendas reais por estado, no idioma da carta (gravado pelo servidor, semanal). */
-  sold?: SoldInfo;
-  /** Id da carta na pokemontcg.io, usado pelo "Quanto vale minha carta?" (gravado pelo servidor). */
-  ptcgId?: string;
   /**
-   * Valor digitado pelo usuário (ex.: menor anúncio conferido no MYP); tem prioridade sobre o preço do MYP.
-   * O servidor apaga (null) quando o MYP passa dele.
+   * Valor digitado pelo usuário: o único valor fixo, com prioridade sobre a média do MYP. É apagado (null) quando a
+   * média do MYP passa dele.
    */
   myValue?: { value: number; setAt: string } | null;
   /** Como a carta chegou: troca, booster ou compra. */

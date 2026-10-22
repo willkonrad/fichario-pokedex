@@ -125,7 +125,7 @@ function SlotPrice({ entry, small }: { entry: Entry; small: boolean }) {
   const ref = valuation(entry);
   const h = small ? 15 : 18;
   if (ref.value == null || !ref.confidence) {
-    // Buscando = o servidor ainda não consultou nenhuma fonte de preço para esta carta.
+    // Buscando = o app ainda não buscou o preço desta carta no MYP.
     const pending = pricePending(entry);
     return (
       <View style={[styles.pill, styles.pillPending, { height: h }]}>

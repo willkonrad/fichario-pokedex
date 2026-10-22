@@ -1,5 +1,12 @@
 # Notas da versão
 
+## 2.5.0 — Valor só pelo MYP Cards e "Meu valor" (22/10/2026)
+
+- **Duas fontes de valor**: o "Meu valor" (fixo até a média do MYP passar dele) ou a média dos anúncios no MYP Cards, mostrada com o mínimo e o máximo. A média é o que entra nos totais e no gráfico de rendimento.
+- Saíram as outras fontes: o menor anúncio via Zukan (provisório), as vendas reais do "Quanto vale minha carta?" e a leitura das ofertas por estado nas páginas do MYP (que nunca chegou a rodar, porque o MYP bloqueia servidores).
+- O quadro de valor da carta ficou mais simples: valor, mínimo/média/máximo do MYP, links para o MYP e a Liga. O gráfico de 30 dias do menor anúncio saiu (o gráfico de rendimento da coleção continua, pela média).
+- No servidor, o cron de preços (price-sync) foi desligado e a foto diária do valor guarda só o "Meu valor" e o mínimo/média/máximo do MYP. O Zukan continua só no catálogo (cartas novas e imagem reserva).
+
 ## 2.4.0 — Catálogo do TCGCSV e preços do MYP por mínimo/média/máximo (22/10/2026)
 
 ### Preços

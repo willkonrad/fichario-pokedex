@@ -1,26 +1,18 @@
-import { LANG_LABEL, VARIANTS, type CardLang, type Entry, type MypApiPrice, type MypCondition, type MypOffers } from './types';
+import type { Entry, MypApiPrice } from './types';
 
 /**
- * Valor da carta (em reais). Na ordem:
+ * Valor da carta (em reais). Só duas fontes:
  *
  *   1. "Meu valor" digitado pelo usuário: o único valor fixo. Quando a média do MYP passa dele, ele é apagado e a
  *      carta volta a usar o MYP (ver myValuePatch);
- *   2. a menor oferta no MYP no ESTADO, IDIOMA e VERSÃO da carta (função myp-scan, quando o MYP liberar esse dado);
- *   3. a MÉDIA dos anúncios do produto no MYP Cards (API pública do MYP; mostrada com o mínimo e o máximo) —
- *      confiança média, porque junta todos os estados e idiomas;
- *   4. sem preço no MYP: a mediana de VENDAS REAIS no estado e idioma da carta — confiança média com 3 ou mais
- *      vendas, baixa com só 1 ou 2;
- *   5. sem a média do MYP (ainda não buscada, ou carta não achada na API): o menor anúncio geral (via Zukan) — confiança
- *      baixa, porque costuma ser de uma carta danificada ou de outro idioma.
+ *   2. a MÉDIA dos anúncios do produto no MYP Cards (API pública do MYP), mostrada com o mínimo e o máximo —
+ *      confiança média, porque junta todos os estados e idiomas.
  *
- * O valor (média) é o que entra nos totais da coleção e no gráfico de rendimento. Sem nenhum desses, a carta fica sem
- * valor (melhor do que mostrar um preço de outra fonte).
+ * O valor (a média, ou o "Meu valor") é o que entra nos totais da coleção e no gráfico de rendimento. Sem nenhum dos
+ * dois, a carta fica sem valor.
  */
 
-export type SourceId = 'manual' | 'mypOffer' | 'myp' | 'sold' | 'zukan';
-
-/** Com menos que isto de vendas no estado, o valor das vendas reais é só uma referência inicial (confiança baixa). */
-const FIRM_SALES = 3;
+export type SourceId = 'manual' | 'myp';
 
 /**
  * Versões especiais (com selo, Poké Ball, Master Ball, 1ª edição, Shadowless) valem outra coisa que a versão comum:
@@ -36,45 +28,9 @@ export function mypCovers(lang: string) {
   return lang === 'pt' || lang === 'en';
 }
 
-/**
- * Nomes de variação no "Quanto vale minha carta?" que correspondem a cada variação do app. O site precifica cada
- * variação separada e a página mostra a mais vendida; vendas de outra variação não servem como valor da carta.
- * Holo aceita "Normal" porque o site chama de Normal a impressão padrão de cartas que já nascem holo (ex.: "ex").
- */
-const SOLD_VARIANTS: Record<string, string[]> = {
-  normal: ['normal'],
-  holo: ['normal', 'holo'],
-  reverse: ['reverse holo', 'reverse'],
-  pokeball: ['pokeball'],
-  masterball: ['masterball'],
-  firstEdition: ['1a edicao'],
-  wPromo: ['carimbada', 'promo', 'carimbada + promo'],
-  staff: ['carimbada', 'carimbada + promo'],
-};
-const plain = (s: string) => s.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/ª/g, 'a').trim();
-
-/** As vendas reais gravadas (variação `soldVariant`) são da mesma variação da carta? Sem nome, assume que sim. */
-export function soldMatchesVariant(variant: string, soldVariant?: string) {
-  if (!soldVariant) return true;
-  return (SOLD_VARIANTS[variant] ?? []).includes(plain(soldVariant));
-}
-
-/** Nenhuma fonte de preço foi consultada ainda para esta carta. */
+/** O app ainda não buscou o preço desta carta (nesta versão e selo) no MYP. */
 export function pricePending(e: Entry) {
-  return !e.myp?.checkedAt && !e.sold?.checkedAt && !e.mypOffers?.checkedAt && !e.mypApi?.checkedAt;
-}
-
-/** Estado do app → estado no MYP (o MYP não tem "M"; "D" lá é "DM"). */
-export function mypCondition(condition: string): MypCondition {
-  return condition === 'M' ? 'NM' : condition === 'D' ? 'DM' : (condition as MypCondition);
-}
-
-/** A leitura das ofertas do MYP é desta carta, idioma e versão (senão o servidor ainda vai ler de novo)? */
-export function mypScanFor(e: Entry): MypOffers | undefined {
-  const s = e.mypOffers;
-  const note = e.variant === 'wPromo' || e.variant === 'staff' ? (e.variantNote ?? '') : '';
-  if (!s?.checkedAt || s.cardId !== e.cardId || s.lang !== e.lang || s.variant !== e.variant || (s.note ?? '') !== note) return undefined;
-  return s;
+  return mypCovers(e.lang) && !mypApiFor(e);
 }
 
 /** A busca na API do MYP é desta carta, versão e selo (senão o app ainda vai buscar de novo)? */
@@ -123,10 +79,7 @@ export type Valuation = {
 
 export const SOURCE_LABEL: Record<SourceId, string> = {
   manual: 'Meu valor',
-  mypOffer: 'MYP Cards · seu estado',
   myp: 'MYP Cards · média',
-  sold: 'Vendas reais',
-  zukan: 'MYP Cards · menor anúncio',
 };
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -137,22 +90,9 @@ export function priceSources(e: Entry): Omit<SourceRow, 'used'>[] {
   if (e.myValue?.value != null) {
     rows.push({ id: 'manual', label: SOURCE_LABEL.manual, brl: e.myValue.value, detail: 'digitado por você' });
   }
-  // Menor oferta no MYP no estado, idioma e versão da carta (quando o MYP liberar esse dado).
-  const scan = mypScanFor(e);
-  const offer = scan?.byCondition?.[mypCondition(e.condition)];
-  if (offer) {
-    const version = VARIANTS.find((v) => v.id === e.variant)?.label ?? e.variant;
-    rows.push({
-      id: 'mypOffer',
-      label: `MYP Cards · ${mypCondition(e.condition)}`,
-      brl: offer.min,
-      detail: `menor oferta em ${mypCondition(e.condition)}, ${LANG_LABEL[e.lang as CardLang]?.toLowerCase() ?? e.lang}, ${version.toLowerCase()} (${offer.count} un.)`,
-    });
-  }
   // Média dos anúncios do produto no MYP (API pública), com mínimo e máximo.
   const api = mypApiFor(e);
-  const usableApi = api?.avg != null && mypApiFitsVariant(e, api);
-  if (api?.avg != null && usableApi) {
+  if (api?.avg != null && mypApiFitsVariant(e, api)) {
     const parts = [
       api.min != null ? `mín ${brl(api.min)}` : null,
       api.max != null ? `máx ${brl(api.max)}` : null,
@@ -160,40 +100,17 @@ export function priceSources(e: Entry): Omit<SourceRow, 'used'>[] {
     ].filter(Boolean);
     rows.push({ id: 'myp', label: SOURCE_LABEL.myp, brl: api.avg, detail: `${parts.join(' · ')} (todos os estados e idiomas)` });
   }
-  // Vendas reais no estado da carta (o site já separa por idioma: cada idioma é uma página), só se forem da
-  // mesma variação da carta.
-  const sold = soldMatchesVariant(e.variant, e.sold?.variant) ? e.sold?.byCondition?.[e.condition] : undefined;
-  if (sold?.value != null) {
-    rows.push({
-      id: 'sold',
-      label: SOURCE_LABEL.sold,
-      brl: sold.value,
-      detail: `${sold.count} ${sold.count === 1 ? 'venda finalizada' : 'vendas finalizadas'} em ${e.condition}${sold.count < FIRM_SALES ? ' · poucas vendas' : ''}`,
-    });
-  }
-  // Menor anúncio geral (Zukan): só sem a média do MYP (ainda não buscada, ou carta não achada na API).
-  if (!usableApi && e.myp?.price != null && mypFitsVariant(e.variant)) {
-    rows.push({ id: 'zukan', label: SOURCE_LABEL.zukan, brl: e.myp.price, detail: 'menor anúncio de qualquer estado (provisório)' });
-  }
   return rows;
 }
 
-/** Confiança de cada fonte quando ela define o valor. */
-function confidenceOf(r: Omit<SourceRow, 'used'>): Confidence {
-  if (r.id === 'sold') return /poucas vendas/.test(r.detail ?? '') ? 'baixa' : 'media';
-  if (r.id === 'myp') return 'media';
-  if (r.id === 'zukan') return 'baixa';
-  return 'alta';
-}
-
-/** Valor da carta (ver comentário do módulo): a primeira fonte disponível, na ordem de prioridade. */
+/** Valor da carta (ver comentário do módulo): "Meu valor", senão a média do MYP. */
 export function valuation(e: Entry): Valuation {
   const all = priceSources(e);
   const best = all[0];
   if (!best) return { sources: [] };
   return {
     value: best.brl,
-    confidence: confidenceOf(best),
+    confidence: best.id === 'manual' ? 'alta' : 'media',
     basis: best.id,
     sources: all.map((r) => ({ ...r, used: r === best })),
   };

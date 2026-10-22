@@ -78,10 +78,6 @@ export default function MenuScreen() {
           Valor de cada carta: média dos anúncios do{' '}
           <Text style={styles.heroLink} accessibilityRole="link" onPress={() => WebBrowser.openBrowserAsync('https://mypcards.com')}>
             MYP Cards
-          </Text>
-          ; sem preço lá, vendas reais finalizadas do{' '}
-          <Text style={styles.heroLink} accessibilityRole="link" onPress={() => WebBrowser.openBrowserAsync('https://quantovaleminhacarta.com.br')}>
-            Quanto vale minha carta?
           </Text>{' '}
           (ou &quot;Meu valor&quot;, fixo até a média do MYP passar dele).
         </Text>

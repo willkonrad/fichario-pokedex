@@ -170,10 +170,10 @@ function CardForm({ params }: { params: Params }) {
   const photo = photoFits(variant, variantNote) ? (isNewCard ? params.photo : existing?.stampPhoto) : undefined;
   const myValueNum = parseBRL(myValueText);
   const purchaseNum = parseBRL(purchaseText);
-  // Valor atual da carta (com o estado e o "Meu valor" da tela), para comparar com o valor de compra.
+  // Valor atual da carta (com o "Meu valor" da tela), para comparar com o valor de compra.
   const currentValue =
     existing && !isNewCard
-      ? valuation({ ...existing, condition, myValue: myValueNum != null ? { value: myValueNum, setAt: '' } : undefined }).value
+      ? valuation({ ...existing, myValue: myValueNum != null ? { value: myValueNum, setAt: '' } : undefined }).value
       : undefined;
 
   /** A carta completa, com as edições atuais (e `patch` por cima, para mudanças feitas agora). */
@@ -183,8 +183,8 @@ function CardForm({ params }: { params: Params }) {
     // Ficha em português sem imagem: a do catálogo em inglês (mesmo id, mesma arte).
     const image = detail?.image ?? enDetail?.image ?? saved?.image;
     return {
-      // Carta já salva: mantém o que só o servidor grava (preços do MYP, vendas reais, imagem reserva antiga).
-      ...(autoSave && existing ? { myp: existing.myp, mypOffers: existing.mypOffers, sold: existing.sold, mypApi: existing.mypApi, ptcgId: existing.ptcgId, myValueReplaced: value == null ? existing.myValueReplaced : undefined, ligaImage: existing.ligaImage, ligaQuery: existing.ligaQuery } : {}),
+      // Carta já salva: mantém o que não se edita nesta tela (preços do MYP, troca do "Meu valor", imagem reserva antiga).
+      ...(autoSave && existing ? { mypApi: existing.mypApi, myValueReplaced: value == null ? existing.myValueReplaced : undefined, ligaImage: existing.ligaImage, ligaQuery: existing.ligaQuery } : {}),
       binderId,
       dex: isExtra ? 0 : dex,
       slot,
@@ -409,7 +409,7 @@ function CardForm({ params }: { params: Params }) {
 
           {/* Valor (MYP Cards ou "Meu valor") e histórico */}
           <View style={{ marginTop: 18 }}>
-            <PricePanel entry={isNewCard ? undefined : existing} condition={condition} myValue={myValueNum} ligaUrl={ligaUrl} />
+            <PricePanel entry={isNewCard ? undefined : existing} myValue={myValueNum} ligaUrl={ligaUrl} />
           </View>
 
           {/* Minha carta: estado, variação, meu valor, observações */}

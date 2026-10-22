@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { mypFitsVariant, soldMatchesVariant } from './valuation';
+import { mypFitsVariant } from './valuation';
 
 /** Um dia do histórico da coleção: soma do valor das cartas com preço naquele dia. */
 export type HistoryPoint = { day: string; value: number; cards: number };
@@ -7,24 +7,16 @@ export type HistoryPoint = { day: string; value: number; cards: number };
 type Row = { entry_id: string; day: string; variant: string | null; sources: Record<string, unknown> | null };
 
 /**
- * Valor de uma carta num dia, pela mesma ordem do app (src/lib/valuation.ts): "Meu valor" > MYP no estado >
- * média do MYP (API) > vendas reais > menor anúncio geral (Zukan, só nos dias sem a média).
+ * Valor de uma carta num dia, pela mesma regra do app (src/lib/valuation.ts): "Meu valor", senão a média do MYP.
+ * Fontes antigas gravadas nas fotos (vendas reais, menor anúncio, oferta por estado) não entram mais.
  */
 function dayValue(s: Record<string, unknown> | null, variant: string | null): number | undefined {
   if (!s) return undefined;
-  const v = variant ?? 'normal';
   const manual = (s.manual as { value?: number } | undefined)?.value;
   if (typeof manual === 'number') return manual;
-  // Menor oferta no estado/idioma/versão (número, nas fotos novas; objeto com "min", nas antigas).
-  const offer = typeof s.mypOffer === 'number' ? s.mypOffer : (s.mypOffer as { min?: number } | undefined)?.min;
-  if (typeof offer === 'number') return offer;
   // Média do produto no MYP: vale para a versão comum, ou para a versão com selo quando o produto é dela.
   const api = s.mypApi as { avg?: number; own?: boolean } | undefined;
-  if (typeof api?.avg === 'number' && (api.own || mypFitsVariant(v))) return api.avg;
-  // Vendas reais só da mesma variação da carta (o nome da variação das vendas vem junto).
-  const raw = s.sold as { value?: number; count?: number; variant?: string } | undefined;
-  if (raw && typeof raw.value === 'number' && soldMatchesVariant(v, raw.variant)) return raw.value;
-  if (typeof s.myp === 'number' && mypFitsVariant(v)) return s.myp;
+  if (typeof api?.avg === 'number' && (api.own || mypFitsVariant(variant ?? 'normal'))) return api.avg;
   return undefined;
 }
 

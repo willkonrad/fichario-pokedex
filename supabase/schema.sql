@@ -48,7 +48,7 @@ create table if not exists public.price_history (
   lang text,
   condition text,
   variant text,
-  sources jsonb, -- { manual, mypOffer, sold, myp }
+  sources jsonb, -- { manual, mypApi: { min, avg, max, own } } (fotos antigas podem ter também sold, myp, mypOffer)
   created_at timestamptz not null default now(),
   primary key (user_id, entry_id, day)
 );
@@ -65,21 +65,19 @@ returns integer language sql security definer set search_path = '' as $$
       e.data->>'cardId', e.data->>'lang', e.data->>'condition', e.data->>'variant',
       jsonb_strip_nulls(jsonb_build_object(
         'manual', e.data->'myValue',
-        'mypOffer', e.data->'mypOffers',
-        -- Mínimo/média/máximo do MYP (API pública, buscados pelo app no celular), só desta carta e versão.
+        -- Mínimo/média/máximo do MYP (API pública, buscados pelo app no celular), só desta carta, versão e selo.
         -- O gráfico de rendimento usa a média.
         'mypApi', case
           when e.data->'mypApi'->>'cardId' = e.data->>'cardId'
            and e.data->'mypApi'->>'variant' = coalesce(e.data->>'variant', 'normal')
+           and coalesce(e.data->'mypApi'->>'note', '') =
+               case when coalesce(e.data->>'variant', 'normal') in ('wPromo', 'staff')
+                    then coalesce(btrim(e.data->>'variantNote'), '') else '' end
            and e.data->'mypApi' ? 'avg'
           then jsonb_strip_nulls(jsonb_build_object(
             'min', e.data->'mypApi'->'min', 'avg', e.data->'mypApi'->'avg', 'max', e.data->'mypApi'->'max',
             'own', e.data->'mypApi'->'ownVersion'))
-        end,
-        -- Vendas reais no estado da carta, com o nome da variação (o app só usa se for a mesma da carta).
-        'sold', (e.data->'sold'->'byCondition'->(e.data->>'condition'))
-          || jsonb_strip_nulls(jsonb_build_object('variant', e.data->'sold'->'variant')),
-        'myp', e.data->'myp'->'price'
+        end
       ))
     from public.entries e
     on conflict (user_id, entry_id, day) do update set sources = excluded.sources, condition = excluded.condition, variant = excluded.variant
@@ -89,9 +87,10 @@ returns integer language sql security definer set search_path = '' as $$
 $$;
 revoke all on function public.snapshot_prices() from public, anon, authenticated;
 
--- ===== Preços: MYP Cards (via Zukan) e vendas reais (Quanto vale minha carta?) — Edge Function price-sync + pg_cron =====
+-- ===== Servidor: marcadores e chave dos crons =====
 
--- Cache das páginas de vendas reais (7 dias), compartilhado entre contas: só o servidor lê e grava.
+-- Marcadores do servidor (hoje só o do catalog-sync, "tcgcsv:groups-listed"); só o servidor lê e grava. O nome vem de
+-- quando guardava as páginas de vendas reais do "Quanto vale minha carta?", fonte que saiu na 2.5.0.
 create table if not exists public.qvmc_cache (
   key text primary key,
   data jsonb,
@@ -100,7 +99,7 @@ create table if not exists public.qvmc_cache (
 alter table public.qvmc_cache enable row level security;
 
 -- Chave aleatória que só o cron conhece (guardada no Vault).
-select vault.create_secret(encode(extensions.gen_random_bytes(32), 'hex'), 'liga_sync_key', 'Chave dos crons de preço')
+select vault.create_secret(encode(extensions.gen_random_bytes(32), 'hex'), 'liga_sync_key', 'Chave dos crons do servidor')
 where not exists (select 1 from vault.secrets where name = 'liga_sync_key');
 
 create or replace function public.check_liga_sync_key(k text)
@@ -109,15 +108,6 @@ returns boolean language sql security definer set search_path = '' as $$
 $$;
 revoke all on function public.check_liga_sync_key(text) from public, anon, authenticated;
 grant execute on function public.check_liga_sync_key(text) to service_role;
-
--- Troque SEU_PROJECT_REF pelo código do projeto.
-select cron.schedule('price-sync', '5-59/10 * * * *', $$
-  select net.http_post(
-    url := 'https://SEU_PROJECT_REF.supabase.co/functions/v1/price-sync',
-    headers := jsonb_build_object('Content-Type', 'application/json',
-      'x-sync-key', (select decrypted_secret from vault.decrypted_secrets where name = 'liga_sync_key')),
-    body := '{}'::jsonb, timeout_milliseconds := 150000);
-$$);
 
 -- Foto diária do valor de cada carta, às 23:50 de Brasília.
 select cron.schedule('price-snapshot', '50 2 * * *', $$ select public.snapshot_prices(); $$);
@@ -161,17 +151,6 @@ end;
 $$;
 revoke all on function public.patch_entry_myp(text, jsonb) from public, anon;
 grant execute on function public.patch_entry_myp(text, jsonb) to authenticated;
-
--- Edições do MYP Cards, usadas pela Edge Function myp-scan (leitura das páginas do produto, publicada mas NÃO agendada:
--- o MYP bloqueia servidores; fica pronta para quando houver token ou dados por estado).
-create table if not exists public.myp_editions (
-  id integer primary key,
-  sigla text not null,
-  name text,
-  slug text,
-  synced_at timestamptz not null default now()
-);
-alter table public.myp_editions enable row level security;
 
 -- ===== Catálogo de cartas: TCGCSV (base principal) ligado à TCGdex — Edge Function catalog-sync + pg_cron =====
 

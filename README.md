@@ -11,7 +11,7 @@ App pessoal e gratuito para colecionadores de Pokémon TCG: organize suas cartas
   - **Livres**: coleção, coleção completa, favoritas, trocas, deck, graduadas — você escolhe a carta de cada bolso.
 - **Folheie como um fichário de verdade**: arraste a página para o lado; no computador, fichários frente e verso abrem **duas páginas lado a lado**, com a capa (com o nome do fichário) ao lado da primeira página.
 - **Catálogo completo** em português, inglês e japonês ([TCGdex](https://tcgdex.dev)), com estado (M, NM, SP, MP, HP, D) e variação (holo, reverse, 1ª edição, Poké Ball, promos com selo…).
-- **Valor de cada carta em reais**: **mínimo, média e máximo dos anúncios no [MYP Cards](https://mypcards.com)** (API pública do MYP), com a média como valor; sem preço lá, **vendas reais finalizadas** ([Quanto vale minha carta?](https://quantovaleminhacarta.com.br)) no estado e idioma da carta. Sempre com link para a fonte e o grau de confiança.
+- **Valor de cada carta em reais**: **mínimo, média e máximo dos anúncios no [MYP Cards](https://mypcards.com)** (API pública do MYP), com a média como valor, sempre com link para o MYP.
 - **Minha coleção**: valor total (soma das médias), faixa do MYP (soma dos mínimos e dos máximos), **gráfico de rendimento** pela média (1M, 3M, 6M, 1A) e as cartas mais valiosas.
 - **"Meu valor"**: o único valor fixo da carta, até a média do MYP passar dele (aí ele é apagado e voltam mínimo/média/máximo).
 - **Origem da carta**: troca, booster ou compra; na compra, o valor pago e quanto a carta valorizou desde então.
@@ -23,12 +23,11 @@ As novidades de cada versão estão em [CHANGELOG.md](CHANGELOG.md).
 
 ## Fontes de dados e atribuição
 
-Os preços vêm de duas fontes brasileiras: o **MYP Cards** é a principal e as **vendas reais** são a reserva, para cartas sem anúncio. Cada valor exibido no app cita a sua fonte, com link.
+Os preços vêm de uma fonte só, o **MYP Cards** (ou do "Meu valor" digitado pelo colecionador). Cada valor exibido no app cita o MYP, com link.
 
 | Fonte | O que fornece | Como é acessada |
 |---|---|---|
-| [MYP Cards](https://mypcards.com) | Mínimo, média e máximo dos anúncios de cada carta, em reais | [API pública do MYP Cards](https://mypcards.com/acesso-api) ([documentação](https://mypcards.github.io/mypcards-api)). Sem token: 10 consultas/min e só aparelhos (o servidor recebe 403 e o navegador não tem CORS), então **o app no celular** busca aos poucos e grava no banco. Token pedido; com ele, a busca passa para o servidor. Atribuição "MYP Cards" com link em todo valor. Enquanto a carta não foi buscada, o menor anúncio vem do [servidor MCP público do Zukan](https://www.zukan.com.br/llms.txt) |
-| [Quanto vale minha carta?](https://quantovaleminhacarta.com.br) | Vendas reais finalizadas, por estado e idioma | Páginas públicas das cartas, cujo uso e citação o site autoriza no seu [llms.txt](https://quantovaleminhacarta.com.br/llms.txt) (citar a fonte, dizer que são vendas reais, preservar idioma e estado, avisar quando há poucas vendas) |
+| [MYP Cards](https://mypcards.com) | Mínimo, média e máximo dos anúncios de cada carta, em reais | [API pública do MYP Cards](https://mypcards.com/acesso-api) ([documentação](https://mypcards.github.io/mypcards-api)). Sem token: 10 consultas/min e só aparelhos (o servidor recebe 403 e o navegador não tem CORS), então **o app no celular** busca aos poucos e grava no banco. Token pedido; com ele, a busca passa para o servidor. Atribuição "MYP Cards" com link em todo valor |
 | [TCGCSV](https://tcgcsv.com) | **Base principal do catálogo**: cartas de todas as coleções (inclusive as lançadas ontem) e versões com selo vendidas à parte, com a foto de cada uma | Espelho gratuito do catálogo da TCGplayer (obrigado, TCGCSV!), copiado 1×/dia para o Supabase pela Edge Function `catalog-sync`, seguindo as [regras de uso](https://tcgcsv.com/docs#usage-guidelines); o app só lê a cópia |
 | [TCGdex](https://tcgdex.dev) | Catálogo secundário: nome e imagem em português, ficha (ataques, HP…), variações e número da Pokédex | API pública |
 | [Zukan](https://www.zukan.com.br) | Cartas novas que a TCGdex ainda não tem (ex.: promos MEP recentes) e imagem reserva | Servidor MCP público |
@@ -37,24 +36,21 @@ Os preços vêm de duas fontes brasileiras: o **MYP Cards** é a principal e as 
 ### Uso responsável
 
 - **Só as cartas da coleção** são consultadas — nada de varrer catálogos inteiros.
-- **Atualização semanal**: o preço do MYP de cada carta é renovado a cada 6 dias (nunca fica com mais de uma semana) e as vendas reais, 1× por semana.
-- **Cache compartilhado**: a mesma carta em vários fichários ou contas é consultada uma única vez.
+- **Atualização semanal**: o preço do MYP de cada carta é renovado 1× por semana, no máximo 10 consultas por minuto.
+- **Sem repetição**: a mesma carta em vários fichários é consultada uma única vez.
 - **Volume pequeno**: cerca de 1.000 cartas por semana, ou ~150–200 consultas por dia.
 - Os dados ficam só no app do próprio colecionador; não são publicados, revendidos nem redistribuídos.
 
 ## Como o valor da carta é definido
 
-Em `src/lib/valuation.ts`, na ordem:
+Em `src/lib/valuation.ts`, só duas fontes:
 
 1. **"Meu valor"** informado pelo colecionador: o único valor fixo. Quando a **média do MYP** passa dele, ele é apagado (fica o registro da troca) e a carta volta a usar o MYP;
-2. a **menor oferta no MYP no estado e idioma da carta**, quando o MYP liberar esse dado;
-3. a **média dos anúncios do produto no MYP** (API pública), mostrada com o mínimo e o máximo — confiança média, porque junta todos os estados e idiomas. Versões especiais (selo, Poké Ball…) só usam o produto próprio da versão no MYP;
-4. sem preço no MYP: a **mediana das vendas reais no estado e idioma da carta** (confiança média com 3 ou mais vendas, baixa com 1 ou 2);
-5. enquanto a carta ainda não foi buscada na API do MYP: o **menor anúncio** (via Zukan) — confiança baixa, provisório.
+2. a **média dos anúncios do produto no MYP** (API pública), mostrada com o mínimo e o máximo — confiança média, porque junta todos os estados e idiomas. Versões especiais (selo, Poké Ball…) só usam o produto próprio da versão no MYP; o preço do produto comum aparece só como referência.
 
-Vendas reais só contam quando são **da mesma variação da carta** (ex.: vendas da versão Normal não valem para uma promo carimbada); senão aparecem só como referência. Sem nenhuma fonte, a carta fica **sem preço** — o app não estima valores (ex.: preço americano convertido com desconto fixo por estado).
+Sem nenhuma das duas, a carta fica **sem preço** — o app não estima valores (ex.: preço americano convertido com desconto fixo por estado).
 
-Um snapshot diário (`snapshot_prices`, 23:50 de Brasília) guarda as fontes de cada carta (inclusive mínimo/média/máximo do MYP) em `price_history`; o gráfico de rendimento usa a mesma ordem acima, com a média do MYP.
+Um snapshot diário (`snapshot_prices`, 23:50 de Brasília) guarda o "Meu valor" e o mínimo/média/máximo do MYP de cada carta em `price_history`; o gráfico de rendimento usa a mesma regra, com a média do MYP.
 
 ## Rodar o app
 
@@ -73,8 +69,8 @@ Para testar no celular, instale o **Expo Go** compatível com o SDK 58 e escanei
 1. Crie um projeto gratuito em [supabase.com](https://supabase.com).
 2. No **SQL Editor**, rode `supabase/schema.sql` (troque `SEU_PROJECT_REF` no final).
 3. Copie `.env.example` para `.env` e preencha a URL e a chave pública do projeto.
-4. Publique a Edge Function `supabase/functions/price-sync` (MYP Cards e vendas reais; cron a cada 10 min, MYP a cada 6 dias, vendas 1× por semana), com verificação de JWT desligada — ela é protegida por uma chave guardada no Vault.
-5. Quando a API do MYP for liberada, crie em **Edge Functions → Secrets** a chave `MYP_API_TOKEN`.
+4. Publique as Edge Functions `supabase/functions/catalog-sync` (cópia do catálogo do TCGCSV, chamada pelo cron; verificação de JWT desligada, porque ela é protegida por uma chave guardada no Vault) e `stamp-image` (foto da versão com selo, chamada pelo app).
+5. Os preços do MYP são buscados pelo app no celular (sem token, a API do MYP não atende servidores). Quando o MYP liberar o token, ele vai em **Edge Functions → Secrets** como `MYP_API_TOKEN`, e a busca passa para o servidor.
 
 Nenhuma chave ou senha fica no código: todas ficam nos Secrets do Supabase ou no `.env` local, que não vai para o repositório.
 
@@ -84,10 +80,11 @@ Nenhuma chave ou senha fica no código: todas ficam nos Secrets do Supabase ou n
 - `src/lib/valuation.ts` — regra do valor de referência.
 - `src/lib/` — TCGdex, Supabase, cálculo das páginas do fichário.
 - `src/store/collection.tsx` — estado da coleção (local + nuvem).
-- `src/components/price-panel.tsx` — quadro de valor da carta, vendas reais por estado e o histórico.
+- `src/components/price-panel.tsx` — quadro de valor da carta: "Meu valor" ou mínimo/média/máximo do MYP.
+- `src/components/myp-refresher.tsx` — busca os preços do MYP no celular (10 consultas/min, 1× por semana por carta).
 - `src/components/ui.tsx` — componentes visuais (botões, campos, cartões, controle segmentado…).
 - `src/theme.ts` — cores e medidas do tema Pokédex.
-- `supabase/` — tabelas, regras de acesso, cron e a Edge Function de preços.
+- `supabase/` — tabelas, regras de acesso, crons e as Edge Functions do catálogo.
 - `scripts/make-icons.js` — gera o ícone, o ícone adaptativo do Android, o favicon e a imagem de abertura.
 - `src/data/pokedex.json` — os 1025 Pokémon (nomes em PT, EN e JP), gerado a partir da PokéAPI.
 

@@ -8,8 +8,8 @@ export function entryValue(e: Entry) {
 
 /**
  * Totais da coleção: soma do valor de cada carta (a média do MYP ou o "Meu valor") e quantas cartas têm valor, por
- * confiança; e a faixa do MYP: a soma dos mínimos e dos máximos (cartas com valor de outra fonte entram com ele nas
- * duas pontas).
+ * confiança; e a faixa do MYP: a soma dos mínimos e dos máximos (cartas com "Meu valor" entram com ele nas duas
+ * pontas).
  */
 export function collectionTotals(entries: Entry[]) {
   let value = 0;
@@ -33,7 +33,7 @@ export function collectionTotals(entries: Entry[]) {
 /** Atualização mais recente e mais antiga dos preços do MYP na coleção (ISO). */
 export function priceFreshness(entries: Entry[]) {
   const times = entries
-    .map((e) => e.mypApi?.checkedAt ?? e.mypOffers?.checkedAt ?? e.myp?.checkedAt)
+    .map((e) => e.mypApi?.checkedAt)
     .filter((t): t is string => !!t)
     .sort();
   return { newest: times[times.length - 1], oldest: times[0] };
