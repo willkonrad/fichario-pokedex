@@ -1,6 +1,15 @@
 # Notas da versão
 
-## 2.4.0 — Catálogo do TCGCSV como base (22/10/2026)
+## 2.4.0 — Catálogo do TCGCSV e preços do MYP por mínimo/média/máximo (22/10/2026)
+
+### Preços
+- **Mínimo, média e máximo do MYP Cards** em cada carta, pela API pública do MYP. A **média** é o valor da carta e entra nos totais e no **gráfico de rendimento**; a coleção mostra também a faixa (soma dos mínimos e dos máximos).
+- **"Meu valor" é o único valor fixo**: quando a média do MYP passa dele, ele é apagado e a carta volta a usar mínimo/média/máximo (a tela da carta avisa).
+- Sem token, a API do MYP só atende aparelhos: **o app no celular busca os preços aos poucos** (no máximo 10 consultas por minuto), cartas novas primeiro, e grava no banco mesclando só o preço; a versão web mostra os valores e avisa quando ainda faltam.
+- Versões com selo usam o produto próprio da versão no MYP quando ele existe (ex.: "Pokemon Day 2026"); senão, o preço do produto comum aparece só como referência.
+- Crédito "MYP Cards" com link nas páginas do fichário e na lista de fichários, como a API exige.
+
+### Catálogo
 
 - **Base principal do catálogo: TCGCSV** (cópia diária e gratuita do catálogo da TCGplayer). As listas de cartas trazem todas as coleções, inclusive as recém-lançadas, e as versões com selo vendidas à parte, cada uma com a foto oficial. A TCGdex continua como base secundária: nome e imagem em português, ficha da carta, variações e preços.
 - Cartas que só existem no TCGCSV abrem com a foto e a ficha básica (bandeira 🇺🇸 EN).

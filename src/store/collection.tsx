@@ -5,7 +5,9 @@ import { AppState } from 'react-native';
 
 import { supabase } from '@/lib/supabase';
 import { clearCatalogCache, pruneStaleCache } from '@/lib/tcgdex';
-import { DEFAULT_SETTINGS, POKEDEX_BINDER, type BinderSettings, type CustomBinder, type Entry } from '@/lib/types';
+import { DEFAULT_SETTINGS, POKEDEX_BINDER, type BinderSettings, type CustomBinder, type Entry, type MypApiPrice } from '@/lib/types';
+import { mypApiMatches } from '@/lib/myp-api';
+import { myValuePatch } from '@/lib/valuation';
 
 const SETTINGS_KEY = 'binder:settings';
 const ENTRIES_KEY = 'binder:entries';
@@ -40,6 +42,12 @@ type Ctx = {
   moveEntry: (id: string, toSlot: number) => Promise<void>;
   /** Remove a carta pelo id (ver `keyOf`). */
   removeEntry: (id: string) => Promise<void>;
+  /**
+   * Grava os preços do MYP buscados no celular. Com conta: no banco, mesclando só o preço sobre a carta como está lá
+   * (sem sobrescrever edições de outro aparelho ou do servidor) e aplicando a regra do "Meu valor" com o valor atual
+   * do banco (função patch_entry_myp). Sem conta: só neste aparelho.
+   */
+  applyMypPrice: (id: string, price: MypApiPrice) => Promise<void>;
   /** Fichário aberto na tela inicial (`pokedex` ou o id de um fichário livre). */
   activeBinderId: string;
   setActiveBinder: (id: string) => Promise<void>;
@@ -298,7 +306,7 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
         await persistDeleted(rest);
       }
       await remote(() => supabase!.from('entries').upsert(toRow(userId!, e)));
-      // O preço do MYP Cards é buscado só pelo servidor (função price-sync) e chega aqui na próxima sincronização.
+      // Os preços chegam depois: os do MYP Cards pelo app no celular (MypRefresher), os outros pelo servidor.
     },
     async syncNow() {
       if (!userId) throw new Error('Entre na sua conta primeiro.');
@@ -322,6 +330,31 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
         await persistDeleted({ ...deletedRef.current, [e.id]: now });
         await remote(() => supabase!.from('entries').delete().eq('user_id', userId!).eq('id', e.id));
       }
+    },
+    async applyMypPrice(id, price) {
+      const cur = entriesRef.current[id];
+      if (!cur) return; // removida enquanto a busca acontecia
+      if (supabase && userId) {
+        const { data, error } = await supabase.rpc('patch_entry_myp', { p_id: id, p_myp: price });
+        if (error) {
+          setSyncError(errorMessage(error));
+          throw error; // a busca tenta de novo mais tarde
+        }
+        const res = data as { prev?: string | null; data?: Entry } | null;
+        const latest = entriesRef.current[id];
+        if (!res?.data || !latest) return; // removida em outro aparelho: a sincronização tira daqui
+        if (!res.prev || latest.updatedAt <= res.prev) {
+          // Nada local pendente: fica a carta do banco, já mesclada (traz junto o que mudou em outro aparelho).
+          await persistEntries({ ...entriesRef.current, [id]: { ...res.data, id } });
+        } else {
+          // Edição local ainda não enviada: guarda o preço aqui sem mexer na data; a edição local vence na sincronização.
+          await persistEntries({ ...entriesRef.current, [id]: { ...latest, mypApi: price } });
+        }
+        return;
+      }
+      const sameCard = mypApiMatches(cur, price);
+      const e: Entry = { ...cur, mypApi: price, ...(sameCard ? myValuePatch(cur, price) : {}), updatedAt: new Date().toISOString() };
+      await persistEntries({ ...entriesRef.current, [id]: e });
     },
     async removeEntry(id) {
       const next = { ...entriesRef.current };

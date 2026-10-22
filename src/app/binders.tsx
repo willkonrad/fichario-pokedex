@@ -1,5 +1,6 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
 import { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -107,6 +108,15 @@ export default function BindersScreen() {
         );
       })}
 
+      {/* Crédito obrigatório da API do MYP Cards (os valores dos fichários vêm dela). */}
+      <Text style={styles.hint}>
+        Valores: média dos anúncios do{' '}
+        <Text style={styles.link} accessibilityRole="link" onPress={() => WebBrowser.openBrowserAsync('https://mypcards.com')}>
+          MYP Cards ↗
+        </Text>{' '}
+        (ou &quot;Meu valor&quot;).
+      </Text>
+
       <Button title="Novo fichário" icon="add" onPress={() => router.push('/binder-edit')} />
       <Text style={styles.hint}>
         Fichários livres servem para o que você quiser: coleções completas, favoritas, trocas, deck ou graduadas. Você escolhe a carta de cada
@@ -144,4 +154,5 @@ const styles = StyleSheet.create({
   value: { color: colors.money, fontSize: 13, fontWeight: '800' },
   edit: { padding: 14, alignSelf: 'stretch', justifyContent: 'center' },
   hint: { color: colors.textMuted, fontSize: 12, lineHeight: 17, textAlign: 'center' },
+  link: { color: colors.blue, fontWeight: '800' },
 });

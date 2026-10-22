@@ -89,7 +89,14 @@ function CardForm({ params }: { params: Params }) {
   const [variantNote, setVariantNote] = useState(isNewCard ? (params.stamp ?? '') : (existing?.variantNote ?? ''));
   const [condition, setCondition] = useState<Condition>(isNewCard ? 'NM' : (existing?.condition ?? 'NM'));
   const [notes, setNotes] = useState(isNewCard ? '' : (existing?.notes ?? ''));
-  const [myValueText, setMyValueText] = useState(isNewCard || existing?.myValue == null ? '' : formatInput(existing.myValue.value));
+  // "Meu valor" digitado nesta tela (null = não mexeu). Sem edição, o campo acompanha a carta salva; uma edição feita
+  // antes de o "Meu valor" ser apagado em segundo plano (a média do MYP passou dele) deixa de valer, para não trazê-lo
+  // de volta no próximo salvamento automático.
+  const [myValueEdit, setMyValueEdit] = useState<{ text: string; at: string } | null>(null);
+  const replacedAt = existing?.myValueReplaced?.at;
+  const editStale = !isNewCard && !!myValueEdit && existing?.myValue == null && !!replacedAt && replacedAt > myValueEdit.at;
+  const myValueText =
+    myValueEdit && !editStale ? myValueEdit.text : isNewCard || existing?.myValue == null ? '' : formatInput(existing.myValue.value);
   const [origin, setOrigin] = useState<Origin | undefined>(isNewCard ? undefined : existing?.origin);
   const [purchaseText, setPurchaseText] = useState(isNewCard || existing?.purchasePrice == null ? '' : formatInput(existing.purchasePrice));
   const [saving, setSaving] = useState(false);
@@ -157,7 +164,10 @@ function CardForm({ params }: { params: Params }) {
   const stampPhoto = useStampImage(lang === 'ja' ? undefined : cardId, stampKeysOf(variant, variantNote));
   // Foto oficial da versão com selo escolhida na lista (só enquanto a variação for a dessa versão).
   const photoVariant = isNewCard ? params.variant : existing?.variant;
-  const photo = variant === photoVariant ? (isNewCard ? params.photo : existing?.stampPhoto) : undefined;
+  const photoNote = ((isNewCard ? params.stamp : existing?.variantNote) ?? '').trim();
+  // A foto é da versão E do selo escolhidos: trocar um dos dois descarta a foto (vale a foto do novo selo, se houver).
+  const photoFits = (v: Variant, note: string) => v === photoVariant && note.trim() === photoNote;
+  const photo = photoFits(variant, variantNote) ? (isNewCard ? params.photo : existing?.stampPhoto) : undefined;
   const myValueNum = parseBRL(myValueText);
   const purchaseNum = parseBRL(purchaseText);
   // Valor atual da carta (com o estado e o "Meu valor" da tela), para comparar com o valor de compra.
@@ -174,7 +184,7 @@ function CardForm({ params }: { params: Params }) {
     const image = detail?.image ?? enDetail?.image ?? saved?.image;
     return {
       // Carta já salva: mantém o que só o servidor grava (preços do MYP, vendas reais, imagem reserva antiga).
-      ...(autoSave && existing ? { myp: existing.myp, mypOffers: existing.mypOffers, sold: existing.sold, ptcgId: existing.ptcgId, myValueReplaced: value == null ? existing.myValueReplaced : undefined, ligaImage: existing.ligaImage, ligaQuery: existing.ligaQuery } : {}),
+      ...(autoSave && existing ? { myp: existing.myp, mypOffers: existing.mypOffers, sold: existing.sold, mypApi: existing.mypApi, ptcgId: existing.ptcgId, myValueReplaced: value == null ? existing.myValueReplaced : undefined, ligaImage: existing.ligaImage, ligaQuery: existing.ligaQuery } : {}),
       binderId,
       dex: isExtra ? 0 : dex,
       slot,
@@ -189,7 +199,7 @@ function CardForm({ params }: { params: Params }) {
       rarity: detail?.rarity ?? saved?.rarity,
       image,
       imageUrl: image ? undefined : (detail?.imageUrl ?? resolvedImageUrl ?? (isNewCard ? undefined : saved?.imageUrl)),
-      stampPhoto: e.variant === photoVariant ? (isNewCard ? params.photo : existing?.stampPhoto) : undefined,
+      stampPhoto: photoFits(e.variant, e.variantNote) ? (isNewCard ? params.photo : existing?.stampPhoto) : undefined,
       variant: e.variant,
       variantNote: e.variantNote.trim() || undefined,
       stampKeys: stampKeysOf(e.variant, e.variantNote),
@@ -466,14 +476,14 @@ function CardForm({ params }: { params: Params }) {
               title="Meu valor"
               hint={
                 existing?.myValue && existing.myValue.value === myValueNum
-                  ? `Digitado em ${formatWhen(existing.myValue.setAt)}. Vale no lugar do preço do MYP até o MYP passar dele (aí ele é apagado e volta o MYP); apague para voltar ao MYP agora.`
+                  ? `Digitado em ${formatWhen(existing.myValue.setAt)}. É o valor fixo da carta até a média do MYP passar dele (aí ele é apagado e voltam mínimo/média/máximo); apague para voltar ao MYP agora.`
                   : !myValueText && existing?.myValueReplaced
-                    ? `Seu valor de ${formatBRL(existing.myValueReplaced.value)} foi apagado em ${formatWhen(existing.myValueReplaced.at)}: o MYP passou dele (${formatBRL(existing.myValueReplaced.mypValue)}).`
-                    : 'Opcional: o valor que você conferiu (ex.: menor anúncio no seu estado no MYP Cards). Vale no lugar do preço do MYP até o MYP passar dele.'
+                    ? `Seu valor de ${formatBRL(existing.myValueReplaced.value)} foi apagado em ${formatWhen(existing.myValueReplaced.at)}: a média do MYP passou dele (${formatBRL(existing.myValueReplaced.mypValue)}).`
+                    : 'Opcional: o valor que você conferiu (ex.: menor anúncio no seu estado no MYP Cards). Vira o valor fixo da carta até a média do MYP passar dele.'
               }>
               <Input
                 value={myValueText}
-                onChangeText={(t) => setMyValueText(t.replace(/[^\d.,]/g, ''))}
+                onChangeText={(t) => setMyValueEdit({ text: t.replace(/[^\d.,]/g, ''), at: new Date().toISOString() })}
                 keyboardType="decimal-pad"
                 placeholder="R$ 0,00"
                 accessibilityLabel="Meu valor em reais"

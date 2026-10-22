@@ -11,9 +11,9 @@ App pessoal e gratuito para colecionadores de Pokémon TCG: organize suas cartas
   - **Livres**: coleção, coleção completa, favoritas, trocas, deck, graduadas — você escolhe a carta de cada bolso.
 - **Folheie como um fichário de verdade**: arraste a página para o lado; no computador, fichários frente e verso abrem **duas páginas lado a lado**, com a capa (com o nome do fichário) ao lado da primeira página.
 - **Catálogo completo** em português, inglês e japonês ([TCGdex](https://tcgdex.dev)), com estado (M, NM, SP, MP, HP, D) e variação (holo, reverse, 1ª edição, Poké Ball, promos com selo…).
-- **Valor de cada carta em reais**, do **menor anúncio no [MYP Cards](https://mypcards.com)** ou, sem anúncio, de **vendas reais finalizadas** ([Quanto vale minha carta?](https://quantovaleminhacarta.com.br)) no estado e idioma da carta, com link para a fonte e o grau de confiança do valor.
-- **Minha coleção**: valor total, **gráfico da evolução do valor** (1M, 3M, 6M, 1A) e as cartas mais valiosas.
-- **"Meu valor"**: o colecionador pode informar o preço que conferiu; ele tem prioridade sobre as outras fontes até o MYP passar dele (aí é apagado e volta o MYP).
+- **Valor de cada carta em reais**: **mínimo, média e máximo dos anúncios no [MYP Cards](https://mypcards.com)** (API pública do MYP), com a média como valor; sem preço lá, **vendas reais finalizadas** ([Quanto vale minha carta?](https://quantovaleminhacarta.com.br)) no estado e idioma da carta. Sempre com link para a fonte e o grau de confiança.
+- **Minha coleção**: valor total (soma das médias), faixa do MYP (soma dos mínimos e dos máximos), **gráfico de rendimento** pela média (1M, 3M, 6M, 1A) e as cartas mais valiosas.
+- **"Meu valor"**: o único valor fixo da carta, até a média do MYP passar dele (aí ele é apagado e voltam mínimo/média/máximo).
 - **Origem da carta**: troca, booster ou compra; na compra, o valor pago e quanto a carta valorizou desde então.
 - **Salvamento automático**: mudar o estado, a variação, o valor ou as observações de uma carta salva na hora.
 - Visual inspirado na Pokédex e no Nintendo Switch: barras vermelhas, cartões brancos e as páginas do fichário escuras como folhas plásticas.
@@ -27,7 +27,7 @@ Os preços vêm de duas fontes brasileiras: o **MYP Cards** é a principal e as 
 
 | Fonte | O que fornece | Como é acessada |
 |---|---|---|
-| [MYP Cards](https://mypcards.com) | Preços das cartas em reais | [API oficial do MYP Cards](https://github.com/MYPCards/mypcards-api) *(acesso solicitado)*; até lá, o [servidor MCP público do Zukan](https://www.zukan.com.br/llms.txt), que repassa o menor anúncio do MYP |
+| [MYP Cards](https://mypcards.com) | Mínimo, média e máximo dos anúncios de cada carta, em reais | [API pública do MYP Cards](https://mypcards.com/acesso-api) ([documentação](https://mypcards.github.io/mypcards-api)). Sem token: 10 consultas/min e só aparelhos (o servidor recebe 403 e o navegador não tem CORS), então **o app no celular** busca aos poucos e grava no banco. Token pedido; com ele, a busca passa para o servidor. Atribuição "MYP Cards" com link em todo valor. Enquanto a carta não foi buscada, o menor anúncio vem do [servidor MCP público do Zukan](https://www.zukan.com.br/llms.txt) |
 | [Quanto vale minha carta?](https://quantovaleminhacarta.com.br) | Vendas reais finalizadas, por estado e idioma | Páginas públicas das cartas, cujo uso e citação o site autoriza no seu [llms.txt](https://quantovaleminhacarta.com.br/llms.txt) (citar a fonte, dizer que são vendas reais, preservar idioma e estado, avisar quando há poucas vendas) |
 | [TCGCSV](https://tcgcsv.com) | **Base principal do catálogo**: cartas de todas as coleções (inclusive as lançadas ontem) e versões com selo vendidas à parte, com a foto de cada uma | Espelho gratuito do catálogo da TCGplayer (obrigado, TCGCSV!), copiado 1×/dia para o Supabase pela Edge Function `catalog-sync`, seguindo as [regras de uso](https://tcgcsv.com/docs#usage-guidelines); o app só lê a cópia |
 | [TCGdex](https://tcgdex.dev) | Catálogo secundário: nome e imagem em português, ficha (ataques, HP…), variações e número da Pokédex | API pública |
@@ -46,14 +46,15 @@ Os preços vêm de duas fontes brasileiras: o **MYP Cards** é a principal e as 
 
 Em `src/lib/valuation.ts`, na ordem:
 
-1. **"Meu valor"** informado pelo colecionador, quando existe — se o MYP passar dele, o servidor apaga o "Meu valor" e a carta volta a usar o MYP;
-2. a **menor oferta no MYP Cards no estado e idioma da carta**, quando a API oferecer;
-3. o **menor anúncio no MYP Cards no idioma da carta** (confiança média);
-4. sem anúncio no MYP: a **mediana das vendas reais no estado e idioma da carta** (confiança média com 3 ou mais vendas, baixa com 1 ou 2).
+1. **"Meu valor"** informado pelo colecionador: o único valor fixo. Quando a **média do MYP** passa dele, ele é apagado (fica o registro da troca) e a carta volta a usar o MYP;
+2. a **menor oferta no MYP no estado e idioma da carta**, quando o MYP liberar esse dado;
+3. a **média dos anúncios do produto no MYP** (API pública), mostrada com o mínimo e o máximo — confiança média, porque junta todos os estados e idiomas. Versões especiais (selo, Poké Ball…) só usam o produto próprio da versão no MYP;
+4. sem preço no MYP: a **mediana das vendas reais no estado e idioma da carta** (confiança média com 3 ou mais vendas, baixa com 1 ou 2);
+5. enquanto a carta ainda não foi buscada na API do MYP: o **menor anúncio** (via Zukan) — confiança baixa, provisório.
 
 Vendas reais só contam quando são **da mesma variação da carta** (ex.: vendas da versão Normal não valem para uma promo carimbada); senão aparecem só como referência. Sem nenhuma fonte, a carta fica **sem preço** — o app não estima valores (ex.: preço americano convertido com desconto fixo por estado).
 
-Um snapshot diário (`snapshot_prices`, 23:50 de Brasília) guarda o valor de cada carta em `price_history`, base dos gráficos de valorização.
+Um snapshot diário (`snapshot_prices`, 23:50 de Brasília) guarda as fontes de cada carta (inclusive mínimo/média/máximo do MYP) em `price_history`; o gráfico de rendimento usa a mesma ordem acima, com a média do MYP.
 
 ## Rodar o app
 

@@ -1,5 +1,6 @@
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Redirect, router } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
 import { useMemo, useState, type ReactNode } from 'react';
 import { PanResponder, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -425,6 +426,14 @@ function BinderFrame(props: {
                       ? `buscando preço de ${pending} ${pending === 1 ? 'carta' : 'cartas'}…`
                       : `${totals.valued} de ${props.entries.length} com preço`}
                 </Text>
+                {/* Crédito obrigatório da API do MYP Cards onde os preços aparecem (vale também para os valores dos bolsos). */}
+                <Text
+                  style={styles.valueSource}
+                  accessibilityRole="link"
+                  accessibilityLabel="Preços do MYP Cards, abrir mypcards.com"
+                  onPress={() => WebBrowser.openBrowserAsync('https://mypcards.com')}>
+                  MYP Cards ↗
+                </Text>
               </View>
             ) : null}
           </View>
@@ -577,6 +586,7 @@ const styles = StyleSheet.create({
   valueLabel: { color: 'rgba(255,255,255,0.8)', fontSize: 12, fontWeight: '800', letterSpacing: 1, textTransform: 'uppercase' },
   value: { color: colors.onPrimary, fontSize: 22, fontWeight: '900' },
   valueNote: { color: 'rgba(255,255,255,0.8)', fontSize: 12, flexShrink: 1 },
+  valueSource: { color: colors.onPrimary, fontSize: 12, fontWeight: '800', marginLeft: 'auto', textDecorationLine: 'underline' },
   search: { marginTop: -24, marginBottom: 12 },
   notice: { color: colors.textMuted, fontSize: 13, marginBottom: 10, lineHeight: 18, textAlign: 'center' },
   pager: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },

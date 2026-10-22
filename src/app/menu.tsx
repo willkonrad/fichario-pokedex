@@ -57,6 +57,11 @@ export default function MenuScreen() {
           <Text style={styles.heroLabel}>Valor da coleção</Text>
         </View>
         <Text style={styles.heroValue}>{stats.valued ? formatBRL(stats.value) : '—'}</Text>
+        {stats.valued && (stats.low !== stats.value || stats.high !== stats.value) ? (
+          <Text style={styles.heroNote}>
+            Faixa no MYP: {formatBRL(stats.low)} (mínimos) a {formatBRL(stats.high)} (máximos)
+          </Text>
+        ) : null}
         <Text style={styles.heroNote}>
           {stats.valued
             ? [
@@ -70,15 +75,15 @@ export default function MenuScreen() {
               : 'Coloque cartas no fichário para ver o valor da coleção.'}
         </Text>
         <Text style={styles.heroSource}>
-          Valor de cada carta: anúncios do{' '}
+          Valor de cada carta: média dos anúncios do{' '}
           <Text style={styles.heroLink} accessibilityRole="link" onPress={() => WebBrowser.openBrowserAsync('https://mypcards.com')}>
             MYP Cards
           </Text>
-          ; sem anúncio, vendas reais finalizadas do{' '}
+          ; sem preço lá, vendas reais finalizadas do{' '}
           <Text style={styles.heroLink} accessibilityRole="link" onPress={() => WebBrowser.openBrowserAsync('https://quantovaleminhacarta.com.br')}>
             Quanto vale minha carta?
           </Text>{' '}
-          (ou &quot;Meu valor&quot;, quando você preenche).
+          (ou &quot;Meu valor&quot;, fixo até a média do MYP passar dele).
         </Text>
       </View>
 

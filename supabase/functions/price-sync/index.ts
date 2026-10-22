@@ -3,8 +3,8 @@
 // 1) MYP Cards (https://mypcards.com): menor anúncio por idioma, com histórico de 30 dias, pelo servidor MCP
 //    público do Zukan (zukan.com.br/mcp), feito para apps consultarem preços. Carta com preço: a cada 6 dias
 //    (nunca fica com mais de uma semana); sem preço: todo dia. Quando a API oficial do MYP for liberada
-//    (chave MYP_API_TOKEN), ela entra aqui. Se o MYP passar do "Meu valor" da carta, o "Meu valor" é apagado e o
-//    app volta a usar o MYP.
+//    (chave MYP_API_TOKEN), ela entra aqui. Se a MÉDIA do MYP (API pública, buscada pelo app no celular) passar do
+//    "Meu valor" da carta, o "Meu valor" é apagado e o app volta a usar mínimo/média/máximo do MYP.
 // 2) Quanto vale minha carta? (quantovaleminhacarta.com.br, da Leilomania): mediana de VENDAS REAIS finalizadas
 //    e pagas, por idioma e estado. O /llms.txt do site declara o conteúdo público e citável e pede: citar a
 //    fonte, dizer que são vendas reais, preservar idioma e estado e repassar o aviso de poucas vendas (o app
@@ -61,10 +61,13 @@ type EntryData = {
   localId?: string;
   condition?: string;
   variant?: string;
+  variantNote?: string;
   ptcgId?: string;
   myp?: MypInfo;
   mypOffers?: { min?: number; condition?: string; lang?: string };
   myValue?: { value: number; setAt?: string } | null;
+  /** Mínimo/média/máximo do MYP (API pública), gravados pelo app no celular. */
+  mypApi?: { cardId?: string; variant?: string; note?: string; avg?: number; ownVersion?: boolean };
   sold?: SoldInfo;
 };
 type Row = { user_id: string; id: string; data: EntryData };
@@ -147,7 +150,7 @@ Deno.serve(async (req) => {
 
     if (!Object.keys(fields).length) continue;
     for (const row of group) {
-      const { error } = await admin.rpc('set_entry_fields', { p_user: row.user_id, p_id: row.id, p_fields: { ...fields, ...replaceMyValue(row.data, fields.myp as MypInfo | undefined) } });
+      const { error } = await admin.rpc('set_entry_fields', { p_user: row.user_id, p_id: row.id, p_fields: { ...fields, ...replaceMyValue(row.data) } });
       if (!error) report.entriesUpdated++;
     }
   }
@@ -155,18 +158,21 @@ Deno.serve(async (req) => {
 });
 
 /**
- * O MYP passou do "Meu valor"? Então o "Meu valor" é apagado (o app volta a usar o MYP) e fica o registro da troca,
- * mostrado na tela da carta. Vale o mesmo preço do MYP que o app usaria: a oferta no estado e idioma da carta, se
- * houver; senão, o menor anúncio no idioma.
+ * A média do MYP passou do "Meu valor"? Então o "Meu valor" é apagado (o app volta a usar mínimo/média/máximo) e fica
+ * o registro da troca, mostrado na tela da carta. Mesma regra do app (src/lib/valuation.ts, myValuePatch): só com a
+ * média desta carta e versão; versão especial só com o produto próprio dela no MYP. O menor anúncio do Zukan não
+ * apaga o "Meu valor" (costuma ser de uma carta danificada).
  */
-function replaceMyValue(data: EntryData, myp?: MypInfo): Record<string, unknown> {
+function replaceMyValue(data: EntryData): Record<string, unknown> {
   const mine = data.myValue?.value;
-  // Versão especial (selo, Poké Ball…): o preço do MYP é o da versão comum e não serve para comparar.
-  if (mine == null || !myp || SPECIAL_VARIANTS.includes(data.variant ?? 'normal')) return {};
-  const offer = data.mypOffers;
-  const mypValue = offer?.min != null && offer.condition === data.condition && offer.lang === data.lang ? offer.min : myp.price;
-  if (mypValue == null || mypValue <= mine) return {};
-  return { myValue: null, myValueReplaced: { value: mine, mypValue, at: new Date().toISOString() } };
+  const api = data.mypApi;
+  const variant = data.variant ?? 'normal';
+  // Selo que identifica a versão (só promo/staff), igual ao app (mypApiNote).
+  const note = variant === 'wPromo' || variant === 'staff' ? (data.variantNote ?? '').trim() : '';
+  if (mine == null || api?.avg == null || api.cardId !== data.cardId || api.variant !== variant || (api.note ?? '') !== note) return {};
+  if (!api.ownVersion && SPECIAL_VARIANTS.includes(variant)) return {};
+  if (api.avg <= mine) return {};
+  return { myValue: null, myValueReplaced: { value: mine, mypValue: api.avg, at: new Date().toISOString() } };
 }
 
 // ---------- MYP Cards (via Zukan) ----------

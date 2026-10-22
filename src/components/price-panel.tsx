@@ -1,6 +1,6 @@
 import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Line, Polyline, Text as SvgText } from 'react-native-svg';
 
 import { formatBRL, formatBRLShort, formatWhen } from '@/lib/quotes';
@@ -9,6 +9,8 @@ import {
   CONFIDENCE_LABEL,
   mypCondition,
   mypCovers,
+  mypApiFitsVariant,
+  mypApiFor,
   mypFitsVariant,
   mypScanFor,
   soldMatchesVariant,
@@ -24,8 +26,8 @@ const MYP_URL = 'https://mypcards.com';
 const QVMC_URL = 'https://quantovaleminhacarta.com.br';
 
 /**
- * Cartão de preço da carta: valor (Meu valor, vendas reais ou MYP Cards), de onde ele vem, as vendas reais por
- * estado e o histórico de 30 dias do MYP.
+ * Cartão de preço da carta: valor (Meu valor ou a média do MYP Cards, com mínimo e máximo; vendas reais na falta
+ * dele), de onde ele vem, as vendas reais por estado e o histórico de 30 dias do menor anúncio no MYP.
  */
 export function PricePanel({
   entry,
@@ -63,8 +65,17 @@ export function PricePanel({
     );
   }
 
+  // Mínimo/média/máximo do produto no MYP (API pública), desta carta e versão.
+  const api = mypApiFor(entry);
+  const apiFits = !!api && mypApiFitsVariant(entry, api);
   const urlOf = (id: SourceId) =>
-    id === 'manual' ? undefined : id === 'sold' ? (sold?.url ?? QVMC_URL) : (id === 'mypOffer' && entry.mypOffers?.url) || MYP_URL;
+    id === 'manual'
+      ? undefined
+      : id === 'sold'
+        ? (sold?.url ?? QVMC_URL)
+        : id === 'myp'
+          ? (api?.url ?? MYP_URL)
+          : (id === 'mypOffer' && entry.mypOffers?.url) || MYP_URL;
   const soldHere = sold?.byCondition?.[condition];
   // Leitura das ofertas do MYP desta carta, idioma e versão (com o estado escolhido agora na tela).
   const scan = mypScanFor({ ...entry, condition });
@@ -75,9 +86,11 @@ export function PricePanel({
       ? 'meu valor · digitado por você'
       : ref?.basis === 'mypOffer'
         ? `${CONFIDENCE_LABEL.alta} · menor oferta no MYP no seu estado, idioma e versão`
-        : ref?.basis === 'sold'
-          ? `${ref.confidence ? CONFIDENCE_LABEL[ref.confidence] : ''} · mediana de ${soldHere?.count ?? 0} ${soldHere?.count === 1 ? 'venda real finalizada' : 'vendas reais finalizadas'} em ${condition}, sem anúncio no MYP${ref.confidence === 'baixa' ? ' (poucas vendas: referência inicial)' : ''}`
-          : `${CONFIDENCE_LABEL.media} · menor anúncio no MYP no idioma da carta, de qualquer estado`;
+        : ref?.basis === 'myp'
+          ? `${CONFIDENCE_LABEL.media} · média dos anúncios no MYP (todos os estados e idiomas)`
+          : ref?.basis === 'sold'
+            ? `${ref.confidence ? CONFIDENCE_LABEL[ref.confidence] : ''} · mediana de ${soldHere?.count ?? 0} ${soldHere?.count === 1 ? 'venda real finalizada' : 'vendas reais finalizadas'} em ${condition}, sem preço no MYP${ref.confidence === 'baixa' ? ' (poucas vendas: referência inicial)' : ''}`
+            : `${CONFIDENCE_LABEL.baixa} · menor anúncio no MYP, de qualquer estado (provisório, até chegarem mínimo/média/máximo)`;
 
   return (
     <View style={{ gap: 12 }}>
@@ -93,8 +106,12 @@ export function PricePanel({
           </>
         ) : (
           <Text style={styles.muted}>
-            {!myp?.checkedAt && !sold?.checkedAt && !scan
-              ? 'Buscando o preço… chega em alguns minutos.'
+            {!myp?.checkedAt && !sold?.checkedAt && !scan && !api
+              ? Platform.OS === 'web'
+                ? 'Os preços do MYP Cards são buscados pelo app no celular (sem token, a API do MYP não atende navegadores). Abra o app no celular para atualizar.'
+                : 'Buscando o preço… chega em alguns minutos.'
+              : api?.notFound && !sold?.checkedAt
+                ? `Não achei esta carta no MYP Cards (${api.notFound}). Você pode preencher "Meu valor".`
               : scan?.notFound
                 ? `Não achei esta carta no MYP Cards (${scan.notFound}) nem vendas registradas dela neste estado. Você pode preencher "Meu valor".`
               : scan
@@ -107,8 +124,44 @@ export function PricePanel({
           </Text>
         )}
 
+        {/* Mínimo, média e máximo do produto no MYP Cards (a média é o valor e entra no gráfico). */}
+        {api?.avg != null ? (
+          <>
+            <Pressable onPress={() => api.url && WebBrowser.openBrowserAsync(api.url)} accessibilityRole="link" disabled={!api.url}>
+              <Text style={[styles.label, { marginTop: 6 }]}>
+                MYP Cards{api.ownVersion ? ` · ${versionLabel.toLowerCase()}` : ''}
+                {api.url ? <Text style={styles.srcLink}> ↗</Text> : null}
+              </Text>
+            </Pressable>
+            <View style={styles.conds}>
+              {(
+                [
+                  ['Mín', api.min],
+                  ['Média', api.avg],
+                  ['Máx', api.max],
+                ] as const
+              ).map(([label, v]) => (
+                <View key={label} style={[styles.cond, label === 'Média' && apiFits && styles.condActive]} accessibilityLabel={`${label}: ${formatBRL(v)}`}>
+                  <Text style={[styles.condId, label === 'Média' && apiFits && { color: colors.primary }]}>{label}</Text>
+                  <Text style={styles.condValue} numberOfLines={1}>
+                    {v != null ? formatBRLShort(v) : '—'}
+                  </Text>
+                </View>
+              ))}
+            </View>
+            <Text style={styles.srcDetail}>
+              {api.qty != null ? `${api.qty} un. à venda · ` : ''}todos os estados e idiomas juntos · atualizado em {formatWhen(api.checkedAt)}
+            </Text>
+            {!apiFits ? (
+              <Text style={styles.note}>
+                São preços do produto comum no MYP; a sua versão ({versionLabel}) vale outra coisa, então eles não entram no valor (só referência).
+              </Text>
+            ) : null}
+          </>
+        ) : null}
+
         {/* Versão especial: o preço do MYP é da versão comum, então aparece só como referência. */}
-        {!scan && myp?.price != null && !mypFitsVariant(entry.variant) ? (
+        {!scan && !api && myp?.price != null && !mypFitsVariant(entry.variant) ? (
           <Text style={styles.note}>
             Versão comum no MYP Cards: {formatBRL(myp.price)}. Não entra no valor: a sua versão ({VARIANTS.find((v) => v.id === entry.variant)?.label ?? entry.variant}) vale outra coisa.
           </Text>
@@ -215,7 +268,7 @@ export function PricePanel({
           <Text style={styles.sourceLink} accessibilityRole="link" onPress={() => WebBrowser.openBrowserAsync(sold?.url ?? QVMC_URL)}>
             Quanto vale minha carta?
           </Text>
-          {(entry.mypOffers?.checkedAt ?? myp?.checkedAt) ? ` · atualizado em ${formatWhen((entry.mypOffers?.checkedAt ?? myp?.checkedAt)!)}` : ''}
+          {(api?.checkedAt ?? entry.mypOffers?.checkedAt ?? myp?.checkedAt) ? ` · atualizado em ${formatWhen((api?.checkedAt ?? entry.mypOffers?.checkedAt ?? myp?.checkedAt)!)}` : ''}
         </Text>
       </View>
 

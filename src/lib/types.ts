@@ -71,6 +71,33 @@ export type SoldInfo = {
 };
 
 /** Menor oferta no MYP Cards no ESTADO e IDIOMA da carta (gravado pelo servidor, quando a API do MYP fornecer). */
+/**
+ * Preços do produto da carta na API pública do MYP Cards (mypcards.com/api/v1): menor, médio e maior anúncio, de
+ * todos os estados e idiomas juntos (a API não separa). Buscados pelo app no celular (sem token, a API só atende
+ * aparelhos: 10 consultas/min), no cadastro e 1×/semana.
+ */
+export type MypApiPrice = {
+  /** Carta, versão e selo (promo/staff) para os quais a busca foi feita (se mudarem, o app busca de novo). */
+  cardId: string;
+  variant: string;
+  note?: string;
+  productId?: number;
+  /** Código do produto no MYP ("pokemon_fco_025/124"). */
+  code?: string;
+  /** Página do produto no MYP. */
+  url?: string;
+  min?: number;
+  avg?: number;
+  max?: number;
+  /** Unidades à venda. */
+  qty?: number;
+  /** Produto próprio da versão com selo (ex.: "Pokemon Day 2026"): os preços são só dessa versão. */
+  ownVersion?: boolean;
+  /** Motivo de não achar a carta no MYP. */
+  notFound?: string;
+  checkedAt: string;
+};
+
 /** Estados do MYP Cards (não tem "M": a melhor categoria é NM; "D" do app é "DM" lá). */
 export type MypCondition = 'NM' | 'SP' | 'MP' | 'HP' | 'DM';
 
@@ -130,6 +157,8 @@ export type Entry = {
   myp?: MypInfo;
   /** Menor oferta no MYP no estado e idioma da carta (gravado pelo servidor, semanal). */
   mypOffers?: MypOffers;
+  /** Menor, médio e maior preço do produto no MYP Cards (API pública; ver MypApiPrice). */
+  mypApi?: MypApiPrice;
   /** Vendas reais por estado, no idioma da carta (gravado pelo servidor, semanal). */
   sold?: SoldInfo;
   /** Id da carta na pokemontcg.io, usado pelo "Quanto vale minha carta?" (gravado pelo servidor). */

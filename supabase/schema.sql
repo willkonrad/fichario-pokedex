@@ -66,6 +66,16 @@ returns integer language sql security definer set search_path = '' as $$
       jsonb_strip_nulls(jsonb_build_object(
         'manual', e.data->'myValue',
         'mypOffer', e.data->'mypOffers',
+        -- Mínimo/média/máximo do MYP (API pública, buscados pelo app no celular), só desta carta e versão.
+        -- O gráfico de rendimento usa a média.
+        'mypApi', case
+          when e.data->'mypApi'->>'cardId' = e.data->>'cardId'
+           and e.data->'mypApi'->>'variant' = coalesce(e.data->>'variant', 'normal')
+           and e.data->'mypApi' ? 'avg'
+          then jsonb_strip_nulls(jsonb_build_object(
+            'min', e.data->'mypApi'->'min', 'avg', e.data->'mypApi'->'avg', 'max', e.data->'mypApi'->'max',
+            'own', e.data->'mypApi'->'ownVersion'))
+        end,
         -- Vendas reais no estado da carta, com o nome da variação (o app só usa se for a mesma da carta).
         'sold', (e.data->'sold'->'byCondition'->(e.data->>'condition'))
           || jsonb_strip_nulls(jsonb_build_object('variant', e.data->'sold'->'variant')),
@@ -101,7 +111,7 @@ revoke all on function public.check_liga_sync_key(text) from public, anon, authe
 grant execute on function public.check_liga_sync_key(text) to service_role;
 
 -- Troque SEU_PROJECT_REF pelo código do projeto.
-select cron.schedule('price-sync', '5-59/10 * * * *', $
+select cron.schedule('price-sync', '5-59/10 * * * *', $$
   select net.http_post(
     url := 'https://SEU_PROJECT_REF.supabase.co/functions/v1/price-sync',
     headers := jsonb_build_object('Content-Type', 'application/json',
@@ -111,3 +121,125 @@ $$);
 
 -- Foto diária do valor de cada carta, às 23:50 de Brasília.
 select cron.schedule('price-snapshot', '50 2 * * *', $$ select public.snapshot_prices(); $$);
+
+-- ===== Preços do MYP Cards pela API pública (mínimo/média/máximo), buscados pelo app no celular =====
+
+-- Grava os preços do MYP (mypApi) SOBRE a carta como está no banco (mescla campo a campo, sem sobrescrever edições de
+-- outro aparelho ou do servidor) e aplica a regra do "Meu valor" com o valor atual do banco: se a média do MYP (desta
+-- carta, versão e selo) passar dele, ele é apagado e fica o registro da troca. Roda com as permissões do usuário.
+create or replace function public.patch_entry_myp(p_id text, p_myp jsonb)
+returns jsonb language plpgsql security invoker set search_path = '' as $$
+declare
+  cur jsonb;
+  nxt jsonb;
+  mine numeric;
+  avg numeric;
+  v text;
+  note text;
+begin
+  select data into cur from public.entries where user_id = (select auth.uid()) and id = p_id for update;
+  if cur is null then
+    return null;
+  end if;
+  nxt := cur || jsonb_build_object('mypApi', p_myp);
+  mine := nullif(cur->'myValue'->>'value', '')::numeric;
+  avg := nullif(p_myp->>'avg', '')::numeric;
+  v := coalesce(cur->>'variant', 'normal');
+  note := case when v in ('wPromo', 'staff') then coalesce(btrim(cur->>'variantNote'), '') else '' end;
+  if mine is not null and avg is not null and avg > mine
+     and p_myp->>'cardId' = cur->>'cardId' and p_myp->>'variant' = v and coalesce(p_myp->>'note', '') = note
+     and (coalesce((p_myp->>'ownVersion')::boolean, false)
+          or v not in ('wPromo', 'staff', 'pokeball', 'masterball', 'firstEdition', 'shadowless', 'other')) then
+    nxt := nxt || jsonb_build_object(
+      'myValue', null,
+      'myValueReplaced', jsonb_build_object('value', mine, 'mypValue', avg, 'at', p_myp->>'checkedAt'));
+  end if;
+  nxt := nxt || jsonb_build_object('updatedAt', to_char(now() at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'));
+  update public.entries set data = nxt, updated_at = now() where user_id = (select auth.uid()) and id = p_id;
+  return jsonb_build_object('prev', cur->>'updatedAt', 'data', nxt);
+end;
+$$;
+revoke all on function public.patch_entry_myp(text, jsonb) from public, anon;
+grant execute on function public.patch_entry_myp(text, jsonb) to authenticated;
+
+-- Edições do MYP Cards, usadas pela Edge Function myp-scan (leitura das páginas do produto, publicada mas NÃO agendada:
+-- o MYP bloqueia servidores; fica pronta para quando houver token ou dados por estado).
+create table if not exists public.myp_editions (
+  id integer primary key,
+  sigla text not null,
+  name text,
+  slug text,
+  synced_at timestamptz not null default now()
+);
+alter table public.myp_editions enable row level security;
+
+-- ===== Catálogo de cartas: TCGCSV (base principal) ligado à TCGdex — Edge Function catalog-sync + pg_cron =====
+
+-- Coleções do TCGCSV (catálogo da TCGplayer): 3 = Pokémon em inglês, 85 = japonês.
+create table if not exists public.tcg_groups (
+  group_id integer primary key,
+  category smallint not null,
+  name text not null,
+  abbr text,
+  modified_on timestamptz,
+  synced_at timestamptz,
+  -- Versão da regra de ligação TCGCSV → TCGdex aplicada (sobe quando a regra melhora, para religar sem baixar de novo).
+  link_version integer not null default 0
+);
+
+-- Cartas do TCGCSV, ligadas ao id da TCGdex quando a carta existe lá (mesma coleção, número e nome).
+create table if not exists public.tcg_catalog (
+  product_id integer primary key,
+  category smallint not null,
+  group_id integer not null references public.tcg_groups (group_id) on delete cascade,
+  name text not null,
+  full_name text not null,
+  number text,
+  rarity text,
+  image text not null,
+  stamp text,
+  tcgdex_id text,
+  updated_at timestamptz not null default now()
+);
+create extension if not exists pg_trgm with schema extensions;
+create index if not exists tcg_catalog_name_trgm on public.tcg_catalog using gin (name extensions.gin_trgm_ops);
+create index if not exists tcg_catalog_tcgdex on public.tcg_catalog (tcgdex_id);
+create index if not exists tcg_catalog_group on public.tcg_catalog (group_id);
+
+-- Siglas e cartas das coleções da TCGdex (para ligar às do TCGCSV).
+create table if not exists public.tcgdex_sets (
+  id text primary key,
+  name text,
+  abbr text,
+  cards jsonb,
+  synced_at timestamptz not null default now()
+);
+
+alter table public.tcg_groups enable row level security;
+alter table public.tcg_catalog enable row level security;
+alter table public.tcgdex_sets enable row level security;
+create policy "catálogo público" on public.tcg_groups for select to anon, authenticated using (true);
+create policy "catálogo público" on public.tcg_catalog for select to anon, authenticated using (true);
+
+-- Religa cartas do catálogo à TCGdex em lote: p = [{ product_id, tcgdex_id }] (só o servidor).
+create or replace function public.relink_catalog(p jsonb)
+returns integer language sql security definer set search_path = '' as $$
+  with upd as (
+    update public.tcg_catalog c set tcgdex_id = x.tcgdex_id
+    from jsonb_to_recordset(p) as x(product_id integer, tcgdex_id text)
+    where c.product_id = x.product_id and c.tcgdex_id is distinct from x.tcgdex_id
+    returning 1
+  )
+  select count(*)::int from upd;
+$$;
+revoke all on function public.relink_catalog(jsonb) from public, anon, authenticated;
+grant execute on function public.relink_catalog(jsonb) to service_role;
+
+-- Cópia do catálogo do TCGCSV (respeita as regras dele: 1×/dia por coleção alterada). Troque SEU_PROJECT_REF.
+select cron.schedule('catalog-sync', '2-59/10 * * * *', $$
+  select net.http_post(
+    url := 'https://SEU_PROJECT_REF.supabase.co/functions/v1/catalog-sync',
+    headers := jsonb_build_object('Content-Type', 'application/json',
+      'x-sync-key', (select decrypted_secret from vault.decrypted_secrets where name = 'liga_sync_key')),
+    body := '{}'::jsonb, timeout_milliseconds := 150000);
+$$);
