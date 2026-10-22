@@ -423,7 +423,7 @@ function BinderFrame(props: {
                     style={styles.value}
                     accessibilityLabel={
                       totals.valued
-                        ? `Média ${formatBRL(totals.value)}${isSpread(totals.range) ? `, de ${formatBRL(totals.min)} a ${formatBRL(totals.max)}` : ''}`
+                        ? `Valor calculado ${formatBRL(totals.value)}${isSpread(totals.range) ? `, mínimo ${formatBRL(totals.min)}, média ${formatBRL(totals.avg)}, máximo ${formatBRL(totals.max)}` : ''}`
                         : 'Sem valor'
                     }>
                     {totals.valued ? formatBRLTight(totals.value) : '—'}
@@ -437,10 +437,12 @@ function BinderFrame(props: {
                     MYP Cards ↗
                   </Text>
                 </View>
-                {/* Mínimo e máximo na linha de baixo (na linha do valor, o "máx" seria cortado no celular). */}
+                {/* Valor calculado na linha de cima; mínimo, média e máximo embaixo (na linha do valor, seriam cortados no celular). */}
                 <Text style={styles.valueNote}>
                   {[
-                    totals.valued && isSpread(totals.range) ? `mín ${formatBRLTight(totals.min)} · máx ${formatBRLTight(totals.max)}` : null,
+                    totals.valued && isSpread(totals.range)
+                      ? `mín ${formatBRLTight(totals.min)} · méd ${formatBRLTight(totals.avg)} · máx ${formatBRLTight(totals.max)}`
+                      : null,
                     !props.entries.length
                       ? 'coloque sua primeira carta'
                       : pending

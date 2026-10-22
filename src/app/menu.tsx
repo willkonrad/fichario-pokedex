@@ -10,10 +10,10 @@ import { ValueRangeRow } from '@/components/value-range';
 import { TOTAL_SPECIES } from '@/data/pokedex';
 import { dexRange } from '@/lib/binder';
 import { collectionHistory, type HistoryPoint } from '@/lib/history';
-import { collectionTotals, entryRange, formatBRL, formatBRLShort, formatBRLTight, formatRange, formatWhen, priceFreshness } from '@/lib/quotes';
+import { collectionTotals, formatBRL, formatBRLShort, formatBRLTight, formatRange, formatWhen, priceFreshness } from '@/lib/quotes';
 import { clearCatalogCache } from '@/lib/tcgdex';
 import { POKEDEX_BINDER, type Entry } from '@/lib/types';
-import { isSpread, type ValueRange } from '@/lib/valuation';
+import { isSpread, valuation, type Valuation, type ValueRange } from '@/lib/valuation';
 import { entriesOf, useCollection } from '@/store/collection';
 import { colors, MAX_WIDTH, radius, shadow } from '@/theme';
 
@@ -34,13 +34,13 @@ export default function MenuScreen() {
     return { cards: list.length, species: new Set(pokedex.map((e) => e.dex)).size, ...collectionTotals(list), ...priceFreshness(list) };
   }, [entries, range.from, range.to]);
   const pct = Math.round((stats.species / range.count) * 1000) / 10;
-  // As 5 cartas mais valiosas (pela média).
+  // As 5 cartas mais valiosas (pelo valor de cada uma: a média ou o valor escolhido nela).
   const top = useMemo(
     () =>
       Object.values(entries)
-        .map((e) => ({ e, range: entryRange(e) }))
-        .filter((x): x is { e: Entry; range: ValueRange } => x.range != null)
-        .sort((a, b) => b.range.avg - a.range.avg)
+        .map((e) => ({ e, ref: valuation(e) }))
+        .filter((x): x is { e: Entry; ref: Valuation & { value: number; range: ValueRange } } => x.ref.value != null && !!x.ref.range)
+        .sort((a, b) => b.ref.value - a.ref.value)
         .slice(0, 5),
     [entries],
   );
@@ -58,13 +58,16 @@ export default function MenuScreen() {
           <MaterialCommunityIcons name="pokeball" size={18} color="rgba(255,255,255,0.85)" />
           <Text style={styles.heroLabel}>Valor da coleção</Text>
         </View>
+        {/* Valor calculado (a média de cada carta, ou o valor escolhido nela) e, embaixo, as somas do MYP. */}
+        <Text style={styles.heroValue} numberOfLines={1} adjustsFontSizeToFit>
+          {stats.valued ? formatBRL(stats.value) : '—'}
+        </Text>
+        {stats.valued ? <Text style={styles.heroCaption}>valor calculado · a média de cada carta, ou o valor escolhido nela</Text> : null}
         {stats.valued && isSpread(stats.range) ? (
           <View style={styles.heroRange}>
-            <ValueRangeRow range={stats.range} onPrimary size="lg" />
+            <ValueRangeRow range={stats.range} emphasis={null} onPrimary size="lg" />
           </View>
-        ) : (
-          <Text style={styles.heroValue}>{stats.valued ? formatBRL(stats.value) : '—'}</Text>
-        )}
+        ) : null}
         <Text style={styles.heroNote}>
           {stats.valued
             ? [
@@ -78,11 +81,12 @@ export default function MenuScreen() {
               : 'Coloque cartas no fichário para ver o valor da coleção.'}
         </Text>
         <Text style={styles.heroSource}>
-          Valor de cada carta: mínimo, média e máximo dos anúncios do{' '}
+          Preços: mínimo, média e máximo dos anúncios do{' '}
           <Text style={styles.heroLink} accessibilityRole="link" onPress={() => WebBrowser.openBrowserAsync('https://mypcards.com')}>
             MYP Cards
           </Text>
-          , somados (ou &quot;Meu valor&quot;, fixo até a média do MYP passar dele).
+          , somados (ou &quot;Meu valor&quot;, fixo até a média do MYP passar dele). Em cada carta você escolhe qual dos três entra
+          no valor calculado.
         </Text>
       </View>
 
@@ -97,14 +101,14 @@ export default function MenuScreen() {
         <>
           <GroupLabel>Mais valiosas</GroupLabel>
           <View style={styles.group}>
-            {top.map(({ e, range }, i) => (
+            {top.map(({ e, ref: { value, range } }, i) => (
               <View key={e.id}>
                 {i > 0 ? <View style={[styles.divider, { marginLeft: 50 }]} /> : null}
                 <Pressable
                   style={({ pressed }) => [styles.topRow, pressed && { opacity: 0.7 }]}
                   onPress={() => openCard(e)}
                   accessibilityRole="button"
-                  accessibilityLabel={`${e.cardName}, média ${formatBRL(range.avg)}${isSpread(range) ? `, de ${formatBRL(range.min)} a ${formatBRL(range.max)}` : ''}`}>
+                  accessibilityLabel={`${e.cardName}, ${formatBRL(value)}${isSpread(range) ? `, de ${formatBRL(range.min)} a ${formatBRL(range.max)}` : ''}`}>
                   <View style={[styles.rank, i === 0 && { backgroundColor: colors.yellow }]}>
                     <Text style={styles.rankText}>{i + 1}</Text>
                   </View>
@@ -117,7 +121,7 @@ export default function MenuScreen() {
                     </Text>
                   </View>
                   <View style={styles.topValues}>
-                    <Text style={styles.topValue}>{formatBRLTight(range.avg)}</Text>
+                    <Text style={styles.topValue}>{formatBRLTight(value)}</Text>
                     {isSpread(range) ? <Text style={styles.topRange}>{formatRange(range.min, range.max)}</Text> : null}
                   </View>
                 </Pressable>
@@ -189,7 +193,7 @@ function CollectionChart({ signedIn }: { signedIn: boolean }) {
   }, [history, days]);
   const first = points[0];
   const last = points[points.length - 1];
-  // Variação pela média; a faixa (mínimo a máximo) aparece embaixo.
+  // Variação pelo valor calculado; a faixa (mínimo a máximo) aparece embaixo.
   const change = first && last && first.v > 0 ? ((last.v - first.v) / first.v) * 100 : null;
   const spread = points.some((p) => p.hi - p.lo >= 0.005);
 
@@ -232,13 +236,13 @@ function CollectionChart({ signedIn }: { signedIn: boolean }) {
   );
 }
 
-/** Legenda do gráfico: a linha é a média e a faixa vai do mínimo ao máximo (valores do último dia). */
+/** Legenda do gráfico: a linha é o valor calculado e a faixa vai do mínimo ao máximo (valores do último dia). */
 function ChartLegend({ last }: { last: { v: number; lo: number; hi: number } }) {
   return (
     <View style={styles.legend}>
       <View style={styles.legendItem}>
         <View style={styles.legendLine} />
-        <Text style={styles.legendText}>Média {formatBRLTight(last.v)}</Text>
+        <Text style={styles.legendText}>Valor calculado {formatBRLTight(last.v)}</Text>
       </View>
       <View style={styles.legendItem}>
         <View style={styles.legendBand} />
@@ -284,7 +288,8 @@ const styles = StyleSheet.create({
   heroTop: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   heroLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '800', letterSpacing: 1.2, textTransform: 'uppercase' },
   heroValue: { color: colors.onPrimary, fontSize: 36, fontWeight: '900', marginTop: 6 },
-  heroRange: { marginTop: 10, marginHorizontal: -4 },
+  heroCaption: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '700', marginTop: 2 },
+  heroRange: { marginTop: 12, marginHorizontal: -4, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.35)' },
   heroNote: { color: 'rgba(255,255,255,0.9)', fontSize: 13, marginTop: 6, lineHeight: 18 },
   heroSource: { color: 'rgba(255,255,255,0.8)', fontSize: 12, marginTop: 8, lineHeight: 17 },
   heroLink: { color: colors.yellow, fontWeight: '800', textDecorationLine: 'underline' },

@@ -115,11 +115,12 @@ export default function BindersScreen() {
 
       {/* Crédito obrigatório da API do MYP Cards (os valores dos fichários vêm dela). */}
       <Text style={styles.hint}>
-        Valores: média dos anúncios do{' '}
+        Valores: valor calculado com os anúncios do{' '}
         <Text style={styles.link} accessibilityRole="link" onPress={() => WebBrowser.openBrowserAsync('https://mypcards.com')}>
           MYP Cards ↗
         </Text>{' '}
-        e, entre parênteses, a soma dos mínimos e dos máximos (ou &quot;Meu valor&quot;).
+        (a média de cada carta, ou o valor escolhido nela) e, entre parênteses, a soma dos mínimos e dos máximos (ou &quot;Meu
+        valor&quot;).
       </Text>
 
       <Button title="Novo fichário" icon="add" onPress={() => router.push('/binder-edit')} />

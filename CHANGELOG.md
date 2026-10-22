@@ -1,5 +1,12 @@
 # Notas da versão
 
+## 2.7.0 — Você escolhe o valor de cada carta (22/10/2026)
+
+- **Mínimo, média ou máximo**: na tela da carta, toque no preço do MYP que vale para ela (ex.: o mínimo para cartas novas, em que ele costuma ser o valor real; a média para as antigas). A escolha fica salva na carta; sem escolha, vale a média.
+- **Valor calculado**: a soma da coleção mostra em destaque o valor calculado (o valor escolhido de cada carta) e, embaixo, a soma dos mínimos, das médias e dos máximos. O cabeçalho do fichário, a lista de fichários, as mais valiosas, os bolsos e a comparação com o valor de compra usam o valor escolhido.
+- **Gráfico de rendimento**: a linha passa a ser o valor calculado (a foto diária guarda a escolha de cada carta), com a faixa do mínimo ao máximo.
+- A API do MYP não separa os preços por idioma nem por estado: os três valores juntam todos os anúncios do produto.
+
 ## 2.6.1 — Preços que faltavam (22/10/2026)
 
 - **A carta aberta na tela passa na frente da fila** de busca do MYP no celular: abriu uma carta sem preço, ela é buscada na hora.

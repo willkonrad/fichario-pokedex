@@ -1,31 +1,29 @@
 import type { Entry } from './types';
 import { valuation } from './valuation';
 
-/** Mínimo, média e máximo da carta ("Meu valor" ou o MYP; ver valuation.ts). */
-export function entryRange(e: Entry) {
-  return valuation(e).range;
-}
-
 /**
- * Totais da coleção: soma dos mínimos, das médias e dos máximos das cartas (cartas com "Meu valor" entram com ele nas
- * três colunas) e quantas cartas têm valor, por confiança. `value` é a soma das médias.
+ * Totais da coleção: o valor calculado (`value`, a soma do valor escolhido em cada carta: mínimo, média ou máximo; a
+ * média por padrão), a soma dos mínimos, das médias e dos máximos (cartas com "Meu valor" entram com ele em tudo) e
+ * quantas cartas têm valor, por confiança.
  */
 export function collectionTotals(entries: Entry[]) {
   let value = 0;
   let valued = 0;
   let min = 0;
+  let avg = 0;
   let max = 0;
   const byConfidence = { alta: 0, media: 0, baixa: 0 };
   for (const e of entries) {
     const ref = valuation(e);
-    if (!ref.range) continue;
-    value += ref.range.avg;
+    if (!ref.range || ref.value == null) continue;
+    value += ref.value;
     min += ref.range.min;
+    avg += ref.range.avg;
     max += ref.range.max;
     valued++;
     if (ref.confidence) byConfidence[ref.confidence]++;
   }
-  return { value, valued, min, max, range: { min, avg: value, max }, byConfidence, unvalued: entries.length - valued };
+  return { value, valued, min, avg, max, range: { min, avg, max }, byConfidence, unvalued: entries.length - valued };
 }
 
 /** Faixa curta, sem a média: "R$ 5,50 – R$ 31". */

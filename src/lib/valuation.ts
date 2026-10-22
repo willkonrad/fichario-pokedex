@@ -1,4 +1,4 @@
-import type { Entry, MypApiPrice } from './types';
+import type { Entry, MypApiPrice, ValueBasis } from './types';
 
 /**
  * Valor da carta (em reais). Só duas fontes:
@@ -9,8 +9,9 @@ import type { Entry, MypApiPrice } from './types';
  *      confiança média, porque juntam todos os estados e idiomas. Versão especial (selo, Poké Ball…) que o MYP não
  *      vende à parte usa o produto da carta base, que tem valor parecido — confiança baixa.
  *
- * A faixa (mín/méd/máx) é o valor da carta e entra nos totais da coleção e no gráfico de rendimento; a média é o ponto
- * do meio (ordena as mais valiosas e aparece nos bolsos). Sem nenhuma das duas fontes, a carta fica sem valor.
+ * A faixa (mín/méd/máx) aparece em todas as telas e é somada na coleção. O VALOR da carta (o "valor calculado" da
+ * soma, dos bolsos, das mais valiosas e do gráfico) é um dos três, escolhido na carta (`valueBasis`): a média por
+ * padrão; o mínimo costuma ser o valor real de cartas novas. Sem nenhuma das duas fontes, a carta fica sem valor.
  */
 
 export type SourceId = 'manual' | 'myp';
@@ -77,10 +78,12 @@ export type SourceRow = {
 export type ValueRange = { min: number; avg: number; max: number };
 
 export type Valuation = {
-  /** A média (ou o "Meu valor"). */
+  /** O valor da carta: o mínimo, a média ou o máximo escolhido (`pick`), ou o "Meu valor". */
   value?: number;
-  /** Mínimo, média e máximo: o valor da carta como o MYP informa. */
+  /** Mínimo, média e máximo como o MYP informa (com "Meu valor", os três são ele). */
   range?: ValueRange;
+  /** Qual dos três é o valor (sem efeito no "Meu valor"). */
+  pick?: ValueBasis;
   confidence?: Confidence;
   /** De onde veio o valor. */
   basis?: SourceId;
@@ -126,9 +129,12 @@ export function valuation(e: Entry): Valuation {
   const best = all[0];
   if (!best) return { sources: [] };
   const api = best.id === 'myp' ? mypApiFor(e) : undefined;
+  const range = { min: Math.min(api?.min ?? best.brl, best.brl), avg: best.brl, max: Math.max(api?.max ?? best.brl, best.brl) };
+  const pick = e.valueBasis ?? 'avg';
   return {
-    value: best.brl,
-    range: { min: Math.min(api?.min ?? best.brl, best.brl), avg: best.brl, max: Math.max(api?.max ?? best.brl, best.brl) },
+    value: range[pick],
+    range,
+    pick,
     // Preço da carta base para uma versão especial: confiança baixa.
     confidence: best.id === 'manual' ? 'alta' : api && !mypApiFitsVariant(e, api) ? 'baixa' : 'media',
     basis: best.id,

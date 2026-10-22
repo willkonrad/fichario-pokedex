@@ -28,6 +28,10 @@ export const VARIANTS = [
 ] as const;
 export type Variant = (typeof VARIANTS)[number]['id'];
 
+/** Qual preço do MYP conta como o valor da carta: mínimo, média ou máximo dos anúncios. */
+export type ValueBasis = 'min' | 'avg' | 'max';
+export const VALUE_BASIS_LABEL: Record<ValueBasis, string> = { min: 'mínimo', avg: 'média', max: 'máximo' };
+
 /** Como a carta chegou à coleção. */
 export const ORIGINS = [
   { id: 'trade', label: 'Troca' },
@@ -97,6 +101,11 @@ export type Entry = {
   notes?: string;
   /** Menor, médio e maior preço do produto no MYP Cards (API pública; ver MypApiPrice). */
   mypApi?: MypApiPrice;
+  /**
+   * Qual dos três preços do MYP é o valor da carta na soma (ex.: mínimo para cartas novas, média para as antigas).
+   * Ausente = média.
+   */
+  valueBasis?: ValueBasis;
   /**
    * Valor digitado pelo usuário: o único valor fixo, com prioridade sobre a média do MYP. É apagado (null) quando a
    * média do MYP passa dele.

@@ -3,7 +3,7 @@ import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ValueRangeRow } from '@/components/value-range';
 import { formatBRL, formatBRLShort, formatWhen } from '@/lib/quotes';
-import { VARIANTS, type Entry } from '@/lib/types';
+import { VALUE_BASIS_LABEL, VARIANTS, type Entry, type ValueBasis } from '@/lib/types';
 import { CONFIDENCE_LABEL, mypApiFitsVariant, mypApiFor, mypCovers, valuation, type Confidence } from '@/lib/valuation';
 import { colors, confidenceColors, radius, shadow } from '@/theme';
 
@@ -17,18 +17,27 @@ const MYP_URL = 'https://mypcards.com';
 export function PricePanel({
   entry,
   myValue,
+  basis,
+  onBasis,
   ligaUrl,
 }: {
   /** Carta salva (os preços chegam depois de salvar). */
   entry?: Entry;
   /** "Meu valor" digitado agora na tela (ainda não salvo). */
   myValue?: number;
+  /** Valor que entra na soma, escolhido agora na tela (mínimo, média ou máximo). */
+  basis?: ValueBasis;
+  onBasis?: (basis: ValueBasis) => void;
   /** Página da carta na LigaPokemon (só o link; o valor vem do MYP). */
   ligaUrl?: string;
 }) {
-  // Valor com o "Meu valor" digitado agora na tela.
+  // Valor com o "Meu valor" e o valor escolhido agora na tela.
   const here = entry
-    ? { ...entry, myValue: myValue != null ? { value: myValue, setAt: entry.myValue?.setAt ?? new Date().toISOString() } : undefined }
+    ? {
+        ...entry,
+        myValue: myValue != null ? { value: myValue, setAt: entry.myValue?.setAt ?? new Date().toISOString() } : undefined,
+        valueBasis: basis ?? entry.valueBasis,
+      }
     : undefined;
   const ref = here ? valuation(here) : undefined;
 
@@ -60,11 +69,15 @@ export function PricePanel({
     <View style={styles.card}>
       <Text style={styles.label}>Valor da carta</Text>
       {ref?.range && ref.basis === 'myp' ? (
-        // O valor é a faixa do MYP: mínimo, média e máximo, como a API informa.
+        // Mínimo, média e máximo como a API informa; o escolhido (a média, por padrão) é o valor que entra na soma.
         <>
-          <View style={styles.rangeBox}>
-            <ValueRangeRow range={ref.range} avgColor={tone} />
-          </View>
+          <ValueRangeRow range={ref.range} emphasis={ref.pick} emphasisColor={tone} onSelect={onBasis} />
+          {onBasis ? (
+            <Text style={styles.detail}>
+              Entra na soma: {ref.pick === 'avg' || !ref.pick ? 'a' : 'o'} {VALUE_BASIS_LABEL[ref.pick ?? 'avg']}. Toque em outro para
+              trocar (o mínimo costuma ser o valor real de cartas novas; a média, o das antigas).
+            </Text>
+          ) : null}
           <View style={styles.confRow}>
             <View style={[styles.confDot, { backgroundColor: tone }]} />
             <Text style={styles.mainSource}>{subtitle}</Text>
@@ -185,7 +198,6 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     alignItems: 'center',
   },
-  rangeBox: { borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, paddingVertical: 10, paddingHorizontal: 4, marginTop: 2 },
   cellId: { color: colors.textMuted, fontSize: 11, fontWeight: '900' },
   cellValue: { color: colors.text, fontSize: 12, fontWeight: '800', marginTop: 1 },
   storeRow: { flexDirection: 'row', gap: 8, marginTop: 4 },

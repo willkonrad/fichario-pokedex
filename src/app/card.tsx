@@ -16,7 +16,19 @@ import { ligaQuery, ligaSearchUrl } from '@/lib/liga';
 import { mypApiDue, prioritizeMypPrice } from '@/lib/myp-api';
 import { formatBRL, formatWhen } from '@/lib/quotes';
 import { cardDetail, type CardDetail } from '@/lib/tcgdex';
-import { CONDITIONS, LANG_LABEL, ORIGINS, VARIANTS, type CardLang, type Condition, type Entry, type Origin, type Variant } from '@/lib/types';
+import {
+  CONDITIONS,
+  LANG_LABEL,
+  ORIGINS,
+  VALUE_BASIS_LABEL,
+  VARIANTS,
+  type CardLang,
+  type Condition,
+  type Entry,
+  type Origin,
+  type ValueBasis,
+  type Variant,
+} from '@/lib/types';
 import { isSpread, valuation } from '@/lib/valuation';
 import { useStampImage } from '@/lib/stamp-image';
 import { availableVariants, versionOptions, type VersionOption } from '@/lib/variants';
@@ -47,6 +59,8 @@ type Edits = {
   myValueText: string;
   origin: Origin | undefined;
   purchaseText: string;
+  /** Qual preço do MYP entra na soma (ausente = média). */
+  valueBasis: ValueBasis | undefined;
 };
 
 export default function CardScreen() {
@@ -104,6 +118,10 @@ function CardForm({ params }: { params: Params }) {
     myValueEdit && !editStale ? myValueEdit.text : isNewCard || existing?.myValue == null ? '' : formatInput(existing.myValue.value);
   const [origin, setOrigin] = useState<Origin | undefined>(isNewCard ? undefined : existing?.origin);
   const [purchaseText, setPurchaseText] = useState(isNewCard || existing?.purchasePrice == null ? '' : formatInput(existing.purchasePrice));
+  // Valor que entra na soma escolhido nesta tela (null = não mexeu): sem escolha aqui, acompanha a carta salva, que pode
+  // mudar por outro aparelho ou pela busca de preço; assim o painel mostra o mesmo que o salvamento automático grava.
+  const [basisEdit, setBasisEdit] = useState<{ v: ValueBasis | undefined } | null>(null);
+  const valueBasis = basisEdit ? basisEdit.v : isNewCard ? undefined : existing?.valueBasis;
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [moveTo, setMoveTo] = useState('');
@@ -175,13 +193,16 @@ function CardForm({ params }: { params: Params }) {
   const photo = photoFits(variant, variantNote) ? (isNewCard ? params.photo : existing?.stampPhoto) : undefined;
   const myValueNum = parseBRL(myValueText);
   const purchaseNum = parseBRL(purchaseText);
-  // Valor atual da carta (com o "Meu valor" da tela), para comparar com o valor de compra: a média e a faixa do MYP.
-  const current = existing && !isNewCard ? valuation({ ...existing, myValue: myValueNum != null ? { value: myValueNum, setAt: '' } : undefined }) : undefined;
+  // Valor atual da carta (com o "Meu valor" e o valor escolhido na tela), para comparar com o valor de compra.
+  const current =
+    existing && !isNewCard
+      ? valuation({ ...existing, valueBasis, myValue: myValueNum != null ? { value: myValueNum, setAt: '' } : undefined })
+      : undefined;
   const currentValue = current?.value;
 
   /** A carta completa, com as edições atuais (e `patch` por cima, para mudanças feitas agora). */
   function buildEntry(patch: Partial<Edits> = {}): Omit<Entry, 'id' | 'updatedAt'> {
-    const e: Edits = { condition, variant, variantNote, notes, myValueText, origin, purchaseText, ...patch };
+    const e: Edits = { condition, variant, variantNote, notes, myValueText, origin, purchaseText, valueBasis, ...patch };
     const value = parseBRL(e.myValueText);
     // Ficha em português sem imagem: a do catálogo em inglês (mesmo id, mesma arte).
     const image = detail?.image ?? enDetail?.image ?? saved?.image;
@@ -210,6 +231,7 @@ function CardForm({ params }: { params: Params }) {
       notes: e.notes.trim() || undefined,
       origin: e.origin,
       purchasePrice: e.origin === 'purchase' ? parseBRL(e.purchaseText) : undefined,
+      valueBasis: e.valueBasis === 'avg' ? undefined : e.valueBasis,
       // Mantém a data de quando o valor foi digitado, se ele não mudou.
       myValue:
         value == null
@@ -412,7 +434,21 @@ function CardForm({ params }: { params: Params }) {
 
           {/* Valor (MYP Cards ou "Meu valor") e histórico */}
           <View style={{ marginTop: 18 }}>
-            <PricePanel entry={isNewCard ? undefined : existing} myValue={myValueNum} ligaUrl={ligaUrl} />
+            <PricePanel
+              entry={isNewCard ? undefined : existing}
+              myValue={myValueNum}
+              basis={valueBasis ?? 'avg'}
+              onBasis={
+                autoSave
+                  ? (b) => {
+                      const next = b === 'avg' ? undefined : b;
+                      setBasisEdit({ v: next });
+                      autoPersist({ valueBasis: next }).catch(() => {});
+                    }
+                  : undefined
+              }
+              ligaUrl={ligaUrl}
+            />
           </View>
 
           {/* Minha carta: estado, variação, meu valor, observações */}
@@ -518,7 +554,8 @@ function CardForm({ params }: { params: Params }) {
                   />
                   {purchaseNum != null && currentValue != null ? (
                     <Text style={[styles.purchaseDiff, { color: currentValue >= purchaseNum ? colors.success : colors.danger }]}>
-                      {current?.basis === 'manual' ? 'Meu valor' : 'Média atual'} {formatBRL(currentValue)} · {currentValue >= purchaseNum ? '+' : '−'}
+                      {current?.basis === 'manual' ? 'Meu valor' : `Valor atual (${VALUE_BASIS_LABEL[current?.pick ?? 'avg']})`} {formatBRL(currentValue)} ·{' '}
+                      {currentValue >= purchaseNum ? '+' : '−'}
                       {formatBRL(Math.abs(currentValue - purchaseNum))} ({currentValue >= purchaseNum ? '+' : '−'}
                       {Math.abs(Math.round(((currentValue - purchaseNum) / purchaseNum) * 100))}%) desde a compra
                       {current?.range && isSpread(current.range) ? (

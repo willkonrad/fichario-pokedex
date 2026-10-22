@@ -5,7 +5,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { formatDex, getSpecies, spriteUrl } from '@/data/pokedex';
 import { CardImage } from '@/components/card-image';
 import { CONFIDENCE_LABEL, isSpread, pricePending, valuation } from '@/lib/valuation';
-import type { Entry } from '@/lib/types';
+import { VALUE_BASIS_LABEL, type Entry } from '@/lib/types';
 import { binderColors as B, CARD_RATIO, colors, confidenceColors, mono, radius } from '@/theme';
 
 const SPECIAL = new Set(['holo', 'reverse', 'firstEdition', 'pokeball', 'masterball', 'wPromo', 'shadowless', 'staff']);
@@ -139,7 +139,7 @@ function SlotPrice({ entry, small }: { entry: Entry; small: boolean }) {
   return (
     <View
       style={[styles.pill, { height: h, backgroundColor: tone.bg }]}
-      accessibilityLabel={`${ref.basis === 'manual' ? 'Meu valor' : 'Valor médio'} ${ref.value.toFixed(2)} reais${ref.range && isSpread(ref.range) ? `, de ${ref.range.min.toFixed(2)} a ${ref.range.max.toFixed(2)}` : ''}, ${CONFIDENCE_LABEL[ref.confidence]}`}>
+      accessibilityLabel={`${ref.basis === 'manual' ? 'Meu valor' : `Valor (${VALUE_BASIS_LABEL[ref.pick ?? 'avg']})`} ${ref.value.toFixed(2)} reais${ref.range && isSpread(ref.range) ? `, de ${ref.range.min.toFixed(2)} a ${ref.range.max.toFixed(2)}` : ''}, ${CONFIDENCE_LABEL[ref.confidence]}`}>
       <Text style={[styles.priceText, { fontSize: size, color: tone.fg }]} numberOfLines={1}>
         <Text style={{ fontSize: size - 2, fontWeight: '700' }}>R$ </Text>
         {formatCompact(ref.value)}

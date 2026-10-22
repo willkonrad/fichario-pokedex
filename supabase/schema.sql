@@ -48,7 +48,7 @@ create table if not exists public.price_history (
   lang text,
   condition text,
   variant text,
-  sources jsonb, -- { manual, mypApi: { min, avg, max, own } } (fotos antigas podem ter também sold, myp, mypOffer)
+  sources jsonb, -- { manual, mypApi: { min, avg, max, own }, basis } (fotos antigas podem ter também sold, myp, mypOffer)
   created_at timestamptz not null default now(),
   primary key (user_id, entry_id, day)
 );
@@ -66,7 +66,7 @@ returns integer language sql security definer set search_path = '' as $$
       jsonb_strip_nulls(jsonb_build_object(
         'manual', e.data->'myValue',
         -- Mínimo/média/máximo do MYP (API pública, buscados pelo app no celular), só desta carta, versão e selo.
-        -- O gráfico de rendimento usa os três: a faixa (mínimo a máximo) e a linha da média.
+        -- O gráfico desenha a faixa (mínimo a máximo) e a linha do valor escolhido na carta (basis).
         'mypApi', case
           when e.data->'mypApi'->>'cardId' = e.data->>'cardId'
            and e.data->'mypApi'->>'variant' = coalesce(e.data->>'variant', 'normal')
@@ -77,7 +77,8 @@ returns integer language sql security definer set search_path = '' as $$
           then jsonb_strip_nulls(jsonb_build_object(
             'min', e.data->'mypApi'->'min', 'avg', e.data->'mypApi'->'avg', 'max', e.data->'mypApi'->'max',
             'own', e.data->'mypApi'->'ownVersion'))
-        end
+        end,
+        'basis', e.data->'valueBasis'
       ))
     from public.entries e
     on conflict (user_id, entry_id, day) do update set sources = excluded.sources, condition = excluded.condition, variant = excluded.variant
