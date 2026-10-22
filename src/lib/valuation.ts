@@ -1,12 +1,13 @@
-import type { Entry } from './types';
+import { LANG_LABEL, VARIANTS, type CardLang, type Entry, type MypCondition, type MypOffers } from './types';
 
 /**
  * Valor da carta (em reais). A fonte principal é o MYP Cards (anúncios); o "Quanto vale minha carta?" (vendas reais
  * finalizadas e pagas) é a reserva, para cartas sem anúncio no MYP. Na ordem:
  *
  *   1. "Meu valor" digitado pelo usuário, quando existe;
- *   2. a menor oferta no MYP no ESTADO e IDIOMA da carta (API do MYP, quando disponível);
- *   3. o menor anúncio no MYP no idioma da carta (via Zukan), de qualquer estado — confiança média;
+ *   2. a menor oferta no MYP no ESTADO, IDIOMA e VERSÃO da carta, lida da página do produto (servidor, myp-scan);
+ *   3. só enquanto essa leitura não chegou: o menor anúncio no MYP no idioma (via Zukan), de qualquer estado —
+ *      confiança média (é o "menor anúncio" geral, que pode ser de uma carta danificada);
  *   4. sem anúncio no MYP: a mediana de VENDAS REAIS no estado e idioma da carta — confiança média com 3 ou mais
  *      vendas, baixa com só 1 ou 2 (podem ser antigas ou fora do padrão).
  *
@@ -58,7 +59,20 @@ export function soldMatchesVariant(variant: string, soldVariant?: string) {
 
 /** O servidor ainda não consultou nenhuma fonte de preço para esta carta. */
 export function pricePending(e: Entry) {
-  return !e.myp?.checkedAt && !e.sold?.checkedAt;
+  return !e.myp?.checkedAt && !e.sold?.checkedAt && !e.mypOffers?.checkedAt;
+}
+
+/** Estado do app → estado no MYP (o MYP não tem "M"; "D" lá é "DM"). */
+export function mypCondition(condition: string): MypCondition {
+  return condition === 'M' ? 'NM' : condition === 'D' ? 'DM' : (condition as MypCondition);
+}
+
+/** A leitura das ofertas do MYP é desta carta, idioma e versão (senão o servidor ainda vai ler de novo)? */
+export function mypScanFor(e: Entry): MypOffers | undefined {
+  const s = e.mypOffers;
+  const note = e.variant === 'wPromo' || e.variant === 'staff' ? (e.variantNote ?? '') : '';
+  if (!s?.checkedAt || s.cardId !== e.cardId || s.lang !== e.lang || s.variant !== e.variant || (s.note ?? '') !== note) return undefined;
+  return s;
 }
 export type Confidence = 'alta' | 'media' | 'baixa';
 
@@ -94,14 +108,16 @@ export function priceSources(e: Entry): Omit<SourceRow, 'used'>[] {
   if (e.myValue?.value != null) {
     rows.push({ id: 'manual', label: SOURCE_LABEL.manual, brl: e.myValue.value, detail: 'digitado por você' });
   }
-  // Menor oferta no estado e idioma (só vale se o estado/idioma ainda forem os da carta).
-  const offers = e.mypOffers;
-  if (offers?.min != null && offers.condition === e.condition && offers.lang === e.lang) {
+  // Menor oferta no MYP no estado, idioma e versão da carta.
+  const scan = mypScanFor(e);
+  const offer = scan?.byCondition?.[mypCondition(e.condition)];
+  if (offer) {
+    const version = VARIANTS.find((v) => v.id === e.variant)?.label ?? e.variant;
     rows.push({
       id: 'mypOffer',
-      label: `MYP Cards · ${e.condition}`,
-      brl: offers.min,
-      detail: `menor oferta no seu estado e idioma (${offers.count} ${offers.count === 1 ? 'oferta' : 'ofertas'})`,
+      label: `MYP Cards · ${mypCondition(e.condition)}`,
+      brl: offer.min,
+      detail: `menor oferta em ${mypCondition(e.condition)}, ${LANG_LABEL[e.lang as CardLang]?.toLowerCase() ?? e.lang}, ${version.toLowerCase()} (${offer.count} un.)`,
     });
   }
   // Vendas reais no estado da carta (o site já separa por idioma: cada idioma é uma página), só se forem da
@@ -116,7 +132,9 @@ export function priceSources(e: Entry): Omit<SourceRow, 'used'>[] {
           detail: `${sold.count} ${sold.count === 1 ? 'venda finalizada' : 'vendas finalizadas'} em ${e.condition}${sold.count < FIRM_SALES ? ' · poucas vendas' : ''}`,
         }
       : undefined;
-  if (e.myp?.price != null && mypFitsVariant(e.variant)) {
+  // O menor anúncio geral (Zukan) só vale enquanto a leitura das ofertas do MYP não chegou: depois dela, o MYP sem
+  // oferta no estado da carta fica sem valor (o menor anúncio geral costuma ser de outro estado).
+  if (!scan && e.myp?.price != null && mypFitsVariant(e.variant)) {
     rows.push({
       id: 'myp',
       label: SOURCE_LABEL.myp,

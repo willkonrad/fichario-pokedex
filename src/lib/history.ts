@@ -14,7 +14,8 @@ function dayValue(s: Record<string, unknown> | null, variant: string | null): nu
   if (!s) return undefined;
   const manual = (s.manual as { value?: number } | undefined)?.value;
   if (typeof manual === 'number') return manual;
-  const offer = (s.mypOffer as { min?: number } | undefined)?.min;
+  // Menor oferta no estado/idioma/versão (número, nas fotos novas; objeto com "min", nas antigas).
+  const offer = typeof s.mypOffer === 'number' ? s.mypOffer : (s.mypOffer as { min?: number } | undefined)?.min;
   if (typeof offer === 'number') return offer;
   // Vendas reais só da mesma variação da carta (o nome da variação das vendas vem junto).
   const raw = s.sold as { value?: number; count?: number; variant?: string } | undefined;

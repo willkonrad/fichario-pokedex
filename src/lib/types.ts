@@ -71,12 +71,27 @@ export type SoldInfo = {
 };
 
 /** Menor oferta no MYP Cards no ESTADO e IDIOMA da carta (gravado pelo servidor, quando a API do MYP fornecer). */
+/** Estados do MYP Cards (não tem "M": a melhor categoria é NM; "D" do app é "DM" lá). */
+export type MypCondition = 'NM' | 'SP' | 'MP' | 'HP' | 'DM';
+
+/**
+ * Ofertas do MYP Cards da carta, lidas da página do produto pelo servidor (função myp-scan, 1×/semana e logo depois
+ * do cadastro): menor preço por estado, só no idioma e na versão (acabamento ou produto do selo) da carta.
+ */
 export type MypOffers = {
-  min?: number;
-  count: number;
-  condition: string;
+  /** Carta, idioma e versão para os quais a leitura foi feita (se mudarem, o servidor lê de novo). */
+  cardId: string;
   lang: string;
+  variant: string;
+  note?: string;
+  productId?: number;
+  /** Página do produto no MYP. */
   url?: string;
+  byCondition?: Partial<Record<MypCondition, { min: number; count: number }>>;
+  /** Ofertas que entraram na conta / ofertas na página. */
+  offers?: number;
+  total?: number;
+  /** Motivo de não achar a carta no MYP. */
   notFound?: string;
   checkedAt: string;
 };

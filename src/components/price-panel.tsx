@@ -4,8 +4,18 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Line, Polyline, Text as SvgText } from 'react-native-svg';
 
 import { formatBRL, formatBRLShort, formatWhen } from '@/lib/quotes';
-import { CONDITIONS, VARIANTS, type Condition, type Entry } from '@/lib/types';
-import { CONFIDENCE_LABEL, mypCovers, mypFitsVariant, soldMatchesVariant, valuation, type Confidence, type SourceId } from '@/lib/valuation';
+import { CONDITIONS, LANG_LABEL, VARIANTS, type Condition, type Entry, type MypCondition } from '@/lib/types';
+import {
+  CONFIDENCE_LABEL,
+  mypCondition,
+  mypCovers,
+  mypFitsVariant,
+  mypScanFor,
+  soldMatchesVariant,
+  valuation,
+  type Confidence,
+  type SourceId,
+} from '@/lib/valuation';
 import { colors, confidenceColors, radius, shadow } from '@/theme';
 
 const LINE = { pt: colors.success, en: colors.blue };
@@ -56,12 +66,15 @@ export function PricePanel({
   const urlOf = (id: SourceId) =>
     id === 'manual' ? undefined : id === 'sold' ? (sold?.url ?? QVMC_URL) : (id === 'mypOffer' && entry.mypOffers?.url) || MYP_URL;
   const soldHere = sold?.byCondition?.[condition];
+  // Leitura das ofertas do MYP desta carta, idioma e versão (com o estado escolhido agora na tela).
+  const scan = mypScanFor({ ...entry, condition });
+  const versionLabel = VARIANTS.find((v) => v.id === entry.variant)?.label ?? entry.variant;
   const tone = ref?.confidence ? CONFIDENCE_COLOR[ref.confidence] : colors.textMuted;
   const subtitle =
     ref?.basis === 'manual'
       ? 'meu valor · digitado por você'
       : ref?.basis === 'mypOffer'
-        ? `${CONFIDENCE_LABEL.alta} · menor oferta no MYP no seu estado e idioma`
+        ? `${CONFIDENCE_LABEL.alta} · menor oferta no MYP no seu estado, idioma e versão`
         : ref?.basis === 'sold'
           ? `${ref.confidence ? CONFIDENCE_LABEL[ref.confidence] : ''} · mediana de ${soldHere?.count ?? 0} ${soldHere?.count === 1 ? 'venda real finalizada' : 'vendas reais finalizadas'} em ${condition}, sem anúncio no MYP${ref.confidence === 'baixa' ? ' (poucas vendas: referência inicial)' : ''}`
           : `${CONFIDENCE_LABEL.media} · menor anúncio no MYP no idioma da carta, de qualquer estado`;
@@ -80,8 +93,12 @@ export function PricePanel({
           </>
         ) : (
           <Text style={styles.muted}>
-            {!myp?.checkedAt && !sold?.checkedAt
+            {!myp?.checkedAt && !sold?.checkedAt && !scan
               ? 'Buscando o preço… chega em alguns minutos.'
+              : scan?.notFound
+                ? `Não achei esta carta no MYP Cards (${scan.notFound}) nem vendas registradas dela neste estado. Você pode preencher "Meu valor".`
+              : scan
+                ? `Sem oferta no MYP Cards em ${mypCondition(condition)} desta versão (${versionLabel}) em ${LANG_LABEL[entry.lang].toLowerCase()}, nem vendas registradas. Veja os outros estados abaixo ou preencha "Meu valor".`
               : !mypFitsVariant(entry.variant)
                 ? 'Sem preço desta versão: o MYP Cards (via Zukan) só informa o preço da versão comum, e não há vendas registradas desta versão. Preencha "Meu valor" com o valor que você conferiu.'
                 : mypCovers(entry.lang)
@@ -91,7 +108,7 @@ export function PricePanel({
         )}
 
         {/* Versão especial: o preço do MYP é da versão comum, então aparece só como referência. */}
-        {myp?.price != null && !mypFitsVariant(entry.variant) ? (
+        {!scan && myp?.price != null && !mypFitsVariant(entry.variant) ? (
           <Text style={styles.note}>
             Versão comum no MYP Cards: {formatBRL(myp.price)}. Não entra no valor: a sua versão ({VARIANTS.find((v) => v.id === entry.variant)?.label ?? entry.variant}) vale outra coisa.
           </Text>
@@ -121,6 +138,33 @@ export function PricePanel({
               );
             })}
           </View>
+        ) : null}
+
+        {/* Ofertas do MYP em cada estado, no idioma e na versão da carta. */}
+        {scan?.byCondition && Object.keys(scan.byCondition).length ? (
+          <>
+            <Pressable onPress={() => scan.url && WebBrowser.openBrowserAsync(scan.url)} accessibilityRole="link" disabled={!scan.url}>
+              <Text style={[styles.label, { marginTop: 6 }]}>
+                Ofertas no MYP por estado · {LANG_LABEL[entry.lang].toLowerCase()}, {versionLabel.toLowerCase()}
+                {scan.url ? <Text style={styles.srcLink}> ↗</Text> : null}
+              </Text>
+            </Pressable>
+            <View style={styles.conds}>
+              {(['NM', 'SP', 'MP', 'HP', 'DM'] as MypCondition[]).map((id) => {
+                const c = scan.byCondition?.[id];
+                const active = id === mypCondition(condition);
+                return (
+                  <View key={id} style={[styles.cond, active && styles.condActive]} accessibilityLabel={`${id}: ${c ? formatBRL(c.min) : 'sem oferta'}`}>
+                    <Text style={[styles.condId, active && { color: colors.primary }]}>{id}</Text>
+                    <Text style={styles.condValue} numberOfLines={1}>
+                      {c ? formatBRLShort(c.min) : '—'}
+                    </Text>
+                    <Text style={styles.condCount}>{c?.count ? `${c.count} un.` : ''}</Text>
+                  </View>
+                );
+              })}
+            </View>
+          </>
         ) : null}
 
         {/* Vendas reais em cada estado, no idioma da carta (o site pede para preservar idioma e estado). */}
