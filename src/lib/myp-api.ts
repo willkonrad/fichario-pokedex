@@ -14,6 +14,31 @@ const API = 'https://mypcards.com/api/v1/pokemon';
 export const MYP_API_INTERVAL_MS = 6500;
 /** Cada carta é consultada de novo depois de 7 dias. */
 export const MYP_API_REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * Versão da regra de reconhecimento do produto. Cartas "não encontradas" (e versões promo) por uma regra mais antiga
+ * são buscadas de novo, sem esperar os 7 dias. 2: nomes "X-EX", promos "079a", coleções clássicas, promos sem selo.
+ */
+export const MYP_MATCHER = 2;
+
+/**
+ * Coleções da TCGdex que o MYP cadastra com outra sigla e com o número da carta original (ex.: Charizard da coleção
+ * clássica de 30 anos = "30CC 004/102" no MYP): a carta é achada pelo nome dentro da edição.
+ */
+const MYP_EDITION: Record<string, string> = {
+  '30th-c': '30CC',
+  cel25cc: 'CCC',
+};
+
+/** Coleção de promos (MEP, SVP, SWSHP…): o produto do MYP é a própria promo. */
+const isPromoSet = (setId: string) => /p$/i.test(setId);
+
+/** O MYP escreve "Alakazam-EX" onde a TCGdex escreve "Alakazam EX" (e o contrário em outras coleções). */
+function nameVariants(name: string) {
+  const out = [name];
+  if (/\s(EX|GX)$/i.test(name)) out.push(name.replace(/\s(EX|GX)$/i, '-$1'));
+  else if (/-(EX|GX)$/i.test(name)) out.push(name.replace(/-(EX|GX)$/i, ' $1'));
+  return out;
+}
 
 /** O MYP respondeu "muitas consultas": esperar antes de continuar. */
 export class MypRateLimited extends Error {}
@@ -38,19 +63,26 @@ function setAbbr(setId: string) {
   });
 }
 
-/** O que a busca precisa da carta: nomes para buscar (inglês primeiro), sigla da coleção e número. */
-async function cardKeys(e: Entry): Promise<{ names: string[]; abbr?: string; localId: string } | undefined> {
+/**
+ * O que a busca precisa da carta: nomes para buscar (inglês primeiro), sigla da coleção no MYP, número, se a carta é
+ * achada pelo nome dentro da edição e se é de uma coleção de promos.
+ */
+async function cardKeys(
+  e: Entry,
+): Promise<{ names: string[]; abbr?: string; localId: string; byName: boolean; promoSet: boolean } | undefined> {
   if (e.cardId.startsWith('tcgp-')) {
     const r = await catalogProduct(Number(e.cardId.slice(5)));
     if (!r) return undefined;
-    return { names: [r.name], abbr: r.tcg_groups?.abbr ?? undefined, localId: (r.number ?? '').split('/')[0] };
+    const abbr = r.tcg_groups?.abbr ?? undefined;
+    return { names: nameVariants(r.name), abbr, localId: (r.number ?? '').split('/')[0], byName: false, promoSet: /p$/i.test(abbr ?? '') };
   }
   const cut = e.cardId.lastIndexOf('-');
+  const setId = e.cardId.slice(0, cut);
   const en = await cardDetail(e.cardId, 'en').catch(() => undefined);
   // Falha de rede propaga (a carta tenta de novo depois); coleção inexistente na TCGdex vira "sem sigla".
-  const abbr = (await setAbbr(e.cardId.slice(0, cut))) ?? undefined;
-  const names = [...new Set([en?.name, e.cardName].filter((n): n is string => !!n?.trim()))];
-  return { names, abbr, localId: e.localId || e.cardId.slice(cut + 1) };
+  const abbr = MYP_EDITION[setId] ?? (await setAbbr(setId)) ?? undefined;
+  const names = [...new Set([en?.name, e.cardName].filter((n): n is string => !!n?.trim()).flatMap(nameVariants))];
+  return { names, abbr, localId: e.localId || e.cardId.slice(cut + 1), byName: setId in MYP_EDITION, promoSet: isPromoSet(setId) };
 }
 
 /**
@@ -59,11 +91,11 @@ async function cardKeys(e: Entry): Promise<{ names: string[]; abbr?: string; loc
  */
 export async function fetchMypPrice(e: Entry, consult: (name: string) => Promise<MypProduct[]>): Promise<MypApiPrice> {
   const note = mypApiNote(e);
-  const base = { cardId: e.cardId, variant: e.variant, note: note || undefined, checkedAt: new Date().toISOString() };
+  const base = { cardId: e.cardId, variant: e.variant, note: note || undefined, checkedAt: new Date().toISOString(), v: MYP_MATCHER };
   const keys = await cardKeys(e);
   if (!keys?.abbr) return { ...base, notFound: 'coleção sem sigla para buscar no MYP' };
   for (const name of keys.names) {
-    const hit = pickMypProduct(await consult(name), keys.abbr, keys.localId, e.variant, note);
+    const hit = pickMypProduct(await consult(name), keys.abbr, keys.localId, e.variant, note, keys.byName ? keys.names : undefined);
     if (!hit) continue;
     const p = hit.product;
     return {
@@ -75,7 +107,8 @@ export async function fetchMypPrice(e: Entry, consult: (name: string) => Promise
       avg: price(p.avg_price),
       max: price(p.max_price),
       qty: p.available_quantity ?? undefined,
-      ownVersion: hit.ownVersion || undefined,
+      // Promo de uma coleção de promos, sem selo marcado: o produto do MYP é a própria carta.
+      ownVersion: hit.ownVersion || (keys.promoSet && e.variant === 'wPromo' && !note) || undefined,
     };
   }
   return { ...base, notFound: `${keys.names[0] ?? 'carta'} ${keys.localId} (${keys.abbr}) não encontrada no MYP` };
@@ -91,10 +124,14 @@ export function mypApiMatches(e: Entry, s: { cardId: string; variant: string; no
   return s.cardId === e.cardId && s.variant === e.variant && (s.note ?? '') === mypApiNote(e);
 }
 
-/** A carta precisa de uma busca no MYP (nova, mudou de carta/versão/selo ou passou de 7 dias)? */
+/**
+ * A carta precisa de uma busca no MYP (nova, mudou de carta/versão/selo, passou de 7 dias, ou não foi achada — ou é
+ * promo — por uma regra de reconhecimento mais antiga)?
+ */
 export function mypApiDue(e: Entry, now: number) {
   if (e.lang !== 'pt' && e.lang !== 'en') return false;
   const s = e.mypApi;
   if (!s || !mypApiMatches(e, s)) return true;
+  if ((s.v ?? 1) < MYP_MATCHER && (s.notFound || e.variant === 'wPromo' || e.variant === 'staff')) return true;
   return now - new Date(s.checkedAt).getTime() > MYP_API_REFRESH_MS;
 }

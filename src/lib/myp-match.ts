@@ -49,17 +49,44 @@ const words = (s: string) =>
     .split(/[^a-z0-9]+/)
     .filter((w) => w.length > 3 && !STAMP_STOP.has(w));
 
+/** Nome do produto sem o número no fim e sem acento: "Spearow - 102/132" → "spearow". */
+const plainName = (s?: string | null) =>
+  (s ?? '')
+    .replace(/\s+-\s+[\w/]+$/, '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
 /**
  * Produto da carta entre os resultados da busca: mesma edição (sigla oficial da coleção) e mesmo número.
  *   - Versão com selo (promo/staff): o produto próprio da versão (código terminado em p1, p2…) só quando o nome dele
  *     traz uma palavra do selo marcado na carta (`note`); senão, o produto comum, que não vale para a versão.
  *   - Versões comuns: só produtos comuns (nunca o de uma versão com selo).
  * Produtos comuns repetidos com o mesmo código são versões cadastradas à parte: a comum é a com mais unidades à venda.
+ * Sem o número exato: o número com uma letra no fim ("079a", como o MYP cadastra algumas promos) e, nas coleções
+ * que o MYP numera de outro jeito (`byName`, ex.: as coleções clássicas, com o número da carta original), o único
+ * produto da edição com o nome da carta.
  */
-export function pickMypProduct(products: MypProduct[], abbr: string, localId: string, variant: string, note = '') {
+export function pickMypProduct(
+  products: MypProduct[],
+  abbr: string,
+  localId: string,
+  variant: string,
+  note = '',
+  byName?: string[],
+) {
   const want = num(localId);
   const ed = abbr.split(':')[0].trim().toLowerCase();
-  const same = products.filter((p) => (p.edition_code ?? '').trim().toLowerCase() === ed && parseMypCode(p.card_code).number === want);
+  const edition = products.filter((p) => (p.edition_code ?? '').trim().toLowerCase() === ed);
+  let same = edition.filter((p) => parseMypCode(p.card_code).number === want);
+  if (!same.length) same = edition.filter((p) => /^(.+\d)[a-z]$/.exec(parseMypCode(p.card_code).number)?.[1] === want);
+  if (!same.length && byName?.length) {
+    const names = byName.map(plainName);
+    const hits = edition.filter((p) => !parseMypCode(p.card_code).version && names.includes(plainName(p.name_en)));
+    if (new Set(hits.map((p) => p.card_code)).size === 1) same = hits;
+  }
   const base = same.filter((p) => !parseMypCode(p.card_code).version);
   if (variant === 'wPromo' || variant === 'staff') {
     // Palavras do selo que não são do nome da carta (ex.: "Pokemon Day" em "Bulbasaur (Pokemon Day 2026)").

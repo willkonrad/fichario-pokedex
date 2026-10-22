@@ -60,6 +60,8 @@ export type MypApiPrice = {
   ownVersion?: boolean;
   /** Motivo de não achar a carta no MYP. */
   notFound?: string;
+  /** Versão da regra que reconheceu o produto (MYP_MATCHER); ausente = 1. */
+  v?: number;
   checkedAt: string;
 };
 

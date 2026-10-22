@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 
 import { fetchMypPrice, MYP_API_INTERVAL_MS, mypApiDue, mypApiMatches, mypApiNote, MypRateLimited, searchMypByName } from '@/lib/myp-api';
+import type { MypProduct } from '@/lib/myp-match';
 import type { Entry } from '@/lib/types';
 import { useCollection } from '@/store/collection';
 
@@ -10,6 +11,8 @@ const IDLE_MS = 5 * 60_000;
 /** Carta que falhou: espera 1 h; depois de 3 falhas seguidas, só na próxima vez que o app abrir. */
 const RETRY_MS = 60 * 60_000;
 const MAX_FAILS = 3;
+/** Resultado de uma busca por nome reaproveitado pelas outras cartas com o mesmo nome. */
+const SEARCH_CACHE_MS = 30 * 60_000;
 
 /** Carta, versão e selo: uma busca serve todos os bolsos com a mesma carta (a API não separa idioma). */
 const groupKey = (e: Entry) => `${e.cardId}|${e.variant}|${mypApiNote(e)}`;
@@ -68,11 +71,18 @@ export function MypRefresher() {
         };
       });
     // Uma consulta por vez, com o intervalo mínimo entre elas (vale também para a segunda tentativa pelo nome em PT).
+    // A busca por nome traz todas as cartas com aquele nome: fica guardada por 30 min e serve as outras (ex.: vários
+    // Gengar da coleção com uma consulta só).
+    const recent = new Map<string, { at: number; products: MypProduct[] }>();
     const consult = async (name: string) => {
+      const hit = recent.get(name);
+      if (hit && Date.now() - hit.at < SEARCH_CACHE_MS) return hit.products;
       const wait = lastCall + MYP_API_INTERVAL_MS - Date.now();
       if (wait > 0) await pause(wait);
       lastCall = Date.now();
-      return searchMypByName(name);
+      const products = await searchMypByName(name);
+      recent.set(name, { at: Date.now(), products });
+      return products;
     };
 
     (async () => {
@@ -96,7 +106,13 @@ export function MypRefresher() {
           const price = await fetchMypPrice(group[0], consult);
           if (!alive) break;
           for (const e of group) await applyRef.current(e.id, price);
-          failures.delete(key);
+          // Preço que não ficou gravado (ex.: carta que ainda não chegou ao banco): espera como uma falha, para a
+          // busca guardada por nome não virar um laço sem pausa.
+          const after = entriesRef.current[group[0].id];
+          if (after && mypApiDue(after, Date.now())) {
+            const f = failures.get(key);
+            failures.set(key, { count: (f?.count ?? 0) + 1, until: Date.now() + RETRY_MS });
+          } else failures.delete(key);
         } catch (err) {
           if (err instanceof MypRateLimited) {
             // Limite do MYP: espera mais de um minuto antes de qualquer consulta.

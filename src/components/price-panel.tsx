@@ -1,6 +1,7 @@
 import * as WebBrowser from 'expo-web-browser';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { ValueRangeRow } from '@/components/value-range';
 import { formatBRL, formatBRLShort, formatWhen } from '@/lib/quotes';
 import { VARIANTS, type Entry } from '@/lib/types';
 import { CONFIDENCE_LABEL, mypApiFitsVariant, mypApiFor, mypCovers, valuation, type Confidence } from '@/lib/valuation';
@@ -10,8 +11,8 @@ const CONFIDENCE_COLOR: Record<Confidence, string> = confidenceColors.light;
 const MYP_URL = 'https://mypcards.com';
 
 /**
- * Cartão de preço da carta: o valor ("Meu valor" ou a média do MYP Cards) e o mínimo, a média e o máximo do produto no
- * MYP (API pública), com o crédito e o link exigidos pelo MYP.
+ * Cartão de preço da carta: o valor é o mínimo, a média e o máximo do produto no MYP Cards (API pública), ou o "Meu
+ * valor" fixo (aí os do MYP aparecem como referência), com o crédito e o link exigidos pelo MYP.
  */
 export function PricePanel({
   entry,
@@ -49,12 +50,23 @@ export function PricePanel({
   const subtitle =
     ref?.basis === 'manual'
       ? 'meu valor · digitado por você (fixo até a média do MYP passar dele)'
-      : `${CONFIDENCE_LABEL.media} · média dos anúncios no MYP (todos os estados e idiomas)`;
+      : `${CONFIDENCE_LABEL.media} · anúncios no MYP Cards, todos os estados e idiomas${api?.qty != null ? ` · ${api.qty} un. à venda` : ''}`;
 
   return (
     <View style={styles.card}>
       <Text style={styles.label}>Valor da carta</Text>
-      {ref?.value != null ? (
+      {ref?.range && ref.basis === 'myp' ? (
+        // O valor é a faixa do MYP: mínimo, média e máximo, como a API informa.
+        <>
+          <View style={styles.rangeBox}>
+            <ValueRangeRow range={ref.range} avgColor={tone} />
+          </View>
+          <View style={styles.confRow}>
+            <View style={[styles.confDot, { backgroundColor: tone }]} />
+            <Text style={styles.mainSource}>{subtitle}</Text>
+          </View>
+        </>
+      ) : ref?.value != null ? (
         <>
           <Text style={[styles.main, { color: tone }]}>{formatBRL(ref.value)}</Text>
           <View style={styles.confRow}>
@@ -78,8 +90,8 @@ export function PricePanel({
         </Text>
       )}
 
-      {/* Mínimo, média e máximo do produto no MYP Cards (a média é o valor e entra no gráfico). */}
-      {api?.avg != null ? (
+      {/* Com "Meu valor" (ou versão sem produto próprio no MYP): mínimo, média e máximo do MYP só como referência. */}
+      {api?.avg != null && ref?.basis !== 'myp' ? (
         <>
           <Pressable onPress={() => api.url && WebBrowser.openBrowserAsync(api.url)} accessibilityRole="link" disabled={!api.url}>
             <Text style={[styles.label, { marginTop: 6 }]}>
@@ -94,17 +106,14 @@ export function PricePanel({
                 ['Média', api.avg],
                 ['Máx', api.max],
               ] as const
-            ).map(([label, v]) => {
-              const active = label === 'Média' && apiFits && ref?.basis === 'myp';
-              return (
-                <View key={label} style={[styles.cell, active && styles.cellActive]} accessibilityLabel={`${label}: ${formatBRL(v)}`}>
-                  <Text style={[styles.cellId, active && { color: colors.primary }]}>{label}</Text>
-                  <Text style={styles.cellValue} numberOfLines={1}>
-                    {v != null ? formatBRLShort(v) : '—'}
-                  </Text>
-                </View>
-              );
-            })}
+            ).map(([label, v]) => (
+              <View key={label} style={styles.cell} accessibilityLabel={`${label}: ${formatBRL(v)}`}>
+                <Text style={styles.cellId}>{label}</Text>
+                <Text style={styles.cellValue} numberOfLines={1}>
+                  {v != null ? formatBRLShort(v) : '—'}
+                </Text>
+              </View>
+            ))}
           </View>
           <Text style={styles.detail}>
             {api.qty != null ? `${api.qty} un. à venda · ` : ''}todos os estados e idiomas juntos
@@ -180,7 +189,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     alignItems: 'center',
   },
-  cellActive: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  rangeBox: { borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, paddingVertical: 10, paddingHorizontal: 4, marginTop: 2 },
   cellId: { color: colors.textMuted, fontSize: 11, fontWeight: '900' },
   cellValue: { color: colors.text, fontSize: 12, fontWeight: '800', marginTop: 1 },
   storeRow: { flexDirection: 'row', gap: 8, marginTop: 4 },

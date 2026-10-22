@@ -342,7 +342,13 @@ export function CollectionProvider({ children }: { children: ReactNode }) {
         }
         const res = data as { prev?: string | null; data?: Entry } | null;
         const latest = entriesRef.current[id];
-        if (!res?.data || !latest) return; // removida em outro aparelho: a sincronização tira daqui
+        if (!latest) return;
+        if (!res?.data) {
+          // Carta que ainda não está no banco (ou removida em outro aparelho): guarda o preço aqui, sem mexer na data;
+          // a próxima sincronização envia a carta com ele (ou a tira daqui).
+          await persistEntries({ ...entriesRef.current, [id]: { ...latest, mypApi: price } });
+          return;
+        }
         if (!res.prev || latest.updatedAt <= res.prev) {
           // Nada local pendente: fica a carta do banco, já mesclada (traz junto o que mudou em outro aparelho).
           await persistEntries({ ...entriesRef.current, [id]: { ...res.data, id } });

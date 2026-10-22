@@ -2,7 +2,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Redirect, router } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useMemo, useState, type ReactNode } from 'react';
-import { PanResponder, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BinderSlot } from '@/components/binder-slot';
@@ -20,8 +20,8 @@ import {
   slotsOnPage,
   totalPages,
 } from '@/lib/binder';
-import { collectionTotals, formatBRLTight } from '@/lib/quotes';
-import { pricePending } from '@/lib/valuation';
+import { collectionTotals, formatBRL, formatBRLTight } from '@/lib/quotes';
+import { isSpread, pricePending } from '@/lib/valuation';
 import { POKEDEX_BINDER, type BinderSettings, type CustomBinder, type Entry } from '@/lib/types';
 import { customEntryId, entriesOf, entryId, useCollection } from '@/store/collection';
 import { binderColors as B, CARD_RATIO, colors, MAX_WIDTH, mono, radius, shadow } from '@/theme';
@@ -416,25 +416,43 @@ function BinderFrame(props: {
             </View>
 
             {showPrices ? (
-              <View style={styles.valueRow}>
-                <Text style={styles.valueLabel}>Valor</Text>
-                <Text style={styles.value}>{totals.valued ? formatBRLTight(totals.value) : '—'}</Text>
-                <Text style={styles.valueNote} numberOfLines={1}>
-                  {!props.entries.length
-                    ? 'coloque sua primeira carta'
-                    : pending
-                      ? `buscando preço de ${pending} ${pending === 1 ? 'carta' : 'cartas'}…`
-                      : `${totals.valued} de ${props.entries.length} com preço`}
+              <>
+                <View style={styles.valueRow}>
+                  <Text style={styles.valueLabel}>Valor</Text>
+                  <Text
+                    style={styles.value}
+                    accessibilityLabel={
+                      totals.valued
+                        ? `Média ${formatBRL(totals.value)}${isSpread(totals.range) ? `, de ${formatBRL(totals.min)} a ${formatBRL(totals.max)}` : ''}`
+                        : 'Sem valor'
+                    }>
+                    {totals.valued ? formatBRLTight(totals.value) : '—'}
+                  </Text>
+                  {/* Crédito obrigatório da API do MYP Cards onde os preços aparecem (vale também para os valores dos bolsos). */}
+                  <Text
+                    style={styles.valueSource}
+                    accessibilityRole="link"
+                    accessibilityLabel="Preços do MYP Cards, abrir mypcards.com"
+                    onPress={() => WebBrowser.openBrowserAsync('https://mypcards.com')}>
+                    MYP Cards ↗
+                  </Text>
+                </View>
+                {/* Mínimo e máximo na linha de baixo (na linha do valor, o "máx" seria cortado no celular). */}
+                <Text style={styles.valueNote}>
+                  {[
+                    totals.valued && isSpread(totals.range) ? `mín ${formatBRLTight(totals.min)} · máx ${formatBRLTight(totals.max)}` : null,
+                    !props.entries.length
+                      ? 'coloque sua primeira carta'
+                      : pending
+                        ? Platform.OS === 'web'
+                          ? `${pending} ${pending === 1 ? 'carta espera' : 'cartas esperam'} o preço (o app no celular busca)`
+                          : `buscando preço de ${pending} ${pending === 1 ? 'carta' : 'cartas'}… (deixe o app aberto)`
+                        : `${totals.valued} de ${props.entries.length} com preço`,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
                 </Text>
-                {/* Crédito obrigatório da API do MYP Cards onde os preços aparecem (vale também para os valores dos bolsos). */}
-                <Text
-                  style={styles.valueSource}
-                  accessibilityRole="link"
-                  accessibilityLabel="Preços do MYP Cards, abrir mypcards.com"
-                  onPress={() => WebBrowser.openBrowserAsync('https://mypcards.com')}>
-                  MYP Cards ↗
-                </Text>
-              </View>
+              </>
             ) : null}
           </View>
         </View>
@@ -585,7 +603,7 @@ const styles = StyleSheet.create({
   valueRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginTop: 10 },
   valueLabel: { color: 'rgba(255,255,255,0.8)', fontSize: 12, fontWeight: '800', letterSpacing: 1, textTransform: 'uppercase' },
   value: { color: colors.onPrimary, fontSize: 22, fontWeight: '900' },
-  valueNote: { color: 'rgba(255,255,255,0.8)', fontSize: 12, flexShrink: 1 },
+  valueNote: { color: 'rgba(255,255,255,0.85)', fontSize: 12, marginTop: 2, lineHeight: 17 },
   valueSource: { color: colors.onPrimary, fontSize: 12, fontWeight: '800', marginLeft: 'auto', textDecorationLine: 'underline' },
   search: { marginTop: -24, marginBottom: 12 },
   notice: { color: colors.textMuted, fontSize: 13, marginBottom: 10, lineHeight: 18, textAlign: 'center' },

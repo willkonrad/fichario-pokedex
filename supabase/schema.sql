@@ -66,7 +66,7 @@ returns integer language sql security definer set search_path = '' as $$
       jsonb_strip_nulls(jsonb_build_object(
         'manual', e.data->'myValue',
         -- Mínimo/média/máximo do MYP (API pública, buscados pelo app no celular), só desta carta, versão e selo.
-        -- O gráfico de rendimento usa a média.
+        -- O gráfico de rendimento usa os três: a faixa (mínimo a máximo) e a linha da média.
         'mypApi', case
           when e.data->'mypApi'->>'cardId' = e.data->>'cardId'
            and e.data->'mypApi'->>'variant' = coalesce(e.data->>'variant', 'normal')
@@ -200,13 +200,13 @@ alter table public.tcgdex_sets enable row level security;
 create policy "catálogo público" on public.tcg_groups for select to anon, authenticated using (true);
 create policy "catálogo público" on public.tcg_catalog for select to anon, authenticated using (true);
 
--- Religa cartas do catálogo à TCGdex em lote: p = [{ product_id, tcgdex_id }] (só o servidor).
+-- Religa cartas do catálogo à TCGdex em lote, com o selo: p = [{ product_id, tcgdex_id, stamp }] (só o servidor).
 create or replace function public.relink_catalog(p jsonb)
 returns integer language sql security definer set search_path = '' as $$
   with upd as (
-    update public.tcg_catalog c set tcgdex_id = x.tcgdex_id
-    from jsonb_to_recordset(p) as x(product_id integer, tcgdex_id text)
-    where c.product_id = x.product_id and c.tcgdex_id is distinct from x.tcgdex_id
+    update public.tcg_catalog c set tcgdex_id = x.tcgdex_id, stamp = x.stamp
+    from jsonb_to_recordset(p) as x(product_id integer, tcgdex_id text, stamp text)
+    where c.product_id = x.product_id and (c.tcgdex_id is distinct from x.tcgdex_id or c.stamp is distinct from x.stamp)
     returning 1
   )
   select count(*)::int from upd;

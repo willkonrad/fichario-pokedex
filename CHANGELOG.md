@@ -1,5 +1,23 @@
 # Notas da versão
 
+## 2.6.0 — Valor por mínimo, média e máximo (22/10/2026)
+
+- **O valor da carta é a faixa do MYP**: mínimo, média e máximo dos anúncios, como a API do MYP informa, lado a lado na tela da carta (a média em destaque).
+- **Minha coleção em três colunas**: soma dos mínimos, das médias e dos máximos. Cartas com "Meu valor" entram com ele nas três.
+- **Gráfico de rendimento com a faixa**: área do mínimo ao máximo e a linha da média, com legenda; a variação do período continua pela média.
+- Faixa também no cabeçalho do fichário, na lista de fichários, nas cartas mais valiosas e na comparação com o valor de compra (quanto a carta rende no mínimo e no máximo).
+- O "Meu valor" não mudou: continua fixo até a média do MYP passar dele. Nos bolsos do fichário aparece a média.
+
+### Versões com selo
+- **Mais de 4 mil versões especiais reconhecidas**: a TCGplayer guarda muitas versões com selo em coleções "de tudo um pouco" (Miscellaneous, Prize Pack, Deck Exclusives, Liga e Campeonatos, Trick or Trade…). Agora cada uma é ligada à carta da coleção de origem pelo número completo (ex.: "Bulbasaur - 133/132 (Mega Evolution Stamped)" = Bulbasaur Megaevolução 133 com o selo da Booster Box).
+- A versão da Booster Box e a do Pokémon Day aparecem uma vez só, com a **foto oficial** da TCGplayer e o nome do selo em português.
+- A busca dos fichários livres também mostra as versões com selo.
+
+### Preços do MYP
+- Mais cartas encontradas: nomes como "Alakazam-EX", promos cadastradas com letra ("MEP 079a"), as coleções clássicas (30 anos e Celebrations, que o MYP numera pela carta original) e promos de coleções de promos sem selo marcado.
+- Uma busca por nome serve todas as cartas com aquele nome (ex.: vários Gengar com uma consulta só), então o app no celular termina a fila bem mais rápido. As cartas não encontradas antes são buscadas de novo.
+- O cabeçalho do fichário avisa quantas cartas esperam o preço; no celular, o app precisa ficar aberto enquanto busca.
+
 ## 2.5.0 — Valor só pelo MYP Cards e "Meu valor" (22/10/2026)
 
 - **Duas fontes de valor**: o "Meu valor" (fixo até a média do MYP passar dele) ou a média dos anúncios no MYP Cards, mostrada com o mínimo e o máximo. A média é o que entra nos totais e no gráfico de rendimento.

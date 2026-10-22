@@ -28,7 +28,7 @@ export function CardGrid({
     <FlatList
       key={cols}
       data={cards}
-      keyExtractor={(c) => `${c.id}|${c.lang}|${c.stamp?.label ?? ''}`}
+      keyExtractor={(c) => `${c.id}|${c.lang}|${c.stamp?.label ?? ''}|${c.imageUrl ?? ''}`}
       numColumns={cols}
       columnWrapperStyle={{ gap: GAP }}
       contentContainerStyle={[styles.list, { width: contentWidth + 32 }]}

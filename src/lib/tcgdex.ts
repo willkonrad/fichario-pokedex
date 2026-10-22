@@ -91,7 +91,7 @@ export async function cached<T>(key: string, load: () => Promise<T>, ttl = CACHE
 const CACHE_PREFIXES = ['tcgdex:', 'ptcg:', 'scrydex:', 'zukan:'];
 
 /** Chaves de versões antigas do cache, que nunca mais são lidas. */
-const STALE_CACHE = [/^tcgdex:dex:v[1-9]:/, /^tcgdex:search:v[12]:/, /^scrydex:(?!v5:)/, /^tcgdex:abbr:/];
+const STALE_CACHE = [/^tcgdex:dex:v(?:[1-9]|1[01]):/, /^tcgdex:search:v[1-4]:/, /^scrydex:(?!v5:)/, /^tcgdex:abbr:/];
 
 /** Apaga as chaves de cache de versões antigas (chamada ao abrir o app). */
 export async function pruneStaleCache() {
@@ -169,10 +169,14 @@ const STAMP_ERA = /^(sv|me|30th)/i;
 
 /**
  * Versões com selo das cartas da lista (uma carta à parte para cada selo), pela ficha em inglês da TCGdex
- * (que lista as impressões). Só nas coleções recentes, para não abrir a ficha de centenas de cartas antigas.
+ * (que lista as impressões). Só nas coleções recentes, para não abrir a ficha de centenas de cartas antigas, e no
+ * máximo `max` cartas (as das coleções mais novas).
  */
-async function stampedVersions(list: CardBrief[]): Promise<CardBrief[]> {
-  const todo = list.filter((c) => STAMP_ERA.test(c.setId));
+async function stampedVersions(list: CardBrief[], max = Infinity): Promise<CardBrief[]> {
+  const todo = list
+    .filter((c) => STAMP_ERA.test(c.setId) && !c.stamp)
+    .sort((a, b) => b.setOrder - a.setOrder)
+    .slice(0, max);
   const out: CardBrief[] = [];
   for (let i = 0; i < todo.length; i += 8) {
     const batch = todo.slice(i, i + 8);
@@ -186,13 +190,31 @@ async function stampedVersions(list: CardBrief[]): Promise<CardBrief[]> {
   return out;
 }
 
+/** Palavras sem acento, com "Pokémon Day" (TCGplayer) e "Pokeday" (TCGdex) escritos do mesmo jeito. */
 const plainWords = (s: string) =>
   s
     .toLowerCase()
     .normalize('NFD')
     .replace(/\p{M}/gu, '')
+    .replace(/pokemon\s*day/g, 'pokeday')
     .split(/[^a-z0-9]+/)
     .filter(Boolean);
+
+/**
+ * A versão com selo da TCGdex é a mesma do catálogo (que tem a foto oficial)? Mesmo selo (palavra em comum com as
+ * chaves da TCGdex, que são em inglês como a TCGplayer), ou só o selo da Booster Box (logo da coleção), que a TCGplayer
+ * chama de "<Coleção> Stamped" (ou "Stamp"). Carta gigante (Jumbo) nunca é a mesma versão.
+ */
+function sameStamp(c: CardBrief & { stamp: NonNullable<CardBrief['stamp']> }, catalogStamp: string[]) {
+  if (catalogStamp.includes('jumbo') || catalogStamp.includes('oversize')) return false;
+  const rest = c.stamp.keys.filter((k) => k !== 'set-logo');
+  if (c.stamp.keys.includes('set-logo') && !rest.length) {
+    const set = plainWords(c.setNameEn ?? '').filter((w) => w.length > 2);
+    return (catalogStamp.includes('stamped') || catalogStamp.includes('stamp')) && catalogStamp.some((w) => set.includes(w));
+  }
+  const w = rest.length ? rest.flatMap(plainWords) : plainWords(c.stamp.label);
+  return catalogStamp.some((x) => x.length > 3 && w.includes(x));
+}
 
 /**
  * Junta o catálogo do TCGCSV (base principal) com a lista da TCGdex (secundária):
@@ -216,9 +238,13 @@ function withCatalog(list: CardBrief[], rows: CatalogRow[], lang: CardLang): Car
 
   const seen = new Set<string>();
   const out: CardBrief[] = [];
-  const catalogStamps = new Map<string, string[][]>();
-  const unique = new Map(rows.map((r) => [r.product_id, r]));
-  for (const r of unique.values()) {
+  // Versões com selo da TCGdex de cada carta (para usar o nome e o selo dela na versão igual do catálogo).
+  const tcgdexStamps = new Map<string, (CardBrief & { stamp: NonNullable<CardBrief['stamp']> })[]>();
+  for (const c of list) if (c.stamp) tcgdexStamps.set(c.id, [...(tcgdexStamps.get(c.id) ?? []), c as CardBrief & { stamp: NonNullable<CardBrief['stamp']> }]);
+  const matched = new Set<CardBrief>();
+  // Ordem fixa (a API não garante uma): a mesma carta vira sempre o mesmo bolso, com a mesma foto.
+  const unique = [...new Map(rows.map((r) => [r.product_id, r])).values()].sort((a, b) => a.product_id - b.product_id);
+  for (const r of unique) {
     const base = r.tcgdex_id ? byId.get(r.tcgdex_id) : undefined;
     const group = r.tcg_groups?.name ?? '';
     const common: CardBrief = base ?? {
@@ -233,8 +259,13 @@ function withCatalog(list: CardBrief[], rows: CatalogRow[], lang: CardLang): Car
       setOrder: orderOf(r.group_id),
     };
     if (r.stamp) {
-      out.push({ ...common, image: undefined, imageUrl: r.image, stamp: { variant: stampVariant(r.stamp), label: r.stamp, keys: [] } });
-      catalogStamps.set(common.id, [...(catalogStamps.get(common.id) ?? []), plainWords(r.stamp)]);
+      // Mesma versão com selo na TCGdex: fica uma só, com a foto do catálogo e o selo da TCGdex (nome em português e
+      // a chave do selo, como nas cartas já salvas).
+      const words = plainWords(r.stamp);
+      const twin = (tcgdexStamps.get(common.id) ?? []).find((c) => !matched.has(c) && sameStamp(c, words));
+      if (twin) matched.add(twin);
+      const stamp = twin?.stamp ?? { variant: stampVariant(r.stamp), label: r.stamp, keys: [] };
+      out.push({ ...common, image: undefined, imageUrl: r.image, stamp });
     } else if (!seen.has(common.id)) {
       seen.add(common.id);
       out.push({ ...common, imageUrl: common.image ? undefined : r.image });
@@ -243,11 +274,7 @@ function withCatalog(list: CardBrief[], rows: CatalogRow[], lang: CardLang): Car
   for (const c of list) {
     if (!c.stamp) {
       if (!seen.has(c.id)) out.push(c);
-      continue;
-    }
-    // Versão com selo da TCGdex que o catálogo já tem (com foto): fica só a do catálogo.
-    const w = plainWords(c.stamp.label);
-    if (!(catalogStamps.get(c.id) ?? []).some((s) => s.some((x) => x.length > 3 && w.includes(x)))) out.push(c);
+    } else if (!matched.has(c)) out.push(c);
   }
   return out;
 }
@@ -266,7 +293,7 @@ function digitalSets() {
 
 /** Todas as cartas de um Pokémon (número da Pokédex nacional) num idioma, da coleção mais nova para a mais antiga. */
 export async function cardsForDex(dex: number, lang: CardLang): Promise<CardBrief[]> {
-  return cached(`tcgdex:dex:v10:${lang}:${dex}`, async () => {
+  return cached(`tcgdex:dex:v12:${lang}:${dex}`, async () => {
     const [raw, sets, enSets, digital] = await Promise.all([rawCardsFor(dex, lang), setsFor(lang), setsFor('en'), digitalSets()]);
     const isPhysical = (c: RawCard) => !digital.includes(setIdOf(c));
     const cards = raw.filter(isPhysical);
@@ -341,7 +368,7 @@ export async function cardsForDex(dex: number, lang: CardLang): Promise<CardBrie
 export async function searchCards(query: string, lang: CardLang): Promise<CardBrief[]> {
   const q = query.trim();
   if (q.length < 2) return [];
-  return cached(`tcgdex:search:v3:${lang}:${q.toLowerCase()}`, async () => {
+  return cached(`tcgdex:search:v5:${lang}:${q.toLowerCase()}`, async () => {
     const byName = (l: CardLang) => getJson<RawCard[]>(`${API}/${l}/cards?name=like:${encodeURIComponent(q)}`);
     const [raw, sets, enSets, digital] = await Promise.all([byName(lang), setsFor(lang), setsFor('en'), digitalSets()]);
     const order = new Map(enSets.map((s, i) => [s.id, i]));
@@ -367,6 +394,9 @@ export async function searchCards(query: string, lang: CardLang): Promise<CardBr
       withEnglishImages(list, en);
       for (const c of en) if (isPhysical(c) && !ids.has(c.id)) list.push(toBrief(c, 'en'));
     }
+    // Versões com selo da TCGdex (ex.: logo da coleção na Booster Box), como no fichário Pokédex; numa busca ampla,
+    // só as das coleções mais novas.
+    if (lang !== 'ja') list.push(...(await stampedVersions(list, 60)));
     const rows = lang === 'ja' ? [] : await catalogByName(q).catch(() => []);
     return withCatalog(list, rows, lang)
       .sort((a, b) => b.setOrder - a.setOrder || a.localId.localeCompare(b.localId, undefined, { numeric: true }))

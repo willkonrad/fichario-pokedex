@@ -4,14 +4,17 @@ import Svg, { Circle, Defs, Line, LinearGradient, Path, Polyline, Stop, Text as 
 
 import { colors } from '@/theme';
 
-/** Gráfico de linha com área preenchida (ex.: valor da coleção por dia). `t` em milissegundos. */
+/**
+ * Gráfico de linha com área preenchida (ex.: valor da coleção por dia). `t` em milissegundos. Com `lo`/`hi` nos
+ * pontos, desenha a faixa entre eles (ex.: mínimo e máximo) e a linha de `v` (a média) por cima.
+ */
 export function LineChart({
   points,
   color = colors.primary,
   height = 170,
   format,
 }: {
-  points: { t: number; v: number }[];
+  points: { t: number; v: number; lo?: number; hi?: number }[];
   color?: string;
   height?: number;
   /** Rótulo do eixo de valores (ex.: "R$ 1,2 mil"). */
@@ -23,8 +26,9 @@ export function LineChart({
   const right = 10;
   const top = 10;
   const bottom = 22;
+  const band = points.some((p) => p.lo != null && p.hi != null && p.hi > p.lo);
   const ts = points.map((p) => p.t);
-  const vs = points.map((p) => p.v);
+  const vs = points.flatMap((p) => (band ? [p.v, p.lo ?? p.v, p.hi ?? p.v] : [p.v]));
   const start = Math.min(...ts);
   const end = Math.max(...ts);
   const min = Math.min(...vs);
@@ -37,6 +41,13 @@ export function LineChart({
   const coords = points.map((p) => `${x(p.t)},${y(p.v)}`).join(' ');
   const area = points.length
     ? `M${x(points[0].t)},${H - bottom} L${points.map((p) => `${x(p.t)},${y(p.v)}`).join(' L')} L${x(points[points.length - 1].t)},${H - bottom} Z`
+    : '';
+  // Faixa: borda de cima pelos máximos (esquerda → direita), volta pela de baixo pelos mínimos.
+  const bandPath = points.length
+    ? `M${points.map((p) => `${x(p.t)},${y(p.hi ?? p.v)}`).join(' L')} L${[...points]
+        .reverse()
+        .map((p) => `${x(p.t)},${y(p.lo ?? p.v)}`)
+        .join(' L')} Z`
     : '';
   const date = (t: number) => new Date(t).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
   const last = points[points.length - 1];
@@ -59,7 +70,11 @@ export function LineChart({
               {format(v)}
             </SvgText>
           ))}
-          {points.length > 1 ? <Path d={area} fill="url(#area)" /> : null}
+          {points.length > 1 && band ? <Path d={bandPath} fill={color} fillOpacity={0.16} /> : null}
+          {points.length > 1 && !band ? <Path d={area} fill="url(#area)" /> : null}
+          {band && points.length === 1 && last.lo != null && last.hi != null ? (
+            <Line x1={x(last.t)} x2={x(last.t)} y1={y(last.hi)} y2={y(last.lo)} stroke={color} strokeOpacity={0.35} strokeWidth={6} strokeLinecap="round" />
+          ) : null}
           {points.length > 1 ? <Polyline points={coords} fill="none" stroke={color} strokeWidth={2.5} strokeLinejoin="round" /> : null}
           {last ? <Circle cx={x(last.t)} cy={y(last.v)} r={4.5} fill={color} stroke={colors.surface} strokeWidth={2} /> : null}
           <SvgText x={left} y={H - 6} fontSize={10} fill={colors.textFaint}>

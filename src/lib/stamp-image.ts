@@ -3,15 +3,15 @@ import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
 import { cached } from './tcgdex';
 
-/** Selos que nunca viram produto à parte na TCGplayer (logo da coleção da Booster Box, 1ª edição). */
-const NO_PHOTO = ['set-logo', '1st-edition'];
+/** Selos que nunca viram produto à parte na TCGplayer (1ª edição). O da Booster Box vira ("<Coleção> Stamped"). */
+const NO_PHOTO = ['1st-edition'];
 
 /**
  * Foto oficial da versão com selo (ex.: Pikachu SVP 027 "Pokémon Center"), pela Edge Function stamp-image, que
  * procura no TCGCSV (catálogo da TCGplayer). null = não existe foto dessa versão. Guardada por 1 semana.
  */
 export function stampImage(cardId: string, stampKeys: string[]) {
-  return cached(`tcgdex:stampimg:v1:${cardId}:${stampKeys.join(',')}`, async () => {
+  return cached(`tcgdex:stampimg:v2:${cardId}:${stampKeys.join(',')}`, async () => {
     if (!supabase) return null;
     const { data, error } = await supabase.functions.invoke<{ image?: string }>('stamp-image', { body: { cardId, stamps: stampKeys } });
     if (error) throw error;

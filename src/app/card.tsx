@@ -16,7 +16,7 @@ import { ligaQuery, ligaSearchUrl } from '@/lib/liga';
 import { formatBRL, formatWhen } from '@/lib/quotes';
 import { cardDetail, type CardDetail } from '@/lib/tcgdex';
 import { CONDITIONS, LANG_LABEL, ORIGINS, VARIANTS, type CardLang, type Condition, type Entry, type Origin, type Variant } from '@/lib/types';
-import { valuation } from '@/lib/valuation';
+import { isSpread, valuation } from '@/lib/valuation';
 import { useStampImage } from '@/lib/stamp-image';
 import { availableVariants, versionOptions, type VersionOption } from '@/lib/variants';
 import { keyOf, useCollection } from '@/store/collection';
@@ -170,11 +170,9 @@ function CardForm({ params }: { params: Params }) {
   const photo = photoFits(variant, variantNote) ? (isNewCard ? params.photo : existing?.stampPhoto) : undefined;
   const myValueNum = parseBRL(myValueText);
   const purchaseNum = parseBRL(purchaseText);
-  // Valor atual da carta (com o "Meu valor" da tela), para comparar com o valor de compra.
-  const currentValue =
-    existing && !isNewCard
-      ? valuation({ ...existing, myValue: myValueNum != null ? { value: myValueNum, setAt: '' } : undefined }).value
-      : undefined;
+  // Valor atual da carta (com o "Meu valor" da tela), para comparar com o valor de compra: a média e a faixa do MYP.
+  const current = existing && !isNewCard ? valuation({ ...existing, myValue: myValueNum != null ? { value: myValueNum, setAt: '' } : undefined }) : undefined;
+  const currentValue = current?.value;
 
   /** A carta completa, com as edições atuais (e `patch` por cima, para mudanças feitas agora). */
   function buildEntry(patch: Partial<Edits> = {}): Omit<Entry, 'id' | 'updatedAt'> {
@@ -515,9 +513,15 @@ function CardForm({ params }: { params: Params }) {
                   />
                   {purchaseNum != null && currentValue != null ? (
                     <Text style={[styles.purchaseDiff, { color: currentValue >= purchaseNum ? colors.success : colors.danger }]}>
-                      Valor atual {formatBRL(currentValue)} · {currentValue >= purchaseNum ? '+' : '−'}
+                      {current?.basis === 'manual' ? 'Meu valor' : 'Média atual'} {formatBRL(currentValue)} · {currentValue >= purchaseNum ? '+' : '−'}
                       {formatBRL(Math.abs(currentValue - purchaseNum))} ({currentValue >= purchaseNum ? '+' : '−'}
                       {Math.abs(Math.round(((currentValue - purchaseNum) / purchaseNum) * 100))}%) desde a compra
+                      {current?.range && isSpread(current.range) ? (
+                        <Text style={styles.purchaseRange}>
+                          {'\n'}No MYP vai de {formatBRL(current.range.min)} ({signedDiff(current.range.min, purchaseNum)}) a{' '}
+                          {formatBRL(current.range.max)} ({signedDiff(current.range.max, purchaseNum)}).
+                        </Text>
+                      ) : null}
                     </Text>
                   ) : null}
                 </>
@@ -630,8 +634,15 @@ function formatInput(n: number) {
   return n.toFixed(2).replace('.', ',');
 }
 
+/** Diferença sobre o valor de compra, em porcentagem com sinal: "+42%", "−8%". */
+function signedDiff(value: number, paid: number) {
+  const pct = Math.round(((value - paid) / paid) * 100);
+  return `${pct >= 0 ? '+' : '−'}${Math.abs(pct)}%`;
+}
+
 const styles = StyleSheet.create({
-  purchaseDiff: { fontSize: 13, fontWeight: '700', marginTop: 6 },
+  purchaseDiff: { fontSize: 13, fontWeight: '700', marginTop: 6, lineHeight: 18 },
+  purchaseRange: { color: colors.textMuted, fontWeight: '600' },
   screen: { flex: 1, backgroundColor: colors.background },
   band: { position: 'absolute', top: 0, left: 0, right: 0, height: 150, backgroundColor: colors.primary },
   hero: {

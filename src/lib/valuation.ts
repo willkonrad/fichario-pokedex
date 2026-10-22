@@ -3,13 +3,13 @@ import type { Entry, MypApiPrice } from './types';
 /**
  * Valor da carta (em reais). Só duas fontes:
  *
- *   1. "Meu valor" digitado pelo usuário: o único valor fixo. Quando a média do MYP passa dele, ele é apagado e a
- *      carta volta a usar o MYP (ver myValuePatch);
- *   2. a MÉDIA dos anúncios do produto no MYP Cards (API pública do MYP), mostrada com o mínimo e o máximo —
- *      confiança média, porque junta todos os estados e idiomas.
+ *   1. "Meu valor" digitado pelo usuário: o único valor fixo (mínimo, média e máximo iguais a ele). Quando a média do
+ *      MYP passa dele, ele é apagado e a carta volta a usar o MYP (ver myValuePatch);
+ *   2. o MÍNIMO, a MÉDIA e o MÁXIMO dos anúncios do produto no MYP Cards (API pública do MYP), como a API informa —
+ *      confiança média, porque juntam todos os estados e idiomas.
  *
- * O valor (a média, ou o "Meu valor") é o que entra nos totais da coleção e no gráfico de rendimento. Sem nenhum dos
- * dois, a carta fica sem valor.
+ * A faixa (mín/méd/máx) é o valor da carta e entra nos totais da coleção e no gráfico de rendimento; a média é o ponto
+ * do meio (ordena as mais valiosas e aparece nos bolsos). Sem nenhuma das duas fontes, a carta fica sem valor.
  */
 
 export type SourceId = 'manual' | 'myp';
@@ -69,8 +69,14 @@ export type SourceRow = {
   detail?: string;
 };
 
+/** Mínimo, média e máximo do valor (com "Meu valor", os três são ele). */
+export type ValueRange = { min: number; avg: number; max: number };
+
 export type Valuation = {
+  /** A média (ou o "Meu valor"). */
   value?: number;
+  /** Mínimo, média e máximo: o valor da carta como o MYP informa. */
+  range?: ValueRange;
   confidence?: Confidence;
   /** De onde veio o valor. */
   basis?: SourceId;
@@ -79,8 +85,13 @@ export type Valuation = {
 
 export const SOURCE_LABEL: Record<SourceId, string> = {
   manual: 'Meu valor',
-  myp: 'MYP Cards · média',
+  myp: 'MYP Cards · mín/méd/máx',
 };
+
+/** A faixa tem mínimo e máximo diferentes (senão é um valor só, como o "Meu valor"). */
+export function isSpread(r: ValueRange) {
+  return r.max - r.min >= 0.005;
+}
 
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -103,13 +114,15 @@ export function priceSources(e: Entry): Omit<SourceRow, 'used'>[] {
   return rows;
 }
 
-/** Valor da carta (ver comentário do módulo): "Meu valor", senão a média do MYP. */
+/** Valor da carta (ver comentário do módulo): "Meu valor", senão mínimo/média/máximo do MYP. */
 export function valuation(e: Entry): Valuation {
   const all = priceSources(e);
   const best = all[0];
   if (!best) return { sources: [] };
+  const api = best.id === 'myp' ? mypApiFor(e) : undefined;
   return {
     value: best.brl,
+    range: { min: Math.min(api?.min ?? best.brl, best.brl), avg: best.brl, max: Math.max(api?.max ?? best.brl, best.brl) },
     confidence: best.id === 'manual' ? 'alta' : 'media',
     basis: best.id,
     sources: all.map((r) => ({ ...r, used: r === best })),

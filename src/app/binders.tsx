@@ -7,8 +7,9 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button, onCover, type IconName } from '@/components/ui';
 import { TOTAL_SPECIES } from '@/data/pokedex';
 import { customTotalSlots, dexRange } from '@/lib/binder';
-import { collectionTotals, formatBRLTight } from '@/lib/quotes';
+import { collectionTotals, formatBRLTight, formatRange } from '@/lib/quotes';
 import { BINDER_PURPOSES, POKEDEX_BINDER } from '@/lib/types';
+import { isSpread } from '@/lib/valuation';
 import { entriesOf, useCollection } from '@/store/collection';
 import { colors, MAX_WIDTH, radius, shadow } from '@/theme';
 
@@ -94,6 +95,10 @@ export default function BindersScreen() {
                 </Text>
                 {r.totals?.valued ? <Text style={styles.value}>{formatBRLTight(r.totals.value)}</Text> : null}
               </View>
+              {/* Mínimo a máximo numa linha própria (ao lado do valor, seria cortado no celular). */}
+              {r.totals?.valued && isSpread(r.totals.range) ? (
+                <Text style={styles.valueRange}>({formatRange(r.totals.min, r.totals.max)})</Text>
+              ) : null}
             </View>
           </Pressable>
             <Pressable
@@ -114,7 +119,7 @@ export default function BindersScreen() {
         <Text style={styles.link} accessibilityRole="link" onPress={() => WebBrowser.openBrowserAsync('https://mypcards.com')}>
           MYP Cards ↗
         </Text>{' '}
-        (ou &quot;Meu valor&quot;).
+        e, entre parênteses, a soma dos mínimos e dos máximos (ou &quot;Meu valor&quot;).
       </Text>
 
       <Button title="Novo fichário" icon="add" onPress={() => router.push('/binder-edit')} />
@@ -152,6 +157,7 @@ const styles = StyleSheet.create({
   statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
   stat: { color: colors.textMuted, fontSize: 12, fontWeight: '600' },
   value: { color: colors.money, fontSize: 13, fontWeight: '800' },
+  valueRange: { color: colors.textMuted, fontSize: 11, fontWeight: '700', textAlign: 'right', marginTop: 1 },
   edit: { padding: 14, alignSelf: 'stretch', justifyContent: 'center' },
   hint: { color: colors.textMuted, fontSize: 12, lineHeight: 17, textAlign: 'center' },
   link: { color: colors.blue, fontWeight: '800' },

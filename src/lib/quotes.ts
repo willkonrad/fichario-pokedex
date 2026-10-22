@@ -1,33 +1,36 @@
 import type { Entry } from './types';
 import { valuation } from './valuation';
 
-/** Valor da carta no total da coleção ("Meu valor" ou a média do MYP; ver valuation.ts). */
-export function entryValue(e: Entry) {
-  return valuation(e).value;
+/** Mínimo, média e máximo da carta ("Meu valor" ou o MYP; ver valuation.ts). */
+export function entryRange(e: Entry) {
+  return valuation(e).range;
 }
 
 /**
- * Totais da coleção: soma do valor de cada carta (a média do MYP ou o "Meu valor") e quantas cartas têm valor, por
- * confiança; e a faixa do MYP: a soma dos mínimos e dos máximos (cartas com "Meu valor" entram com ele nas duas
- * pontas).
+ * Totais da coleção: soma dos mínimos, das médias e dos máximos das cartas (cartas com "Meu valor" entram com ele nas
+ * três colunas) e quantas cartas têm valor, por confiança. `value` é a soma das médias.
  */
 export function collectionTotals(entries: Entry[]) {
   let value = 0;
   let valued = 0;
-  let low = 0;
-  let high = 0;
+  let min = 0;
+  let max = 0;
   const byConfidence = { alta: 0, media: 0, baixa: 0 };
   for (const e of entries) {
     const ref = valuation(e);
-    if (ref.value == null) continue;
-    value += ref.value;
+    if (!ref.range) continue;
+    value += ref.range.avg;
+    min += ref.range.min;
+    max += ref.range.max;
     valued++;
     if (ref.confidence) byConfidence[ref.confidence]++;
-    const api = ref.basis === 'myp' ? e.mypApi : undefined;
-    low += api?.min ?? ref.value;
-    high += api?.max ?? ref.value;
   }
-  return { value, valued, low, high, byConfidence, unvalued: entries.length - valued };
+  return { value, valued, min, max, range: { min, avg: value, max }, byConfidence, unvalued: entries.length - valued };
+}
+
+/** Faixa curta, sem a média: "R$ 5,50 – R$ 31". */
+export function formatRange(min: number, max: number) {
+  return `${formatBRLTight(min)} – ${formatBRLTight(max)}`;
 }
 
 /** Atualização mais recente e mais antiga dos preços do MYP na coleção (ISO). */

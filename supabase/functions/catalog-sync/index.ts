@@ -10,9 +10,13 @@
 //
 // Cada carta é ligada ao id da TCGdex (mesma sigla oficial de coleção, mesmo número e mesmo nome), que o app usa
 // para a ficha em português, as variações e os preços. Produtos com um complemento a mais que a versão comum da
-// mesma carta (ex.: "(Pokemon Center Exclusive)") viram a versão com selo, com a foto própria.
+// mesma carta (ex.: "(Pokemon Center Exclusive)") viram a versão com selo, com a foto própria. Versões com selo que a
+// TCGplayer guarda em coleções "de tudo um pouco" (ex.: "Bulbasaur - 133/132 (Mega Evolution Stamped)", da Booster
+// Box) são ligadas pelo número completo "N/T" à carta da coleção de origem.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+
+import { candidatesFor, linkAndStamp, type TcgdexCard, type TcgdexSet } from './link.ts';
 
 const TCGCSV = 'https://tcgcsv.com';
 const TCGDEX = 'https://api.tcgdex.net/v2/en';
@@ -33,69 +37,17 @@ async function get<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-const words = (s: string) =>
-  s
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{M}/gu, '')
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean)
-    .join(' ');
-/** "007/165", "SWSH001", "TG06" → "7", "swsh1", "tg6". */
-const num = (s?: string) => (s ?? '').split('/')[0].trim().toLowerCase().replace(/^([a-z]*)0+(?=\d)/, '$1');
-/** Complementos entre parênteses ou colchetes: "Pikachu - 225 (World Championship 2025) [Winner]". */
-const qualifiers = (s: string) => [...s.matchAll(/[([]([^)\]]+)[)\]]/g)].map((m) => m[1].trim());
-
 type Group = { groupId: number; name: string; abbreviation?: string; modifiedOn?: string };
 type Product = { productId: number; name: string; extendedData?: { name: string; value: string }[] };
-type TcgdexCard = { id: string; localId: string; name: string };
-type TcgdexSet = { id: string; abbr: string | null; name: string | null; cards: TcgdexCard[] | null };
-
-/** Versão da regra de ligação; coleções com versão menor são religadas a partir da cópia (sem baixar de novo). */
-const LINK_VERSION = 2;
-const GROUPS_RELINKED_PER_RUN = 60;
-
-/** "SWSH08", "SM05", "sv03.5" → "swsh8", "sm5", "sv3.5": compara o código da TCGplayer com o id da TCGdex. */
-const code = (s: string) => s.toLowerCase().replace(/[^a-z0-9.]/g, '').replace(/([a-z])0+(?=\d)/g, '$1');
-const STOP = new Set(['the', 'and', 'of', 'pokemon', 'tcg', 'set', 'sets', 'cards', 'card', 'series', 'black', 'star', 'expansion']);
-/** Palavras do nome da coleção, sem o prefixo de série ("SWSH08: ", "SM - ") e sem plural. */
-const setWords = (s: string) =>
-  new Set(
-    words(s.replace(/^[A-Za-z]{1,5}\d{0,3}(\.\d)?\s*[:–-]\s+/, ''))
-      .split(' ')
-      .map((w) => w.replace(/s$/, ''))
-      .filter((w) => w && !STOP.has(w)),
-  );
 
 /**
- * Coleções da TCGdex candidatas a uma coleção do TCGCSV: mesma sigla, código igual ao id (SWSH08 ↔ swsh8) ou nome
- * mais parecido. A carta só é ligada se número E nome baterem, então candidatas a mais não geram ligações erradas.
+ * Versão da regra de ligação; coleções com versão menor são religadas a partir da cópia (sem baixar de novo).
+ * 3: ligação pelo número completo "N/T" e selo das versões de outras coleções (ex.: "Mega Evolution Stamped").
+ * 4: reimpressões renumeradas (coleções clássicas) ligadas pelo nome; nome da coleção no selo das versões de outras
+ *    coleções ("Jumbo Cards · …", "Prize Pack Series Cards · …"); kits com duas coleções da TCGdex.
  */
-function candidatesFor(g: { name: string; abbr: string | null }, sets: TcgdexSet[]) {
-  const out = new Set<TcgdexSet>();
-  for (const s of sets) {
-    if (g.abbr && (s.abbr === g.abbr || code(s.id) === code(g.abbr))) out.add(s);
-  }
-  const gw = setWords(g.name);
-  let best = 0;
-  const scored = sets.map((s) => {
-    const sw = setWords(s.name ?? '');
-    const shared = [...gw].filter((w) => sw.has(w)).length;
-    best = Math.max(best, shared);
-    return { s, shared };
-  });
-  if (best > 0) for (const x of scored) if (x.shared === best) out.add(x.s);
-  return [...out];
-}
-
-/** Id da TCGdex da carta (mesmo número e mesmo nome numa das coleções candidatas). */
-function linkCard(name: string, number: string, candidates: TcgdexSet[]) {
-  for (const s of candidates) {
-    const hit = (s.cards ?? []).find((t) => num(t.localId) === num(number) && words(t.name) === words(name));
-    if (hit) return hit.id;
-  }
-  return null;
-}
+const LINK_VERSION = 4;
+const GROUPS_RELINKED_PER_RUN = 60;
 
 Deno.serve(async (req) => {
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
@@ -105,7 +57,9 @@ Deno.serve(async (req) => {
   const report = { tcgdexSets: 0, groupsListed: 0, groupsSynced: 0, cards: 0, linked: 0, pending: 0, relinkedGroups: 0, relinkedCards: 0 };
 
   // 1) Siglas oficiais das coleções da TCGdex (e as cartas de cada uma), aos poucos; renovadas a cada 7 dias.
-  const tcgdexList = await get<{ id: string; name: string }[]>(`${TCGDEX}/sets`);
+  const tcgdexList = await get<{ id: string; name: string; cardCount?: { official?: number } }[]>(`${TCGDEX}/sets`);
+  // Número oficial de cartas de cada coleção (o "132" de "133/132"), para a ligação pelo número completo.
+  const official = new Map(tcgdexList.filter((s) => s.cardCount?.official).map((s) => [s.id, s.cardCount!.official!]));
   const { data: known } = await admin.from('tcgdex_sets').select('id, name, synced_at');
   const fresh = new Set(
     (known ?? []).filter((s) => s.name && Date.now() - new Date(s.synced_at).getTime() < 7 * 86_400_000).map((s) => s.id),
@@ -162,37 +116,33 @@ Deno.serve(async (req) => {
         const number = p.extendedData?.find((e) => e.name === 'Number')?.value;
         const cut = p.name.indexOf(' - ');
         const name = (cut > 0 ? p.name.slice(0, cut) : p.name.replace(/[([][^)\]]*[)\]]/g, '')).trim();
-        return number ? { p, number, name, quals: qualifiers(cut > 0 ? p.name.slice(cut) : p.name) } : null;
+        return number ? { p, number, name } : null;
       })
       .filter((c): c is NonNullable<typeof c> => !!c);
 
-    // Versão comum de cada carta (nome + número): a com menos complementos; os complementos a mais são o selo.
-    const base = new Map<string, string[]>();
-    for (const c of cards) {
-      const k = `${words(c.name)}|${num(c.number)}`;
-      const cur = base.get(k);
-      if (!cur || c.quals.length < cur.length) base.set(k, c.quals);
-    }
-    // Coleções da TCGdex candidatas (só inglês: os ids japoneses da TCGdex são outros).
-    const candidates = g.category === 3 ? candidatesFor(g, tcgdexSets) : [];
+    // Ligação à TCGdex e selo (só inglês: os ids japoneses da TCGdex são outros).
+    const english = g.category === 3;
+    const links = linkAndStamp(
+      g.name,
+      cards.map((c) => ({ product_id: c.p.productId, name: c.name, number: c.number, full_name: c.p.name })),
+      english ? candidatesFor(g, tcgdexSets) : [],
+      english ? tcgdexSets : [],
+      official,
+    );
 
-    const rows = cards.map((c) => {
-      const k = `${words(c.name)}|${num(c.number)}`;
-      const extra = c.quals.filter((q) => !(base.get(k) ?? []).includes(q));
-      return {
-        product_id: c.p.productId,
-        category: g.category,
-        group_id: g.group_id,
-        name: c.name,
-        full_name: c.p.name,
-        number: c.number,
-        rarity: c.p.extendedData?.find((e) => e.name === 'Rarity')?.value ?? null,
-        image: `https://tcgplayer-cdn.tcgplayer.com/product/${c.p.productId}_in_1000x1000.jpg`,
-        stamp: extra.length ? extra.join(' · ') : null,
-        tcgdex_id: linkCard(c.name, c.number, candidates),
-        updated_at: new Date().toISOString(),
-      };
-    });
+    const rows = cards.map((c, i) => ({
+      product_id: c.p.productId,
+      category: g.category,
+      group_id: g.group_id,
+      name: c.name,
+      full_name: c.p.name,
+      number: c.number,
+      rarity: c.p.extendedData?.find((e) => e.name === 'Rarity')?.value ?? null,
+      image: `https://tcgplayer-cdn.tcgplayer.com/product/${c.p.productId}_in_1000x1000.jpg`,
+      stamp: links[i].stamp,
+      tcgdex_id: links[i].tcgdex_id,
+      updated_at: new Date().toISOString(),
+    }));
     for (let i = 0; i < rows.length; i += 500) {
       const { error } = await admin.from('tcg_catalog').upsert(rows.slice(i, i + 500), { onConflict: 'product_id' });
       if (error) throw error;
@@ -215,9 +165,26 @@ Deno.serve(async (req) => {
     .lt('link_version', LINK_VERSION)
     .limit(GROUPS_RELINKED_PER_RUN);
   for (const g of oldLinks ?? []) {
-    const candidates = candidatesFor(g, tcgdexSets);
-    const { data: cards } = await admin.from('tcg_catalog').select('product_id, name, number').eq('group_id', g.group_id);
-    const links = (cards ?? []).map((c) => ({ product_id: c.product_id, tcgdex_id: linkCard(c.name, c.number ?? '', candidates) }));
+    // Todas as cartas da coleção, em páginas de 1.000 (limite da API; ex.: World Championship Decks tem 1.700).
+    const cards: { product_id: number; name: string; number: string | null; full_name: string }[] = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await admin
+        .from('tcg_catalog')
+        .select('product_id, name, number, full_name')
+        .eq('group_id', g.group_id)
+        .order('product_id')
+        .range(from, from + 999);
+      if (error) throw error;
+      cards.push(...(data ?? []));
+      if (!data || data.length < 1000) break;
+    }
+    const links = linkAndStamp(
+      g.name,
+      cards.map((c) => ({ product_id: c.product_id, name: c.name, number: c.number ?? '', full_name: c.full_name })),
+      candidatesFor(g, tcgdexSets),
+      tcgdexSets,
+      official,
+    );
     if (links.length) {
       const { data: changed, error } = await admin.rpc('relink_catalog', { p: links });
       if (error) throw error;
