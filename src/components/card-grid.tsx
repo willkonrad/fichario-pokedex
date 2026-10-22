@@ -44,6 +44,7 @@ export function CardGrid({
           <View style={[styles.thumb, { height: itemWidth / CARD_RATIO }]}>
             <CardImage
               image={item.image}
+              imageUrl={item.imageUrl}
               cardId={item.lang === 'ja' ? undefined : item.id}
               nameEn={item.lang === 'en' || item.dataLang === 'en' ? item.name : undefined}
               setNameEn={item.setNameEn}

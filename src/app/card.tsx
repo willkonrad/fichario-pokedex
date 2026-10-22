@@ -33,6 +33,8 @@ type Params = {
   /** Versão com selo escolhida na lista (já marca a variação e o selo). */
   variant?: Variant;
   stamp?: string;
+  /** Foto oficial da versão com selo escolhida na lista. */
+  photo?: string;
 };
 
 /** Campos que o usuário edita nesta tela (o resto vem do catálogo ou do servidor). */
@@ -153,6 +155,9 @@ function CardForm({ params }: { params: Params }) {
   }
   // Foto oficial da versão com selo escolhida (vem da TCGplayer, em inglês): usada pela bandeira do idioma.
   const stampPhoto = useStampImage(lang === 'ja' ? undefined : cardId, stampKeysOf(variant, variantNote));
+  // Foto oficial da versão com selo escolhida na lista (só enquanto a variação for a dessa versão).
+  const photoVariant = isNewCard ? params.variant : existing?.variant;
+  const photo = variant === photoVariant ? (isNewCard ? params.photo : existing?.stampPhoto) : undefined;
   const myValueNum = parseBRL(myValueText);
   const purchaseNum = parseBRL(purchaseText);
   // Valor atual da carta (com o estado e o "Meu valor" da tela), para comparar com o valor de compra.
@@ -183,7 +188,8 @@ function CardForm({ params }: { params: Params }) {
       setTotal: (detail?.set.cardCount?.official || detail?.set.cardCount?.total) ?? saved?.setTotal,
       rarity: detail?.rarity ?? saved?.rarity,
       image,
-      imageUrl: image ? undefined : (resolvedImageUrl ?? (isNewCard ? undefined : saved?.imageUrl)),
+      imageUrl: image ? undefined : (detail?.imageUrl ?? resolvedImageUrl ?? (isNewCard ? undefined : saved?.imageUrl)),
+      stampPhoto: e.variant === photoVariant ? (isNewCard ? params.photo : existing?.stampPhoto) : undefined,
       variant: e.variant,
       variantNote: e.variantNote.trim() || undefined,
       stampKeys: stampKeysOf(e.variant, e.variantNote),
@@ -298,7 +304,7 @@ function CardForm({ params }: { params: Params }) {
   // Idioma da imagem mostrada: a da TCGdex diz no endereço (/pt/, /en/); as reservas (pokemontcg.io, Scrydex) são
   // da carta em inglês; o Zukan também diz no endereço.
   const shownImage = detail?.image ?? enDetail?.image ?? saved?.image ?? resolvedImageUrl ?? (isNewCard ? undefined : saved?.imageUrl);
-  const imageLang: CardLang | undefined = stampPhoto
+  const imageLang: CardLang | undefined = photo || stampPhoto || detail?.imageUrl
     ? 'en'
     : !shownImage
       ? undefined
@@ -306,10 +312,10 @@ function CardForm({ params }: { params: Params }) {
       ? 'ja'
       : ((shownImage.match(/tcgdex\.net\/(pt|en|ja)\//)?.[1] ?? shownImage.match(/zukan\.com\.br\/cards\/[^/]+\/(pt|en)\//)?.[1] ?? 'en') as CardLang);
 
-  const cardImageEl = (fit: 'contain' | 'cover', stampKeys = stampKeysOf(variant, variantNote)) => (
+  const cardImageEl = (fit: 'contain' | 'cover', stampKeys = stampKeysOf(variant, variantNote), withPhoto = true) => (
     <CardImage
       image={detail?.image ?? enDetail?.image ?? saved?.image}
-      imageUrl={isNewCard ? undefined : (saved?.imageUrl ?? existing?.ligaImage)}
+      imageUrl={detail?.imageUrl ?? (isNewCard ? undefined : (saved?.imageUrl ?? existing?.ligaImage))}
       cardId={lang === 'ja' ? undefined : cardId}
       nameEn={enDetail?.name}
       setNameEn={enDetail?.set.name}
@@ -318,6 +324,7 @@ function CardForm({ params }: { params: Params }) {
       contentFit={fit}
       dex={dex || undefined}
       stampKeys={stampKeys}
+      photo={withPhoto ? photo : undefined}
       onResolved={setResolvedImageUrl}
     />
   );
@@ -344,7 +351,7 @@ function CardForm({ params }: { params: Params }) {
           visible={showVersions}
           options={versions}
           selected={pickedVariant ? { variant, stamp: variantNote || undefined } : undefined}
-          image={(o) => cardImageEl('cover', o.stampKeys)}
+          image={(o) => cardImageEl('cover', o.stampKeys, false)}
           onPick={pickVersion}
           onClose={() => {
             setVersionsOpen(false);

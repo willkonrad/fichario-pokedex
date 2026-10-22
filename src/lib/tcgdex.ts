@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { getSpecies } from '@/data/pokedex';
+import { catalogByName, catalogByTcgdexIds, catalogNumber, catalogProduct, stampVariant, type CatalogRow } from './catalog';
 import type { CardLang, Variant } from './types';
 import { versionOptions } from './variants';
 
@@ -27,6 +28,8 @@ export type CardBrief = {
    * como uma carta à parte na lista, como a Liga faz ("133b"). Escolher já marca a variação e o selo.
    */
   stamp?: { variant: Variant; label: string; keys: string[] };
+  /** Foto completa da carta (TCGplayer, via catálogo do TCGCSV), quando não há imagem da TCGdex. */
+  imageUrl?: string;
 };
 
 export type CardDetail = {
@@ -57,6 +60,8 @@ export type CardDetail = {
   variants_detailed?: { type: string; subtype?: string; size?: string; foil?: string; stamp?: string[] }[];
   set: { id: string; name: string; cardCount?: { official?: number; total?: number } };
   variants?: Partial<Record<'normal' | 'reverse' | 'holo' | 'firstEdition' | 'wPromo', boolean>>;
+  /** Foto completa da carta, para cartas que só existem no catálogo do TCGCSV. */
+  imageUrl?: string;
 };
 
 type SetBrief = { id: string; name: string; logo?: string };
@@ -86,7 +91,7 @@ export async function cached<T>(key: string, load: () => Promise<T>, ttl = CACHE
 const CACHE_PREFIXES = ['tcgdex:', 'ptcg:', 'scrydex:', 'zukan:'];
 
 /** Chaves de versões antigas do cache, que nunca mais são lidas. */
-const STALE_CACHE = [/^tcgdex:dex:v[1-8]:/, /^tcgdex:search:v1:/, /^scrydex:(?!v5:)/, /^tcgdex:abbr:/];
+const STALE_CACHE = [/^tcgdex:dex:v[1-9]:/, /^tcgdex:search:v[12]:/, /^scrydex:(?!v5:)/, /^tcgdex:abbr:/];
 
 /** Apaga as chaves de cache de versões antigas (chamada ao abrir o app). */
 export async function pruneStaleCache() {
@@ -181,6 +186,72 @@ async function stampedVersions(list: CardBrief[]): Promise<CardBrief[]> {
   return out;
 }
 
+const plainWords = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+
+/**
+ * Junta o catálogo do TCGCSV (base principal) com a lista da TCGdex (secundária):
+ *   - carta do catálogo ligada à TCGdex: usa os dados da TCGdex (nome e imagem em português, variações, preços);
+ *   - carta só do catálogo (ex.: coleção lançada ontem): id "tcgp-<produto>", com a foto da TCGplayer;
+ *   - versão com selo do catálogo: carta à parte, com a foto própria;
+ *   - da TCGdex entram também as cartas e versões com selo que o catálogo não tem (ex.: selo da Booster Box).
+ */
+function withCatalog(list: CardBrief[], rows: CatalogRow[], lang: CardLang): CardBrief[] {
+  if (!rows.length) return list;
+  const byId = new Map(list.filter((c) => !c.stamp).map((c) => [c.id, c]));
+  // Ordem das coleções que só existem no catálogo: logo depois da coleção ligada de id anterior (a TCGplayer
+  // numera as coleções em ordem de lançamento).
+  const groupOrder = new Map<number, number>();
+  for (const r of rows) {
+    const b = r.tcgdex_id ? byId.get(r.tcgdex_id) : undefined;
+    if (b) groupOrder.set(r.group_id, Math.max(groupOrder.get(r.group_id) ?? -1, b.setOrder));
+  }
+  const known = [...groupOrder.entries()].sort((a, b) => a[0] - b[0]);
+  const orderOf = (g: number) => groupOrder.get(g) ?? known.reduce((o, [id, ord]) => (id <= g ? ord : o), -1) + 0.5;
+
+  const seen = new Set<string>();
+  const out: CardBrief[] = [];
+  const catalogStamps = new Map<string, string[][]>();
+  const unique = new Map(rows.map((r) => [r.product_id, r]));
+  for (const r of unique.values()) {
+    const base = r.tcgdex_id ? byId.get(r.tcgdex_id) : undefined;
+    const group = r.tcg_groups?.name ?? '';
+    const common: CardBrief = base ?? {
+      id: r.tcgdex_id ?? `tcgp-${r.product_id}`,
+      localId: catalogNumber(r.number),
+      name: r.name,
+      lang,
+      dataLang: 'en',
+      setId: `tcgp${r.group_id}`,
+      setName: group,
+      setNameEn: group,
+      setOrder: orderOf(r.group_id),
+    };
+    if (r.stamp) {
+      out.push({ ...common, image: undefined, imageUrl: r.image, stamp: { variant: stampVariant(r.stamp), label: r.stamp, keys: [] } });
+      catalogStamps.set(common.id, [...(catalogStamps.get(common.id) ?? []), plainWords(r.stamp)]);
+    } else if (!seen.has(common.id)) {
+      seen.add(common.id);
+      out.push({ ...common, imageUrl: common.image ? undefined : r.image });
+    }
+  }
+  for (const c of list) {
+    if (!c.stamp) {
+      if (!seen.has(c.id)) out.push(c);
+      continue;
+    }
+    // Versão com selo da TCGdex que o catálogo já tem (com foto): fica só a do catálogo.
+    const w = plainWords(c.stamp.label);
+    if (!(catalogStamps.get(c.id) ?? []).some((s) => s.some((x) => x.length > 3 && w.includes(x)))) out.push(c);
+  }
+  return out;
+}
+
 const setIdOf = (c: RawCard) => c.id.slice(0, c.id.length - c.localId.length - 1); // id = "<setId>-<localId>"
 
 /** Coleções do TCG Pocket (jogo digital): não existem em papel, então ficam fora do fichário. */
@@ -195,7 +266,7 @@ function digitalSets() {
 
 /** Todas as cartas de um Pokémon (número da Pokédex nacional) num idioma, da coleção mais nova para a mais antiga. */
 export async function cardsForDex(dex: number, lang: CardLang): Promise<CardBrief[]> {
-  return cached(`tcgdex:dex:v9:${lang}:${dex}`, async () => {
+  return cached(`tcgdex:dex:v10:${lang}:${dex}`, async () => {
     const [raw, sets, enSets, digital] = await Promise.all([rawCardsFor(dex, lang), setsFor(lang), setsFor('en'), digitalSets()]);
     const isPhysical = (c: RawCard) => !digital.includes(setIdOf(c));
     const cards = raw.filter(isPhysical);
@@ -247,7 +318,17 @@ export async function cardsForDex(dex: number, lang: CardLang): Promise<CardBrie
     }
 
     if (lang !== 'ja') list.push(...(await stampedVersions(list)));
-    return list.sort(
+
+    // Base principal: o catálogo do TCGCSV (cartas pelo nome do Pokémon e as ligadas às cartas da TCGdex acima).
+    let all = list;
+    const species = getSpecies(dex)?.name;
+    if (lang !== 'ja' && species) {
+      const rows = await Promise.all([catalogByName(species), catalogByTcgdexIds(list.map((c) => c.id))])
+        .then(([byName, byId]) => [...byName.filter((r) => nameMatches(r.name, species, 'en')), ...byId])
+        .catch(() => []);
+      all = withCatalog(list, rows, lang);
+    }
+    return all.sort(
       (a, b) => b.setOrder - a.setOrder || a.localId.localeCompare(b.localId, undefined, { numeric: true }) || Number(!!a.stamp) - Number(!!b.stamp),
     );
   }, LIST_TTL);
@@ -260,7 +341,7 @@ export async function cardsForDex(dex: number, lang: CardLang): Promise<CardBrie
 export async function searchCards(query: string, lang: CardLang): Promise<CardBrief[]> {
   const q = query.trim();
   if (q.length < 2) return [];
-  return cached(`tcgdex:search:v2:${lang}:${q.toLowerCase()}`, async () => {
+  return cached(`tcgdex:search:v3:${lang}:${q.toLowerCase()}`, async () => {
     const byName = (l: CardLang) => getJson<RawCard[]>(`${API}/${l}/cards?name=like:${encodeURIComponent(q)}`);
     const [raw, sets, enSets, digital] = await Promise.all([byName(lang), setsFor(lang), setsFor('en'), digitalSets()]);
     const order = new Map(enSets.map((s, i) => [s.id, i]));
@@ -286,7 +367,8 @@ export async function searchCards(query: string, lang: CardLang): Promise<CardBr
       withEnglishImages(list, en);
       for (const c of en) if (isPhysical(c) && !ids.has(c.id)) list.push(toBrief(c, 'en'));
     }
-    return list
+    const rows = lang === 'ja' ? [] : await catalogByName(q).catch(() => []);
+    return withCatalog(list, rows, lang)
       .sort((a, b) => b.setOrder - a.setOrder || a.localId.localeCompare(b.localId, undefined, { numeric: true }))
       .slice(0, 300);
   }, LIST_TTL);
@@ -294,6 +376,19 @@ export async function searchCards(query: string, lang: CardLang): Promise<CardBr
 
 export function cardDetail(id: string, lang: CardLang) {
   return cached(`tcgdex:card:${lang}:${id}`, async () => {
+    // Carta que só existe no catálogo do TCGCSV ("tcgp-<produto>"): ficha básica com a foto da TCGplayer.
+    if (id.startsWith('tcgp-')) {
+      const r = await catalogProduct(Number(id.slice(5)));
+      if (!r) throw new Error('TCGCSV 404');
+      return {
+        id,
+        localId: catalogNumber(r.number),
+        name: r.name,
+        rarity: r.rarity ?? undefined,
+        set: { id: `tcgp${r.group_id}`, name: r.tcg_groups?.name ?? '' },
+        imageUrl: r.image,
+      } satisfies CardDetail;
+    }
     try {
       return await getJson<CardDetail>(`${API}/${lang}/cards/${encodeURIComponent(id)}`);
     } catch (e) {

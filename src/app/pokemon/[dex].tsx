@@ -50,7 +50,7 @@ function PokemonCards() {
   function pick(card: CardBrief) {
     router.push({
       pathname: '/card',
-      params: { dex, slot, cardId: card.id, lang: card.lang, dataLang: card.dataLang ?? card.lang, variant: card.stamp?.variant, stamp: card.stamp?.label },
+      params: { dex, slot, cardId: card.id, lang: card.lang, dataLang: card.dataLang ?? card.lang, variant: card.stamp?.variant, stamp: card.stamp?.label, photo: card.stamp ? card.imageUrl : undefined },
     });
   }
 

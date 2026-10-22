@@ -59,7 +59,18 @@ function SearchForm() {
 
   function pick(card: CardBrief) {
     const where = binder ? { binder: binder.id, slot } : { dex: 0, slot: extra! };
-    router.push({ pathname: '/card', params: { ...where, cardId: card.id, lang: card.lang, dataLang: card.dataLang ?? card.lang } });
+    router.push({
+      pathname: '/card',
+      params: {
+        ...where,
+        cardId: card.id,
+        lang: card.lang,
+        dataLang: card.dataLang ?? card.lang,
+        variant: card.stamp?.variant,
+        stamp: card.stamp?.label,
+        photo: card.stamp ? card.imageUrl : undefined,
+      },
+    });
   }
 
   return (

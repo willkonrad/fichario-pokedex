@@ -1,5 +1,12 @@
 # Notas da versão
 
+## 2.4.0 — Catálogo do TCGCSV como base (22/10/2026)
+
+- **Base principal do catálogo: TCGCSV** (cópia diária e gratuita do catálogo da TCGplayer). As listas de cartas trazem todas as coleções, inclusive as recém-lançadas, e as versões com selo vendidas à parte, cada uma com a foto oficial. A TCGdex continua como base secundária: nome e imagem em português, ficha da carta, variações e preços.
+- Cartas que só existem no TCGCSV abrem com a foto e a ficha básica (bandeira 🇺🇸 EN).
+- A versão com selo escolhida na lista guarda a foto oficial e aparece com ela no fichário.
+- Cartas japonesas continuam vindo da TCGdex por enquanto.
+
 ## 2.3.0 — Todas as cartas, todas as artes (21/10/2026)
 
 - **Cartas que faltavam**: a lista de cada Pokémon completa com o catálogo do Zukan as cartas que a TCGdex ainda não tem (ex.: Nidorina MEP 101 da ETB de 30 anos, coleção me06).

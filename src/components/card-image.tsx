@@ -5,6 +5,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { ptcgImage, scrydexImage } from '@/lib/ptcg';
 import { spriteUrl } from '@/data/pokedex';
+import { catalogImage } from '@/lib/catalog';
 import { useStampImage } from '@/lib/stamp-image';
 import { cardImage, zukanImage } from '@/lib/tcgdex';
 import { binderColors, colors } from '@/theme';
@@ -33,6 +34,7 @@ export function CardImage({
   dex,
   dark = false,
   stampKeys,
+  photo,
   onResolved,
 }: {
   image?: string;
@@ -55,10 +57,13 @@ export function CardImage({
   onResolved?: (url: string) => void;
   /** Versão com selo: mostra a foto oficial dela (TCGplayer, via TCGCSV) quando existir. */
   stampKeys?: string[];
+  /** Foto oficial já conhecida da versão com selo (vem antes de tudo). */
+  photo?: string;
 }) {
-  const stampPhoto = useStampImage(cardId, stampKeys);
+  const stampFromSource = useStampImage(cardId, stampKeys);
+  const stampPhoto = photo ? catalogImage(photo, quality) : stampFromSource;
   const [stampFailed, setStampFailed] = useState<string | undefined>();
-  const primary = image ? cardImage(image, quality) : imageUrl;
+  const primary = image ? cardImage(image, quality) : imageUrl ? catalogImage(imageUrl, quality) : undefined;
   const [failed, setFailed] = useState<string | undefined>();
   const [found, setFound] = useState<{ key: string; url?: string } | undefined>();
   const needsFallback = !primary || failed === primary;

@@ -29,10 +29,10 @@ Os preços vêm de duas fontes brasileiras: o **MYP Cards** é a principal e as 
 |---|---|---|
 | [MYP Cards](https://mypcards.com) | Preços das cartas em reais | [API oficial do MYP Cards](https://github.com/MYPCards/mypcards-api) *(acesso solicitado)*; até lá, o [servidor MCP público do Zukan](https://www.zukan.com.br/llms.txt), que repassa o menor anúncio do MYP |
 | [Quanto vale minha carta?](https://quantovaleminhacarta.com.br) | Vendas reais finalizadas, por estado e idioma | Páginas públicas das cartas, cujo uso e citação o site autoriza no seu [llms.txt](https://quantovaleminhacarta.com.br/llms.txt) (citar a fonte, dizer que são vendas reais, preservar idioma e estado, avisar quando há poucas vendas) |
-| [TCGdex](https://tcgdex.dev) | Catálogo e imagens das cartas (sem preços) | API pública |
+| [TCGCSV](https://tcgcsv.com) | **Base principal do catálogo**: cartas de todas as coleções (inclusive as lançadas ontem) e versões com selo vendidas à parte, com a foto de cada uma | Espelho gratuito do catálogo da TCGplayer (obrigado, TCGCSV!), copiado 1×/dia para o Supabase pela Edge Function `catalog-sync`, seguindo as [regras de uso](https://tcgcsv.com/docs#usage-guidelines); o app só lê a cópia |
+| [TCGdex](https://tcgdex.dev) | Catálogo secundário: nome e imagem em português, ficha (ataques, HP…), variações e número da Pokédex | API pública |
 | [Zukan](https://www.zukan.com.br) | Cartas novas que a TCGdex ainda não tem (ex.: promos MEP recentes) e imagem reserva | Servidor MCP público |
 | [pokemontcg.io](https://pokemontcg.io) / Scrydex | Imagem reserva de cartas sem imagem na TCGdex | Arquivos públicos no GitHub e CDN de imagens |
-| [TCGCSV](https://tcgcsv.com) | Foto oficial das versões com selo que a TCGplayer lista à parte (Pokémon Center, campeonatos…) | Espelho gratuito do catálogo da TCGplayer (obrigado, TCGCSV!), pela Edge Function `stamp-image` |
 
 ### Uso responsável
 
