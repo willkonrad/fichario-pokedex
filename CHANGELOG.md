@@ -6,6 +6,7 @@
 - **Valor calculado**: a soma da coleção mostra em destaque o valor calculado (o valor escolhido de cada carta) e, embaixo, a soma dos mínimos, das médias e dos máximos. O cabeçalho do fichário, a lista de fichários, as mais valiosas, os bolsos e a comparação com o valor de compra usam o valor escolhido.
 - **Gráfico de rendimento**: a linha passa a ser o valor calculado (a foto diária guarda a escolha de cada carta), com a faixa do mínimo ao máximo.
 - A API do MYP não separa os preços por idioma nem por estado: os três valores juntam todos os anúncios do produto.
+- **Busca pelo código do produto no MYP** quando o nome não acha: o MYP cadastra algumas cartas com o número no nome e sem nome em português (ex.: "Mega Clefable ex - 031/088", "Nidorina (30th Celebration)"); nas coleções clássicas, o número original vem do catálogo do TCGCSV (ex.: Gengar da coleção de 30 anos = "Gengar (Prime)" 94/102).
 
 ## 2.6.1 — Preços que faltavam (22/10/2026)
 

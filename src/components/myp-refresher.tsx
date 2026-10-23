@@ -10,6 +10,7 @@ import {
   mypPriority,
   MypRateLimited,
   onMypPriority,
+  searchMypByCode,
   searchMypByName,
 } from '@/lib/myp-api';
 import type { MypProduct } from '@/lib/myp-match';
@@ -84,16 +85,19 @@ export function MypRefresher() {
     // A busca por nome traz todas as cartas com aquele nome: fica guardada por 30 min e serve as outras (ex.: vários
     // Gengar da coleção com uma consulta só).
     const recent = new Map<string, { at: number; products: MypProduct[] }>();
-    const consult = async (name: string) => {
-      const hit = recent.get(name);
+    const limited = async (key: string, load: () => Promise<MypProduct[]>) => {
+      const hit = recent.get(key);
       if (hit && Date.now() - hit.at < SEARCH_CACHE_MS) return hit.products;
       const wait = lastCall + MYP_API_INTERVAL_MS - Date.now();
       if (wait > 0) await pause(wait);
       lastCall = Date.now();
-      const products = await searchMypByName(name);
-      recent.set(name, { at: Date.now(), products });
+      const products = await load();
+      recent.set(key, { at: Date.now(), products });
       return products;
     };
+    const consult = (name: string) => limited(`nome:${name}`, () => searchMypByName(name));
+    // Pelo código do produto, quando o nome não acha (o MYP cadastra algumas cartas com o número no nome).
+    const consultCode = (code: string) => limited(`codigo:${code}`, () => searchMypByCode(code));
 
     // A tela de uma carta sem preço pede a vez dela: acorda a busca, se estiver ociosa.
     onMypPriority(() => wakeRef.current());
@@ -122,7 +126,7 @@ export function MypRefresher() {
         const group = due.filter((e) => groupKey(e) === key);
         for (const e of group) urgent.delete(e.id);
         try {
-          const price = await fetchMypPrice(group[0], consult);
+          const price = await fetchMypPrice(group[0], consult, consultCode);
           if (!alive) break;
           for (const e of group) await applyRef.current(e.id, price);
           // Preço que não ficou gravado (ex.: carta que ainda não chegou ao banco): espera como uma falha, para a
