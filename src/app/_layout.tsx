@@ -2,6 +2,7 @@ import { DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 
 import { MypRefresher } from '@/components/myp-refresher';
+import { TcgplayerRefresher } from '@/components/tcgplayer-refresher';
 import { CollectionProvider } from '@/store/collection';
 import { colors } from '@/theme';
 
@@ -20,6 +21,7 @@ export default function RootLayout() {
       <CollectionProvider>
         {/* Preços do MYP Cards das cartas, buscados aos poucos pelo app no celular. */}
         <MypRefresher />
+        <TcgplayerRefresher />
         {/* Texto claro na barra de status: as barras do topo são vermelhas. */}
         <StatusBar style="light" />
         <Stack

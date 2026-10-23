@@ -12,15 +12,18 @@ type Row = { entry_id: string; day: string; variant: string | null; sources: Rec
 
 /**
  * Valor de uma carta num dia, pela mesma regra do app (src/lib/valuation.ts): "Meu valor" (mínimo, média e máximo
- * iguais), senão mínimo/média/máximo do MYP (da carta base, para versão especial que o MYP não vende à parte). Fontes
- * antigas gravadas nas fotos (vendas reais, menor anúncio, oferta por estado) não entram.
+ * iguais), senão a TCGplayer (cartas em inglês, já em reais), senão mínimo/média/máximo do MYP (da carta base, para
+ * versão especial que o MYP não vende à parte). Fontes antigas gravadas nas fotos (vendas reais, menor anúncio, oferta
+ * por estado) não entram.
  */
 function dayRange(s: Record<string, unknown> | null): (ValueRange & { pick: number }) | undefined {
   if (!s) return undefined;
   const manual = (s.manual as { value?: number } | undefined)?.value;
   if (typeof manual === 'number') return { min: manual, avg: manual, max: manual, pick: manual };
-  // Produto no MYP: o da versão, ou o da carta base para versão especial que o MYP não vende à parte (valor parecido).
-  const api = s.mypApi as { min?: number; avg?: number; max?: number } | undefined;
+  // TCGplayer (só cartas em inglês têm), senão o produto no MYP.
+  type Prices = { min?: number; avg?: number; max?: number } | undefined;
+  const tcg = s.tcgplayer as Prices;
+  const api = typeof tcg?.avg === 'number' ? tcg : (s.mypApi as Prices);
   if (typeof api?.avg !== 'number') return undefined;
   const avg = api.avg;
   const range = {

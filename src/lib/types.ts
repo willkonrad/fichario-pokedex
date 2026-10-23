@@ -28,6 +28,39 @@ export const VARIANTS = [
 ] as const;
 export type Variant = (typeof VARIANTS)[number]['id'];
 
+/**
+ * Preço da carta em inglês na TCGplayer (EUA): cópia diária do TCGCSV feita pelo servidor (tcg_prices), convertida
+ * pela PTAX do Banco Central (fx_rates). Gravado pelo app (lib/tcgplayer.ts).
+ */
+export type TcgplayerPrice = {
+  /** Carta, versão e selo para os quais o preço foi achado (se mudarem, o app busca de novo). */
+  cardId: string;
+  variant: string;
+  note?: string;
+  /** Produto e impressão na TCGplayer (subTypeName: "Normal", "Holofoil", "Reverse Holofoil"…). */
+  productId?: number;
+  subType?: string;
+  url?: string;
+  /** US$: menor anúncio, mediana dos anúncios e valor de mercado (vendas recentes). */
+  usdLow?: number;
+  usdMid?: number;
+  usdMarket?: number;
+  /** Câmbio usado (PTAX de venda) e o dia dele. */
+  fx?: number;
+  fxDay?: string;
+  /** Em reais: mínimo = menor anúncio, média = valor de mercado, máximo = mediana dos anúncios. */
+  min?: number;
+  avg?: number;
+  max?: number;
+  /** Versão especial sem produto próprio na TCGplayer: preços da carta base. */
+  base?: boolean;
+  /** Versão do TCGCSV dos preços. */
+  builtAt?: string;
+  /** Motivo de não ter preço (carta fora do catálogo, sem vendas recentes…). */
+  notFound?: string;
+  checkedAt: string;
+};
+
 /** Qual preço do MYP conta como o valor da carta: mínimo, média ou máximo dos anúncios. */
 export type ValueBasis = 'min' | 'avg' | 'max';
 export const VALUE_BASIS_LABEL: Record<ValueBasis, string> = { min: 'mínimo', avg: 'média', max: 'máximo' };
@@ -103,22 +136,27 @@ export type Entry = {
   notes?: string;
   /** Menor, médio e maior preço do produto no MYP Cards (API pública; ver MypApiPrice). */
   mypApi?: MypApiPrice;
+  /** Preço na TCGplayer (EUA), para cartas em inglês (ver TcgplayerPrice). */
+  tcgplayer?: TcgplayerPrice;
   /**
    * Qual dos três preços do MYP é o valor da carta na soma (ex.: mínimo para cartas novas, média para as antigas).
    * Ausente = média.
    */
   valueBasis?: ValueBasis;
   /**
-   * Valor digitado pelo usuário: o único valor fixo, com prioridade sobre a média do MYP. É apagado (null) quando a
-   * média do MYP passa dele.
+   * Valor digitado pelo usuário: o único valor fixo, com prioridade sobre as fontes. É apagado (null) quando a média da
+   * fonte passa dele: a do MYP ou, nas cartas em inglês, o valor de mercado da TCGplayer (em reais).
    */
   myValue?: { value: number; setAt: string } | null;
   /** Como a carta chegou: troca, booster ou compra. */
   origin?: Origin;
   /** Quanto foi pago (só para origem "compra"). */
   purchasePrice?: number;
-  /** "Meu valor" apagado pelo servidor porque o MYP passou dele (gravado pelo servidor). */
-  myValueReplaced?: { value: number; mypValue: number; at: string };
+  /**
+   * "Meu valor" apagado porque a média da fonte passou dele (gravado pelo servidor). `mypValue` é essa média, em reais;
+   * `source` diz qual fonte foi (ausente = MYP, como nas versões anteriores à 2.8.0).
+   */
+  myValueReplaced?: { value: number; mypValue: number; at: string; source?: 'myp' | 'tcgplayer' };
   /** Imagem reserva salva por versões antigas do app (de quando os preços vinham da Liga). */
   ligaImage?: string;
   /** Busca exata da carta na Liga ("Nome (número/total)"), gravada por versões antigas; usada no link "Ver na Liga". */

@@ -85,8 +85,8 @@ export default function MenuScreen() {
           <Text style={styles.heroLink} accessibilityRole="link" onPress={() => WebBrowser.openBrowserAsync('https://mypcards.com')}>
             MYP Cards
           </Text>
-          , somados (ou &quot;Meu valor&quot;, fixo até a média do MYP passar dele). Em cada carta você escolhe qual dos três entra
-          no valor calculado.
+          ; nas cartas em inglês, da TCGplayer (EUA), em reais pela PTAX. Somados (ou &quot;Meu valor&quot;, fixo até a média da fonte
+          passar dele). Em cada carta você escolhe qual dos três entra no valor calculado.
         </Text>
       </View>
 

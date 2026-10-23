@@ -13,6 +13,10 @@
 // mesma carta (ex.: "(Pokemon Center Exclusive)") viram a versão com selo, com a foto própria. Versões com selo que a
 // TCGplayer guarda em coleções "de tudo um pouco" (ex.: "Bulbasaur - 133/132 (Mega Evolution Stamped)", da Booster
 // Box) são ligadas pelo número completo "N/T" à carta da coleção de origem.
+//
+// Também copia, 1×/dia por coleção em inglês, os preços da TCGplayer (arquivo /prices do TCGCSV: menor anúncio,
+// mediana e valor de mercado por impressão, em US$) para a tabela tcg_prices, e a PTAX do dólar do Banco Central
+// (fx_rates), com que o app mostra em reais o valor das cartas em inglês.
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
@@ -48,13 +52,31 @@ type Product = { productId: number; name: string; extendedData?: { name: string;
  */
 const LINK_VERSION = 4;
 const GROUPS_RELINKED_PER_RUN = 60;
+/** Preços da TCGplayer: coleções relidas por chamada (1 arquivo cada, 1×/dia por coleção) e tempo máximo da etapa. */
+const PRICE_GROUPS_PER_RUN = 40;
+const PRICE_TIME_MS = 80_000;
+/** PTAX do dólar (venda), série 1 do SGS do Banco Central: sai por volta de 13:10 de Brasília nos dias úteis. */
+const BCB_USD = 'https://api.bcb.gov.br/dados/serie/bcdata.sgs.1/dados/ultimos/1?formato=json';
+
+type PriceRow = { productId: number; subTypeName?: string | null; lowPrice?: number | null; midPrice?: number | null; marketPrice?: number | null };
 
 Deno.serve(async (req) => {
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
   const key = req.headers.get('x-sync-key') ?? '';
   const { data: allowed } = await admin.rpc('check_liga_sync_key', { k: key });
   if (allowed !== true) return json({ error: 'forbidden' }, 403);
-  const report = { tcgdexSets: 0, groupsListed: 0, groupsSynced: 0, cards: 0, linked: 0, pending: 0, relinkedGroups: 0, relinkedCards: 0 };
+  const report = {
+    tcgdexSets: 0,
+    groupsListed: 0,
+    groupsSynced: 0,
+    cards: 0,
+    linked: 0,
+    pending: 0,
+    relinkedGroups: 0,
+    relinkedCards: 0,
+    priceGroups: 0,
+    fx: '',
+  };
 
   // 1) Siglas oficiais das coleções da TCGdex (e as cartas de cada uma), aos poucos; renovadas a cada 7 dias.
   const tcgdexList = await get<{ id: string; name: string; cardCount?: { official?: number } }[]>(`${TCGDEX}/sets`);
@@ -192,6 +214,59 @@ Deno.serve(async (req) => {
     }
     await admin.from('tcg_groups').update({ link_version: LINK_VERSION }).eq('group_id', g.group_id);
     report.relinkedGroups++;
+  }
+
+  // 5) Câmbio do dia (PTAX do Banco Central), para mostrar em reais os preços da TCGplayer: depois das 16h UTC, se
+  //    ainda não há a cotação de hoje e a última consulta tem mais de 1 hora (fim de semana e feriado não têm PTAX).
+  const today = new Date(Date.now() - 3 * 3_600_000).toISOString().slice(0, 10);
+  const { data: lastFx } = await admin.from('fx_rates').select('day, fetched_at').eq('currency', 'USD').order('day', { ascending: false }).limit(1).maybeSingle();
+  if (
+    new Date().getUTCHours() >= 16 &&
+    (!lastFx || lastFx.day < today) &&
+    (!lastFx || Date.now() - new Date(lastFx.fetched_at).getTime() > 3_600_000)
+  ) {
+    const rows = await get<{ data: string; valor: string }[]>(BCB_USD).catch(() => null);
+    const row = Array.isArray(rows) ? rows[rows.length - 1] : null;
+    const [d, m, y] = row?.data?.split('/') ?? [];
+    const sell = Number(row?.valor);
+    if (y && sell > 0) {
+      await admin.from('fx_rates').upsert({ day: `${y}-${m}-${d}`, currency: 'USD', sell, source: 'bcb_ptax', fetched_at: new Date().toISOString() });
+      report.fx = `${y}-${m}-${d} ${sell}`;
+    } else if (lastFx) {
+      // Sem cotação nova (antes da divulgação, fim de semana): marca a consulta para esperar 1 hora.
+      await admin.from('fx_rates').update({ fetched_at: new Date().toISOString() }).eq('day', lastFx.day).eq('currency', 'USD');
+    }
+  }
+
+  // 6) Preços da TCGplayer (via TCGCSV) das coleções em inglês, 1×/dia por coleção: só as que ainda não têm os preços
+  //    da versão atual do TCGCSV (last-updated.txt), poucas por chamada e com tempo máximo.
+  const started = Date.now();
+  const built = Number.isNaN(lastUpdated.getTime()) ? null : lastUpdated.toISOString();
+  const { data: priceDue } = built
+    ? await admin
+        .from('tcg_groups')
+        .select('group_id')
+        .eq('category', 3)
+        .not('synced_at', 'is', null)
+        .or(`prices_at.is.null,prices_at.lt."${built}"`)
+        .order('group_id', { ascending: false })
+        .limit(PRICE_GROUPS_PER_RUN)
+    : { data: [] };
+  for (const g of priceDue ?? []) {
+    if (Date.now() - started > PRICE_TIME_MS) break;
+    const res = await get<{ results?: PriceRow[] }>(`${TCGCSV}/tcgplayer/3/${g.group_id}/prices`).catch(() => null);
+    await sleep(PAUSE_MS);
+    if (!res) continue;
+    const rows = (res.results ?? []).map((r) => ({
+      product_id: r.productId,
+      sub_type: r.subTypeName ?? null,
+      low: r.lowPrice ?? null,
+      mid: r.midPrice ?? null,
+      market: r.marketPrice ?? null,
+    }));
+    const { error } = await admin.rpc('upsert_tcg_prices', { p_group: g.group_id, p_built: built, p: rows });
+    if (error) throw error;
+    report.priceGroups++;
   }
   return json(report);
 });

@@ -74,6 +74,8 @@ export function stampVariant(stamp: string): Variant {
   if (/staff|prerelease/i.test(stamp)) return 'staff';
   if (/master ?ball/i.test(stamp)) return 'masterball';
   if (/pok[eé] ?ball/i.test(stamp)) return 'pokeball';
+  // "Non-Holo" (de deck, Target, DVD…) é a versão normal, sem brilho.
+  if (/non[- ]?holo/i.test(stamp)) return 'normal';
   if (/reverse/i.test(stamp)) return 'reverse';
   if (/cosmos|holo/i.test(stamp)) return 'holo';
   if (/1st edition/i.test(stamp)) return 'firstEdition';

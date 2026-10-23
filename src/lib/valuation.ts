@@ -1,20 +1,24 @@
+import { tcgplayerFor } from './tcgplayer';
 import type { Entry, MypApiPrice, ValueBasis } from './types';
 
 /**
- * Valor da carta (em reais). Só duas fontes:
+ * Valor da carta (em reais), na ordem:
  *
- *   1. "Meu valor" digitado pelo usuário: o único valor fixo (mínimo, média e máximo iguais a ele). Quando a média do
- *      MYP passa dele, ele é apagado e a carta volta a usar o MYP (ver myValuePatch);
- *   2. o MÍNIMO, a MÉDIA e o MÁXIMO dos anúncios do produto no MYP Cards (API pública do MYP), como a API informa —
- *      confiança média, porque juntam todos os estados e idiomas. Versão especial (selo, Poké Ball…) que o MYP não
- *      vende à parte usa o produto da carta base, que tem valor parecido — confiança baixa.
+ *   1. "Meu valor" digitado pelo usuário: o único valor fixo (mínimo, média e máximo iguais a ele). Quando a média da
+ *      fonte da carta passa dele, ele é apagado e a carta volta a usar a fonte (ver myValuePatch);
+ *   2. carta em INGLÊS: a TCGplayer (EUA), em reais pela PTAX — mínimo = menor anúncio, média = valor de mercado
+ *      (vendas recentes), máximo = mediana dos anúncios (lib/tcgplayer.ts); o MYP aparece só como referência;
+ *   3. o MÍNIMO, a MÉDIA e o MÁXIMO dos anúncios do produto no MYP Cards (API pública do MYP), como a API informa —
+ *      confiança média, porque juntam todos os estados e idiomas. Versão especial (selo, Poké Ball…) sem produto
+ *      próprio usa o da carta base, que tem valor parecido — confiança baixa. Carta em inglês sem preço na TCGplayer
+ *      também usa o MYP, com confiança baixa.
  *
  * A faixa (mín/méd/máx) aparece em todas as telas e é somada na coleção. O VALOR da carta (o "valor calculado" da
  * soma, dos bolsos, das mais valiosas e do gráfico) é um dos três, escolhido na carta (`valueBasis`): a média por
- * padrão; o mínimo costuma ser o valor real de cartas novas. Sem nenhuma das duas fontes, a carta fica sem valor.
+ * padrão; o mínimo costuma ser o valor real de cartas novas. Sem nenhuma fonte, a carta fica sem valor.
  */
 
-export type SourceId = 'manual' | 'myp';
+export type SourceId = 'manual' | 'tcgplayer' | 'myp';
 
 /**
  * Versões especiais (com selo, Poké Ball, Master Ball, 1ª edição, Shadowless): o preço exato é o do produto próprio da
@@ -30,8 +34,9 @@ export function mypCovers(lang: string) {
   return lang === 'pt' || lang === 'en';
 }
 
-/** O app ainda não buscou o preço desta carta (nesta versão e selo) no MYP. */
+/** O app ainda não buscou o preço desta carta (nesta versão e selo): na TCGplayer (em inglês) ou no MYP. */
 export function pricePending(e: Entry) {
+  if (e.lang === 'en') return !tcgplayerFor(e);
   return mypCovers(e.lang) && !mypApiFor(e);
 }
 
@@ -52,13 +57,14 @@ export function mypApiFitsVariant(e: Entry, s: MypApiPrice) {
 }
 
 /**
- * "Meu valor" é fixo até a média do MYP passar dele: aí ele é apagado (fica o registro da troca, mostrado na tela da
- * carta) e a carta volta a usar mínimo/média/máximo do MYP.
+ * "Meu valor" é fixo até a média da fonte passar dele (a do MYP; nas cartas em inglês, o valor de mercado da
+ * TCGplayer): aí ele é apagado (fica o registro da troca, mostrado na tela da carta) e a carta volta a usar mínimo,
+ * média e máximo da fonte.
  */
-export function myValuePatch(e: Entry, s: MypApiPrice): Partial<Entry> {
+export function myValuePatch(e: Entry, s: { avg?: number; checkedAt: string }, source: 'myp' | 'tcgplayer'): Partial<Entry> {
   const mine = e.myValue?.value;
   if (mine == null || s.avg == null || s.avg <= mine) return {};
-  return { myValue: null, myValueReplaced: { value: mine, mypValue: s.avg, at: s.checkedAt } };
+  return { myValue: null, myValueReplaced: { value: mine, mypValue: s.avg, at: s.checkedAt, source } };
 }
 
 export type Confidence = 'alta' | 'media' | 'baixa';
@@ -92,6 +98,7 @@ export type Valuation = {
 
 export const SOURCE_LABEL: Record<SourceId, string> = {
   manual: 'Meu valor',
+  tcgplayer: 'TCGplayer (EUA) · menor anúncio/mercado/mediana',
   myp: 'MYP Cards · mín/méd/máx',
 };
 
@@ -108,6 +115,12 @@ export function priceSources(e: Entry): Omit<SourceRow, 'used'>[] {
   if (e.myValue?.value != null) {
     rows.push({ id: 'manual', label: SOURCE_LABEL.manual, brl: e.myValue.value, detail: 'digitado por você' });
   }
+  // Carta em inglês: TCGplayer (EUA), em reais pela PTAX.
+  const tcg = e.lang === 'en' ? tcgplayerFor(e) : undefined;
+  if (tcg?.avg != null) {
+    const usd = tcg.usdMarket != null ? `US$ ${tcg.usdMarket.toFixed(2).replace('.', ',')}` : '';
+    rows.push({ id: 'tcgplayer', label: SOURCE_LABEL.tcgplayer, brl: tcg.avg, detail: `mercado ${usd} · todos os estados${tcg.base ? ' · carta base' : ''}` });
+  }
   // Média dos anúncios do produto no MYP (API pública), com mínimo e máximo (de versão especial sem produto próprio,
   // os da carta base).
   const api = mypApiFor(e);
@@ -123,20 +136,31 @@ export function priceSources(e: Entry): Omit<SourceRow, 'used'>[] {
   return rows;
 }
 
-/** Valor da carta (ver comentário do módulo): "Meu valor", senão mínimo/média/máximo do MYP. */
+/** Valor da carta (ver comentário do módulo): "Meu valor", senão a TCGplayer (cartas em inglês), senão o MYP. */
 export function valuation(e: Entry): Valuation {
   const all = priceSources(e);
   const best = all[0];
   if (!best) return { sources: [] };
   const api = best.id === 'myp' ? mypApiFor(e) : undefined;
-  const range = { min: Math.min(api?.min ?? best.brl, best.brl), avg: best.brl, max: Math.max(api?.max ?? best.brl, best.brl) };
+  const tcg = best.id === 'tcgplayer' ? tcgplayerFor(e) : undefined;
+  const src = tcg ?? api;
+  const range = { min: Math.min(src?.min ?? best.brl, best.brl), avg: best.brl, max: Math.max(src?.max ?? best.brl, best.brl) };
   const pick = e.valueBasis ?? 'avg';
   return {
     value: range[pick],
     range,
     pick,
-    // Preço da carta base para uma versão especial: confiança baixa.
-    confidence: best.id === 'manual' ? 'alta' : api && !mypApiFitsVariant(e, api) ? 'baixa' : 'media',
+    // Preço da carta base para uma versão especial, ou MYP numa carta em inglês sem preço na TCGplayer: confiança baixa.
+    confidence:
+      best.id === 'manual'
+        ? 'alta'
+        : tcg
+          ? tcg.base
+            ? 'baixa'
+            : 'media'
+          : api && (!mypApiFitsVariant(e, api) || e.lang === 'en')
+            ? 'baixa'
+            : 'media',
     basis: best.id,
     sources: all.map((r) => ({ ...r, used: r === best })),
   };

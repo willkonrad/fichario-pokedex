@@ -1,12 +1,23 @@
 # Notas da versão
 
+## 2.8.0 — Cartas em inglês pelo preço da TCGplayer (23/10/2026)
+
+- **Cartas em inglês valem pelo preço da TCGplayer (EUA)**, o principal mercado de cartas em inglês, em reais pela **PTAX do Banco Central**: mínimo = menor anúncio, média = valor de mercado (vendas recentes), máximo = mediana dos anúncios. A escolha de mínimo/média/máximo de cada carta continua valendo. O MYP aparece como referência (ele mistura todos os idiomas).
+- O preço é da impressão certa (normal, holo, reverse, 1ª edição…) e da versão com selo, Poké Ball, Master Ball, holo especial (Cosmos, Cracked Ice, Reverse Cosmos da Costco…) ou de loja (Best Buy…) quando a TCGplayer vende à parte; senão, o da carta base, com confiança baixa. Carta sem vendas recentes na TCGplayer usa o MYP, com confiança baixa — o app não estima.
+- O servidor copia os preços do **TCGCSV** 1×/dia por coleção (espelho gratuito da TCGplayer; o app nunca chama o TCGCSV) e a PTAX dos dias úteis; o app lê do banco, então os preços em inglês aparecem também na versão web.
+- O "Meu valor" de uma carta em inglês é trocado quando o valor de mercado da TCGplayer passa dele (o MYP não troca mais nas cartas em inglês); a tela da carta diz qual fonte trocou e, enquanto o "Meu valor" vale, mostra o mínimo/média/máximo da TCGplayer como referência.
+- O app só grava o preço da TCGplayer quando ele muda e olha cada carta no máximo 1×/hora enquanto o servidor copia as coleções, então não gera escritas repetidas nem muda a data das cartas nos outros aparelhos à toa.
+- A tela da carta mostra o valor em dólar, o câmbio usado, o link "TCGplayer ↗" e o crédito "via TCGCSV · PTAX do Banco Central".
+- Versões "Non-Holo" do catálogo (de deck, Target, DVD…) aparecem como **normais**, não como holo. Trocar a variação pelos chips volta para a versão comum (o selo de uma versão escolhida em "Ver versões" sai).
+- A bandeira do idioma sobre a imagem saiu; quando a foto é da versão em inglês, uma linha embaixo do nome avisa.
+
 ## 2.7.0 — Você escolhe o valor de cada carta (22/10/2026)
 
 - **Mínimo, média ou máximo**: na tela da carta, toque no preço do MYP que vale para ela (ex.: o mínimo para cartas novas, em que ele costuma ser o valor real; a média para as antigas). A escolha fica salva na carta; sem escolha, vale a média.
 - **Valor calculado**: a soma da coleção mostra em destaque o valor calculado (o valor escolhido de cada carta) e, embaixo, a soma dos mínimos, das médias e dos máximos. O cabeçalho do fichário, a lista de fichários, as mais valiosas, os bolsos e a comparação com o valor de compra usam o valor escolhido.
 - **Gráfico de rendimento**: a linha passa a ser o valor calculado (a foto diária guarda a escolha de cada carta), com a faixa do mínimo ao máximo.
 - A API do MYP não separa os preços por idioma nem por estado: os três valores juntam todos os anúncios do produto.
-- **Foto da carta em português**: quando a TCGdex só tem a foto em inglês de uma carta em português, o app usa a foto em português do MYP, se ela existir (o MYP às vezes informa uma foto que não existe; o app confere antes). Sem foto em português, o selo da imagem diz "foto EN" e a tela explica que a carta é em português e só a foto é da versão em inglês.
+- **Foto da carta em português**: quando a TCGdex só tem a foto em inglês de uma carta em português, o app usa a foto em português do MYP, se ela existir (o MYP às vezes informa uma foto que não existe; o app confere antes). Sem foto em português, a tela avisa numa linha que a foto é da versão em inglês; a bandeira sobre a imagem saiu.
 - **Busca pelo código do produto no MYP** quando o nome não acha: o MYP cadastra algumas cartas com o número no nome e sem nome em português (ex.: "Mega Clefable ex - 031/088", "Nidorina (30th Celebration)"); nas coleções clássicas, o número original vem do catálogo do TCGCSV (ex.: Gengar da coleção de 30 anos = "Gengar (Prime)" 94/102).
 
 ## 2.6.1 — Preços que faltavam (22/10/2026)

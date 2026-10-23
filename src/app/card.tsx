@@ -6,7 +6,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CardAttributes, cardAttributeItems, CardMoves } from '@/components/card-facts';
 import { CardImage } from '@/components/card-image';
-import { ImageLangBadge } from '@/components/lang-flag';
 import { PricePanel } from '@/components/price-panel';
 import { VersionPicker } from '@/components/version-picker';
 import { BOTTOM_BAR_SPACE, BottomBar, Button, Card, Chip, EmptyState, GroupLabel, Input, Loading, Section, Segmented } from '@/components/ui';
@@ -63,6 +62,9 @@ type Edits = {
   valueBasis: ValueBasis | undefined;
 };
 
+/** Variações com a descrição (selo) digitável na tela. */
+const NOTE_VARIANTS: Variant[] = ['other', 'staff', 'wPromo'];
+
 export default function CardScreen() {
   const params = useLocalSearchParams<Params>();
   const { ready } = useCollection();
@@ -109,7 +111,7 @@ function CardForm({ params }: { params: Params }) {
   const [condition, setCondition] = useState<Condition>(isNewCard ? 'NM' : (existing?.condition ?? 'NM'));
   const [notes, setNotes] = useState(isNewCard ? '' : (existing?.notes ?? ''));
   // "Meu valor" digitado nesta tela (null = não mexeu). Sem edição, o campo acompanha a carta salva; uma edição feita
-  // antes de o "Meu valor" ser apagado em segundo plano (a média do MYP passou dele) deixa de valer, para não trazê-lo
+  // antes de o "Meu valor" ser apagado em segundo plano (a média da fonte passou dele) deixa de valer, para não trazê-lo
   // de volta no próximo salvamento automático.
   const [myValueEdit, setMyValueEdit] = useState<{ text: string; at: string } | null>(null);
   const replacedAt = existing?.myValueReplaced?.at;
@@ -199,6 +201,8 @@ function CardForm({ params }: { params: Params }) {
       ? valuation({ ...existing, valueBasis, myValue: myValueNum != null ? { value: myValueNum, setAt: '' } : undefined })
       : undefined;
   const currentValue = current?.value;
+  // A média que apaga o "Meu valor": nas cartas em inglês, o valor de mercado da TCGplayer; nas outras, a do MYP.
+  const myValueSource = lang === 'en' ? 'o valor de mercado da TCGplayer (em reais)' : 'a média do MYP';
 
   /** A carta completa, com as edições atuais (e `patch` por cima, para mudanças feitas agora). */
   function buildEntry(patch: Partial<Edits> = {}): Omit<Entry, 'id' | 'updatedAt'> {
@@ -208,7 +212,15 @@ function CardForm({ params }: { params: Params }) {
     const image = detail?.image ?? enDetail?.image ?? saved?.image;
     return {
       // Carta já salva: mantém o que não se edita nesta tela (preços do MYP, troca do "Meu valor", imagem reserva antiga).
-      ...(autoSave && existing ? { mypApi: existing.mypApi, myValueReplaced: value == null ? existing.myValueReplaced : undefined, ligaImage: existing.ligaImage, ligaQuery: existing.ligaQuery } : {}),
+      ...(autoSave && existing
+        ? {
+            mypApi: existing.mypApi,
+            tcgplayer: existing.tcgplayer,
+            myValueReplaced: value == null ? existing.myValueReplaced : undefined,
+            ligaImage: existing.ligaImage,
+            ligaQuery: existing.ligaQuery,
+          }
+        : {}),
       binderId,
       dex: isExtra ? 0 : dex,
       slot,
@@ -328,7 +340,7 @@ function CardForm({ params }: { params: Params }) {
 
   function pickVersion(o: VersionOption) {
     // Selo de promo: já preenche a descrição da variação com o nome do selo.
-    const note = o.stamp ?? (o.variant === 'other' || o.variant === 'staff' || o.variant === 'wPromo' ? variantNote : '');
+    const note = o.stamp ?? (NOTE_VARIANTS.includes(o.variant) ? variantNote : '');
     setPickedVariant(o.variant);
     setVariantNote(note);
     setVersionsOpen(false);
@@ -382,7 +394,6 @@ function CardForm({ params }: { params: Params }) {
           accessibilityRole="imagebutton"
           accessibilityLabel="Ampliar imagem da carta">
           {!detail && !existing && !loadError ? <Loading /> : cardImageEl('contain')}
-          {imageLang ? <ImageLangBadge lang={imageLang} cardLang={lang} /> : null}
           <View style={styles.zoomHint}>
             <Ionicons name="expand-outline" size={14} color="#fff" />
           </View>
@@ -419,8 +430,7 @@ function CardForm({ params }: { params: Params }) {
           </View>
           {imageLang && imageLang !== lang ? (
             <Text style={styles.imageLangNote}>
-              Sua carta é em {LANG_LABEL[lang].toLowerCase()}; a foto é da versão em {LANG_LABEL[imageLang].toLowerCase()}, porque as fontes de
-              imagem não têm a foto desta carta em {LANG_LABEL[lang].toLowerCase()}.
+              Foto da versão em {LANG_LABEL[imageLang].toLowerCase()} (não há foto desta carta em {LANG_LABEL[lang].toLowerCase()}).
             </Text>
           ) : null}
           {copies.length ? (
@@ -501,8 +511,13 @@ function CardForm({ params }: { params: Params }) {
                     selected={variant === v.id}
                     hint={showAllVariants && avail.ids.includes(v.id)}
                     onPress={() => {
+                      // Trocar de variação pelo chip é a versão comum: o selo de uma versão do catálogo (Cosmos Holo,
+                      // Non-Holo…) sai, para não ficar escondido escolhendo o produto; a descrição digitada fica nas
+                      // variações que a mostram.
+                      const note = v.id === variant || NOTE_VARIANTS.includes(v.id) ? variantNote : '';
                       setPickedVariant(v.id);
-                      autoPersist({ variant: v.id }).catch(() => {});
+                      setVariantNote(note);
+                      autoPersist({ variant: v.id, variantNote: note }).catch(() => {});
                     }}
                   />
                 ))}
@@ -513,7 +528,7 @@ function CardForm({ params }: { params: Params }) {
                   </Pressable>
                 ) : null}
               </View>
-              {variant === 'other' || variant === 'staff' || variant === 'wPromo' ? (
+              {NOTE_VARIANTS.includes(variant) ? (
                 <Input
                   value={variantNote}
                   onChangeText={setVariantNote}
@@ -526,10 +541,10 @@ function CardForm({ params }: { params: Params }) {
               title="Meu valor"
               hint={
                 existing?.myValue && existing.myValue.value === myValueNum
-                  ? `Digitado em ${formatWhen(existing.myValue.setAt)}. É o valor fixo da carta até a média do MYP passar dele (aí ele é apagado e voltam mínimo/média/máximo); apague para voltar ao MYP agora.`
+                  ? `Digitado em ${formatWhen(existing.myValue.setAt)}. É o valor fixo da carta até ${myValueSource} passar dele (aí ele é apagado e voltam mínimo/média/máximo); apague para voltar ${lang === 'en' ? 'à TCGplayer' : 'ao MYP'} agora.`
                   : !myValueText && existing?.myValueReplaced
-                    ? `Seu valor de ${formatBRL(existing.myValueReplaced.value)} foi apagado em ${formatWhen(existing.myValueReplaced.at)}: a média do MYP passou dele (${formatBRL(existing.myValueReplaced.mypValue)}).`
-                    : 'Opcional: o valor que você conferiu (ex.: menor anúncio no seu estado no MYP Cards). Vira o valor fixo da carta até a média do MYP passar dele.'
+                    ? `Seu valor de ${formatBRL(existing.myValueReplaced.value)} foi apagado em ${formatWhen(existing.myValueReplaced.at)}: ${existing.myValueReplaced.source === 'tcgplayer' ? 'o valor de mercado da TCGplayer (EUA, em reais)' : 'a média do MYP'} passou dele (${formatBRL(existing.myValueReplaced.mypValue)}).`
+                    : `Opcional: o valor que você conferiu (ex.: menor anúncio no seu estado no MYP Cards). Vira o valor fixo da carta até ${myValueSource} passar dele.`
               }>
               <Input
                 value={myValueText}
@@ -571,7 +586,8 @@ function CardForm({ params }: { params: Params }) {
                       {Math.abs(Math.round(((currentValue - purchaseNum) / purchaseNum) * 100))}%) desde a compra
                       {current?.range && isSpread(current.range) ? (
                         <Text style={styles.purchaseRange}>
-                          {'\n'}No MYP vai de {formatBRL(current.range.min)} ({signedDiff(current.range.min, purchaseNum)}) a{' '}
+                          {'\n'}
+                          {current.basis === 'tcgplayer' ? 'Na TCGplayer' : 'No MYP'} vai de {formatBRL(current.range.min)} ({signedDiff(current.range.min, purchaseNum)}) a{' '}
                           {formatBRL(current.range.max)} ({signedDiff(current.range.max, purchaseNum)}).
                         </Text>
                       ) : null}
