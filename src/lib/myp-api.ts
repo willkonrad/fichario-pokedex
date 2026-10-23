@@ -76,6 +76,16 @@ export async function searchMypByCode(code: string): Promise<MypProduct[]> {
 }
 
 /**
+ * Foto do MYP que existe de verdade: a API às vezes informa o endereço de uma foto que não está no servidor de imagens
+ * (dá erro 404). Confere com uma consulta leve ao servidor de imagens (não é a API de preços, não entra no limite).
+ */
+async function existingImage(url?: string | null) {
+  if (!url || !/\.(jpe?g|png|webp)$/i.test(url)) return undefined;
+  const res = await fetch(url, { method: 'HEAD' }).catch(() => null);
+  return res?.ok ? url : undefined;
+}
+
+/**
  * Códigos que o produto da carta teria no MYP: "pokemon_<sigla>_<número com 3 dígitos>/<total>" (total com 3 dígitos
  * ou como impresso, ex.: "/64"); nas coleções de promos, sem o total ("pokemon_mep_101"). Só para números numéricos.
  */
@@ -142,7 +152,7 @@ export async function fetchMypPrice(
   const keys = await cardKeys(e);
   if (!keys?.abbr) return { ...base, notFound: 'coleção sem sigla para buscar no MYP' };
   const abbr = keys.abbr;
-  const toPrice = (hit: NonNullable<ReturnType<typeof pickMypProduct>>): MypApiPrice => {
+  const toPrice = async (hit: NonNullable<ReturnType<typeof pickMypProduct>>): Promise<MypApiPrice> => {
     const p = hit.product;
     return {
       ...base,
@@ -153,13 +163,14 @@ export async function fetchMypPrice(
       avg: price(p.avg_price),
       max: price(p.max_price),
       qty: p.available_quantity ?? undefined,
+      imagePt: e.lang === 'pt' ? await existingImage(p.img_pt) : undefined,
       // Promo de uma coleção de promos, sem selo marcado: o produto do MYP é a própria carta.
       ownVersion: hit.ownVersion || (keys.promoSet && e.variant === 'wPromo' && !note) || undefined,
     };
   };
   for (const name of keys.names) {
     const hit = pickMypProduct(await consult(name), abbr, keys.localId, e.variant, note, keys.byName ? keys.names : undefined);
-    if (hit) return toPrice(hit);
+    if (hit) return await toPrice(hit);
   }
   if (consultCode) {
     // Coleções que o MYP numera pela carta original (byName): o número original vem do catálogo do TCGCSV, que liga a
@@ -170,7 +181,7 @@ export async function fetchMypPrice(
     for (const [localId, total] of numbers) {
       for (const code of mypCodes(abbr, localId, Number(total) || undefined, keys.promoSet)) {
         const hit = pickMypProduct(await consultCode(code), abbr, localId, e.variant, note);
-        if (hit) return toPrice(hit);
+        if (hit) return await toPrice(hit);
       }
     }
   }
@@ -192,6 +203,15 @@ export function mypPriority() {
 }
 export function onMypPriority(wake: () => void) {
   wakeRefresher = wake;
+}
+
+/**
+ * Foto em português do MYP para uma carta em português que só tem a foto da versão em inglês (a TCGdex não tem a
+ * foto em português de muitas coleções). Só a da mesma carta; senão, undefined.
+ */
+export function mypPtImage(e: Entry) {
+  if (e.lang !== 'pt' || e.image?.includes('/pt/') || e.mypApi?.cardId !== e.cardId) return undefined;
+  return e.mypApi?.imagePt;
 }
 
 /** Selo da carta que importa para achar o produto do MYP (só nas versões promo/staff). */

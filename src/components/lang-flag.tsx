@@ -32,14 +32,24 @@ export function Flag({ lang, size = 18 }: { lang: CardLang; size?: number }) {
   );
 }
 
-/** Selo sobre a imagem da carta: em que idioma está a imagem mostrada (ex.: carta em português com imagem em inglês). */
-export function ImageLangBadge({ lang }: { lang: CardLang }) {
+/**
+ * Selo sobre a imagem da carta: em que idioma está a imagem mostrada. Quando é outro que o da carta (ex.: carta em
+ * português com a foto da versão em inglês, porque nenhuma fonte tem a foto em português), diz "foto EN".
+ */
+export function ImageLangBadge({ lang, cardLang }: { lang: CardLang; cardLang?: CardLang }) {
+  const other = !!cardLang && cardLang !== lang;
   return (
-    <View style={styles.badge} accessibilityLabel={`Imagem da carta em ${LANG_LABEL[lang].toLowerCase()}`}>
+    <View
+      style={styles.badge}
+      accessibilityLabel={
+        other
+          ? `Foto da carta em ${LANG_LABEL[lang].toLowerCase()}; a sua carta é em ${LANG_LABEL[cardLang].toLowerCase()}`
+          : `Imagem da carta em ${LANG_LABEL[lang].toLowerCase()}`
+      }>
       <View style={styles.flag}>
         <Flag lang={lang} size={12} />
       </View>
-      <Text style={styles.text}>{LANG_SHORT[lang]}</Text>
+      <Text style={styles.text}>{other ? `foto ${LANG_SHORT[lang]}` : LANG_SHORT[lang]}</Text>
     </View>
   );
 }

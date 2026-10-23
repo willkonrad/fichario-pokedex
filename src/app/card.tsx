@@ -13,7 +13,7 @@ import { BOTTOM_BAR_SPACE, BottomBar, Button, Card, Chip, EmptyState, GroupLabel
 import { formatDex, getSpecies, speciesInCardName } from '@/data/pokedex';
 import { customTotalSlots, indexOfDex, indexOfExtra, physicalPosition } from '@/lib/binder';
 import { ligaQuery, ligaSearchUrl } from '@/lib/liga';
-import { mypApiDue, prioritizeMypPrice } from '@/lib/myp-api';
+import { mypApiDue, mypPtImage, prioritizeMypPrice } from '@/lib/myp-api';
 import { formatBRL, formatWhen } from '@/lib/quotes';
 import { cardDetail, type CardDetail } from '@/lib/tcgdex';
 import {
@@ -339,13 +339,17 @@ function CardForm({ params }: { params: Params }) {
   // Idioma da imagem mostrada: a da TCGdex diz no endereço (/pt/, /en/); as reservas (pokemontcg.io, Scrydex) são
   // da carta em inglês; o Zukan também diz no endereço.
   const shownImage = detail?.image ?? enDetail?.image ?? saved?.image ?? resolvedImageUrl ?? (isNewCard ? undefined : saved?.imageUrl);
+  // Carta em português sem foto em português na TCGdex: a foto em português do MYP, quando ele tem.
+  const ptImage = saved && !detail?.image?.includes('/pt/') ? mypPtImage(saved) : undefined;
   const imageLang: CardLang | undefined = photo || stampPhoto || detail?.imageUrl
     ? 'en'
-    : !shownImage
-      ? undefined
-      : lang === 'ja'
-      ? 'ja'
-      : ((shownImage.match(/tcgdex\.net\/(pt|en|ja)\//)?.[1] ?? shownImage.match(/zukan\.com\.br\/cards\/[^/]+\/(pt|en)\//)?.[1] ?? 'en') as CardLang);
+    : ptImage
+      ? 'pt'
+      : !shownImage
+        ? undefined
+        : lang === 'ja'
+          ? 'ja'
+          : ((shownImage.match(/tcgdex\.net\/(pt|en|ja)\//)?.[1] ?? shownImage.match(/zukan\.com\.br\/cards\/[^/]+\/(pt|en)\//)?.[1] ?? 'en') as CardLang);
 
   const cardImageEl = (fit: 'contain' | 'cover', stampKeys = stampKeysOf(variant, variantNote), withPhoto = true) => (
     <CardImage
@@ -360,6 +364,7 @@ function CardForm({ params }: { params: Params }) {
       dex={dex || undefined}
       stampKeys={stampKeys}
       photo={withPhoto ? photo : undefined}
+      ptImage={withPhoto ? ptImage : undefined}
       onResolved={setResolvedImageUrl}
     />
   );
@@ -377,7 +382,7 @@ function CardForm({ params }: { params: Params }) {
           accessibilityRole="imagebutton"
           accessibilityLabel="Ampliar imagem da carta">
           {!detail && !existing && !loadError ? <Loading /> : cardImageEl('contain')}
-          {imageLang ? <ImageLangBadge lang={imageLang} /> : null}
+          {imageLang ? <ImageLangBadge lang={imageLang} cardLang={lang} /> : null}
           <View style={styles.zoomHint}>
             <Ionicons name="expand-outline" size={14} color="#fff" />
           </View>
@@ -412,6 +417,12 @@ function CardForm({ params }: { params: Params }) {
             {detail?.rarity && detail.rarity !== 'None' ? <Badge text={detail.rarity} /> : null}
             <Badge icon="location-outline" text={`Pág. ${pos.page}${pos.side ? ` · folha ${pos.sheet} (${pos.side})` : ''} · bolso ${pos.pocket}${isExtra ? ' (livre)' : ''}`} />
           </View>
+          {imageLang && imageLang !== lang ? (
+            <Text style={styles.imageLangNote}>
+              Sua carta é em {LANG_LABEL[lang].toLowerCase()}; a foto é da versão em {LANG_LABEL[imageLang].toLowerCase()}, porque as fontes de
+              imagem não têm a foto desta carta em {LANG_LABEL[lang].toLowerCase()}.
+            </Text>
+          ) : null}
           {copies.length ? (
             <View style={styles.copies}>
               <Ionicons name="copy-outline" size={14} color={colors.blue} />
@@ -683,6 +694,7 @@ function signedDiff(value: number, paid: number) {
 }
 
 const styles = StyleSheet.create({
+  imageLangNote: { color: colors.textMuted, fontSize: 12, lineHeight: 17, marginTop: -4, marginBottom: 8 },
   purchaseDiff: { fontSize: 13, fontWeight: '700', marginTop: 6, lineHeight: 18 },
   purchaseRange: { color: colors.textMuted, fontWeight: '600' },
   screen: { flex: 1, backgroundColor: colors.background },

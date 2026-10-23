@@ -12,6 +12,7 @@ import { binderColors, colors } from '@/theme';
 
 /**
  * Imagem da carta, na ordem:
+ *   0. foto em português do MYP (`ptImage`), para carta em português que a TCGdex só tem em inglês;
  *   1. TCGdex (`image`);
  *   2. `imageUrl` já resolvida antes (reserva salva na carta);
  *   3. Scrydex pelo id da carta (não depende da API da pokemontcg.io, que cai com frequência);
@@ -35,6 +36,7 @@ export function CardImage({
   dark = false,
   stampKeys,
   photo,
+  ptImage,
   onResolved,
 }: {
   image?: string;
@@ -59,11 +61,17 @@ export function CardImage({
   stampKeys?: string[];
   /** Foto oficial já conhecida da versão com selo (vem antes de tudo). */
   photo?: string;
+  /** Foto da carta em português (MYP), antes da imagem da TCGdex em inglês. */
+  ptImage?: string;
 }) {
   const stampFromSource = useStampImage(cardId, stampKeys);
   const stampPhoto = photo ? catalogImage(photo, quality) : stampFromSource;
   const [stampFailed, setStampFailed] = useState<string | undefined>();
-  const primary = image ? cardImage(image, quality) : imageUrl ? catalogImage(imageUrl, quality) : undefined;
+  // Foto em português do MYP: o MYP às vezes informa o endereço de uma foto que não existe; se falhar, volta para a
+  // imagem normal (TCGdex), sem passar pelas reservas.
+  const [ptFailed, setPtFailed] = useState<string | undefined>();
+  const usePt = !!ptImage && ptFailed !== ptImage;
+  const primary = usePt ? ptImage : image ? cardImage(image, quality) : imageUrl ? catalogImage(imageUrl, quality) : undefined;
   const [failed, setFailed] = useState<string | undefined>();
   const [found, setFound] = useState<{ key: string; url?: string } | undefined>();
   const needsFallback = !primary || failed === primary;
@@ -115,7 +123,15 @@ export function CardImage({
       style={StyleSheet.absoluteFill}
       contentFit={contentFit}
       transition={150}
-      onError={() => (useStamp ? setStampFailed(stampPhoto) : src === primary ? setFailed(primary) : setFound({ key: searchKey }))}
+      onError={() =>
+        useStamp
+          ? setStampFailed(stampPhoto)
+          : usePt && src === ptImage
+            ? setPtFailed(ptImage)
+            : src === primary
+              ? setFailed(primary)
+              : setFound({ key: searchKey })
+      }
     />
   );
 }

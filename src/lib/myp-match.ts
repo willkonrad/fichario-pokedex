@@ -11,6 +11,9 @@ export type MypProduct = {
   max_price?: string | null;
   available_quantity?: number | null;
   link?: string | null;
+  /** Foto da carta em português e em inglês (sem foto, vem só o endereço base "https://img.mypcards.com/"). */
+  img_pt?: string | null;
+  img_en?: string | null;
 };
 
 /** "007", "SWSH001", "TG06" → "7", "swsh1", "tg6". */

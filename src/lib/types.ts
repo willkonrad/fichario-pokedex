@@ -62,6 +62,8 @@ export type MypApiPrice = {
   qty?: number;
   /** Produto próprio da versão com selo (ex.: "Pokemon Day 2026"): os preços são só dessa versão. */
   ownVersion?: boolean;
+  /** Foto da carta em português no MYP (para cartas em português sem foto em português na TCGdex). */
+  imagePt?: string;
   /** Motivo de não achar a carta no MYP. */
   notFound?: string;
   /** Versão da regra que reconheceu o produto (MYP_MATCHER); ausente = 1. */

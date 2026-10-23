@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { formatDex, getSpecies, spriteUrl } from '@/data/pokedex';
 import { CardImage } from '@/components/card-image';
+import { mypPtImage } from '@/lib/myp-api';
 import { CONFIDENCE_LABEL, isSpread, pricePending, valuation } from '@/lib/valuation';
 import { VALUE_BASIS_LABEL, type Entry } from '@/lib/types';
 import { binderColors as B, CARD_RATIO, colors, confidenceColors, mono, radius } from '@/theme';
@@ -70,6 +71,7 @@ export function BinderSlot({
             dark
             stampKeys={entry.stampKeys}
             photo={entry.stampPhoto}
+            ptImage={mypPtImage(entry)}
           />
         </Pressable>
       ) : !dex ? (
