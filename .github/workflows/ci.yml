@@ -1,0 +1,62 @@
+# Integração contínua (Q1): a cada push e pull request, instala exatamente o que está no package-lock.json e confere os
+# tipos, o lint (app, testes, Edge Functions e scripts), os testes de unidade e se algum segredo entrou no repositório.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Tipos, lint e testes
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          # O Expo SDK 58 e o React Native 0.88 pedem Node 22.13+ ou 24.3+.
+          node-version: 24
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Tipos
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npx expo lint .
+
+      - name: Testes
+        run: npm test -- --ci
+
+  secrets:
+    name: Segredos (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # Para listar os commits do pull request.
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Histórico inteiro: o gitleaks olha todos os commits do push, não só o último.
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Achados aparecem no log e no resumo da execução (sem comentar no pull request, que pediria escrita).
+          GITLEAKS_ENABLE_COMMENTS: false
+          # Repositório de organização: o gitleaks-action pede uma licença (gratuita) em GITLEAKS_LICENSE.
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}

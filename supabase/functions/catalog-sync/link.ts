@@ -9,6 +9,74 @@ export const words = (s: string) =>
     .split(/[^a-z0-9]+/)
     .filter(Boolean)
     .join(' ');
+
+/**
+ * Palavras do nome da carta, com os símbolos que a TCGdex usa escritos como a TCGplayer escreve: "Nidoran♀" = "Nidoran
+ * F", "Jolteon ☆" = "Jolteon Star", "Giratina ◇" = "Giratina Prism Star". O δ e o "(Delta Species)" saem dos dois lados
+ * (a TCGplayer às vezes põe o complemento no nome, às vezes não; o número já diz qual carta é).
+ */
+export const nameWords = (s: string) =>
+  words(
+    s
+      .replace(/♀/g, ' f ')
+      .replace(/♂/g, ' m ')
+      .replace(/[☆★]/g, ' star ')
+      .replace(/◇/g, ' prism star ')
+      .replace(/δ/g, ' ')
+      .replace(/\bdelta species\b/gi, ' '),
+  );
+
+/**
+ * Nome sem as letras soltas do Unown e do Nidoran (letra do Unown, F/M), sem "Prism Star"/"Star" e sem o "Basic" das
+ * energias básicas ("Basic Fire Energy" da TCGplayer = "Fire Energy" da TCGdex): só para conferir junto do número. Nos
+ * outros nomes a letra solta fica, porque diz qual é a carta ("Mega Charizard X ex" não é a "Y", "Pikachu V" não é
+ * "Pikachu").
+ */
+const LOOSE_DROP = new Set(['prism', 'star']);
+export const looseName = (s: string) => {
+  let w = nameWords(s)
+    .split(' ')
+    .filter((x) => x && !LOOSE_DROP.has(x));
+  if (w[0] === 'unown' || w[0] === 'nidoran') w = w.filter((x) => x.length > 1);
+  return (w[0] === 'basic' && w[w.length - 1] === 'energy' ? w.slice(1) : w).join(' ');
+};
+
+/** Posição do " - " fora de parênteses e colchetes ("Psychic Energy (#8 - Latias)" não tem nenhum); -1 sem ele. */
+function outerDash(fullName: string) {
+  let depth = 0;
+  for (let i = 0; i < fullName.length; i++) {
+    const ch = fullName[i];
+    if (ch === '(' || ch === '[') depth++;
+    else if ((ch === ')' || ch === ']') && depth > 0) depth--;
+    else if (depth === 0 && fullName.startsWith(' - ', i)) return i;
+  }
+  return -1;
+}
+
+/**
+ * Nome sem os complementos entre parênteses ou colchetes, menos a letra do Unown e o F/M do Nidoran ("Unown [M]" →
+ * "Unown M", "Nidoran (F)" → "Nidoran F", "Psychic Energy (#8 - Latias)" → "Psychic Energy", "Professor's Research
+ * [Professor Sada]" → "Professor's Research").
+ */
+export function withoutQualifiers(name: string) {
+  const base = name.replace(/\s*[([][^)\]]*[)\]]/g, '').trim();
+  const keepLetter = /(^|\s)(unown|nidoran)$/i.test(base);
+  return name
+    .replace(/\s*[([]([^)\]]*)[)\]]/g, (_, q: string) => (keepLetter && /^[a-z?!]$/i.test(q.trim()) ? ` ${q.trim()}` : ''))
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Nome da carta no produto da TCGplayer: o que vem antes de " - " (fora dos parênteses), com os complementos que
+ * estiverem ali ("Professor's Research [Professor Sada]"; a ligação tenta também sem eles, ver linkCard) ou, sem número
+ * no nome, o nome sem os complementos (withoutQualifiers).
+ */
+export function productName(fullName: string) {
+  const cut = outerDash(fullName);
+  return cut > 0 ? fullName.slice(0, cut).trim() : withoutQualifiers(fullName);
+}
+
 /** "007/165", "SWSH001", "TG06" → "7", "swsh1", "tg6". */
 export const num = (s?: string) => (s ?? '').split('/')[0].trim().toLowerCase().replace(/^([a-z]*)0+(?=\d)/, '$1');
 /** Complementos entre parênteses ou colchetes: "Pikachu - 225 (World Championship 2025) [Winner]". */
@@ -30,13 +98,35 @@ export const setWords = (s: string) =>
   );
 
 /**
- * Coleções da TCGdex candidatas a uma coleção do TCGCSV: mesma sigla, código igual ao id (SWSH08 ↔ swsh8) ou nome
- * mais parecido. A carta só é ligada se número E nome baterem, então candidatas a mais não geram ligações erradas.
+ * Coleções que a TCGplayer e a TCGdex nomeiam de jeitos que não se cruzam pelo nome nem pela sigla (principalmente as
+ * de promos): nome da coleção na TCGplayer → id da TCGdex.
+ */
+const SET_ALIASES: [RegExp, string][] = [
+  [/^swsh: sword & shield promo cards$/i, 'swshp'],
+  [/^diamond and pearl promos$/i, 'dpp'],
+  [/^black and white promos$/i, 'bwp'],
+  [/^hgss promos$/i, 'hgssp'],
+  [/^xy promos$/i, 'xyp'],
+  [/^sm promos$/i, 'smp'],
+  [/^sv: scarlet & violet promo cards$/i, 'svp'],
+  [/^me: mega evolution promo$/i, 'mep'],
+  [/^nintendo promos$/i, 'np'],
+  [/^wotc promo$/i, 'basep'],
+  [/^sve: scarlet & violet energies$/i, 'sve'],
+  [/^mee: mega evolution energies$/i, 'mee'],
+];
+
+/**
+ * Coleções da TCGdex candidatas a uma coleção do TCGCSV: mesma sigla, código igual ao id (SWSH08 ↔ swsh8), apelido
+ * conhecido (SET_ALIASES) ou nome mais parecido. A carta só é ligada se número E nome baterem, então candidatas a mais
+ * não geram ligações erradas.
  */
 export function candidatesFor(g: { name: string; abbr: string | null }, sets: TcgdexSet[]) {
   const out = new Set<TcgdexSet>();
+  const aliases = SET_ALIASES.filter(([re]) => re.test(g.name.trim())).map(([, id]) => id);
   for (const s of sets) {
     if (g.abbr && (s.abbr === g.abbr || code(s.id) === code(g.abbr))) out.add(s);
+    if (aliases.includes(s.id)) out.add(s);
   }
   const gw = setWords(g.name);
   let best = 0;
@@ -50,27 +140,54 @@ export function candidatesFor(g: { name: string; abbr: string | null }, sets: Tc
   return [...out];
 }
 
-/** Id da TCGdex da carta (mesmo número e mesmo nome numa das coleções candidatas). */
-export function linkCard(name: string, number: string, candidates: TcgdexSet[]) {
-  for (const s of candidates) {
-    const hit = (s.cards ?? []).find((t) => num(t.localId) === num(number) && words(t.name) === words(name));
-    if (hit) return hit.id;
-  }
-  return null;
+/**
+ * Id da TCGdex da carta: mesmo número e mesmo nome numa das coleções candidatas. Sem acerto pelo nome inteiro, aceita o
+ * nome sem letras soltas e sem "Star" (ex.: "Unown (M)" da TCGplayer = "Unown" M da TCGdex), sempre com o mesmo número.
+ * A mesma carta em duas candidatas (ex.: as duas metades de um kit de treinador, cada uma numerada de 1 a 30): vale a
+ * que o complemento do produto (`fullName`) cita, "Tierno (20 - Suicune Deck)" → a metade do Suicune; senão, a primeira.
+ * A TCGdex às vezes tem no nome o complemento que vem antes do " - " ("Professor's Research (Professor Magnolia)"), às
+ * vezes não ("Professor's Research [Professor Sada] - 189/198" = "Professor's Research" sv01-189): tenta com ele e, sem
+ * acerto, sem ele.
+ */
+export function linkCard(name: string, number: string, candidates: TcgdexSet[], fullName = '') {
+  const n = num(number);
+  const pick = (same: (t: TcgdexCard) => boolean) => {
+    const hits = candidates.flatMap((s) => {
+      const hit = (s.cards ?? []).find((t) => num(t.localId) === n && same(t));
+      return hit ? [{ s, hit }] : [];
+    });
+    if (hits.length <= 1) return hits[0]?.hit.id ?? null;
+    const quals = setWords(qualifiers(fullName).join(' '));
+    const cited = hits.find(({ s }) => [...setWords(s.name ?? '')].some((w) => quals.has(w)));
+    return (cited ?? hits[0]).hit.id;
+  };
+  const byName = (cardName: string) => {
+    const strict = nameWords(cardName);
+    const direct = pick((t) => nameWords(t.name) === strict);
+    if (direct) return direct;
+    const loose = looseName(cardName);
+    return loose ? pick((t) => looseName(t.name) === loose) : null;
+  };
+  const bare = withoutQualifiers(name);
+  return byName(name) ?? (bare && bare !== name ? byName(bare) : null);
 }
 
 /**
  * Ligação pelo número completo "N/T", em qualquer coleção da TCGdex com T cartas oficiais: para os produtos de
  * coleções "de tudo um pouco" da TCGplayer (ex.: "Miscellaneous Cards & Products"), onde ficam versões com selo de
  * cartas de outras coleções ("Bulbasaur - 133/132 (Mega Evolution Stamped)"). Só liga se houver exatamente uma carta
- * com esse nome e número entre essas coleções.
+ * com esse nome e número entre essas coleções; sem acerto, tenta o nome sem os complementos, como em linkCard
+ * ("Boss's Orders [Cyrus] - 132/172" = "Boss's Orders" swsh9-132).
  */
 export function linkByTotal(name: string, number: string, sets: TcgdexSet[], official: Map<string, number>) {
   const total = Number(number.split('/')[1]);
   if (!total) return null;
-  const hits = sets
-    .filter((s) => official.get(s.id) === total)
-    .flatMap((s) => (s.cards ?? []).filter((t) => num(t.localId) === num(number) && words(t.name) === words(name)));
+  const inTotal = sets.filter((s) => official.get(s.id) === total);
+  const hitsFor = (cardName: string) =>
+    inTotal.flatMap((s) => (s.cards ?? []).filter((t) => num(t.localId) === num(number) && nameWords(t.name) === nameWords(cardName)));
+  let hits = hitsFor(name);
+  const bare = withoutQualifiers(name);
+  if (!hits.length && bare && bare !== name) hits = hitsFor(bare);
   return hits.length === 1 ? hits[0].id : null;
 }
 
@@ -84,9 +201,9 @@ function linkRenumbered(names: string[], candidates: TcgdexSet[]) {
   let bestHits = 0;
   for (const s of candidates) {
     const byName = new Map<string, TcgdexCard[]>();
-    for (const t of s.cards ?? []) byName.set(words(t.name), [...(byName.get(words(t.name)) ?? []), t]);
+    for (const t of s.cards ?? []) byName.set(nameWords(t.name), [...(byName.get(nameWords(t.name)) ?? []), t]);
     const links = names.map((n) => {
-      const hits = byName.get(words(n)) ?? [];
+      const hits = byName.get(nameWords(n)) ?? [];
       return hits.length === 1 ? hits[0].id : null;
     });
     const n = links.filter(Boolean).length;
@@ -115,13 +232,13 @@ export function linkAndStamp(groupName: string, cards: CardIn[], candidates: Tcg
     return { ...c, quals: qualifiers(cut > 0 ? c.full_name.slice(cut) : c.full_name) };
   });
   // Versão comum de cada carta (nome + número): a com menos complementos.
-  const keyOf = (c: CardIn) => `${words(c.name)}|${num(c.number)}`;
+  const keyOf = (c: CardIn) => `${nameWords(c.name)}|${num(c.number)}`;
   const base = new Map<string, string[]>();
   for (const c of parsed) {
     const cur = base.get(keyOf(c));
     if (!cur || c.quals.length < cur.length) base.set(keyOf(c), c.quals);
   }
-  const direct = parsed.map((c) => linkCard(c.name, c.number, candidates));
+  const direct = parsed.map((c) => linkCard(c.name, c.number, candidates, c.full_name));
   const directCount = direct.filter(Boolean).length;
   const renumbered = directCount < parsed.length / 5 ? linkRenumbered(parsed.map((c) => c.name), candidates) : null;
   const linked = parsed.map((c, i) => {

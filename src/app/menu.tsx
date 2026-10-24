@@ -1,326 +1,306 @@
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
-import * as WebBrowser from 'expo-web-browser';
-import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useMemo, useState, type ReactNode } from 'react';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { LineChart } from '@/components/line-chart';
-import { Card, Chip, GroupLabel, type IconName } from '@/components/ui';
-import { ValueRangeRow } from '@/components/value-range';
+import { moverItems, MoversCard, useValueHistory, ValueChartCard, type RangeId } from '@/components/collection-chart';
+import { MyValueNotice, SyncNotice, syncSummary } from '@/components/collection-notices';
+import { PurchasesCard } from '@/components/collection-purchases';
+import { TopCards, topCards } from '@/components/collection-top';
+import { HowWeCalculateSheet, ValueHero } from '@/components/collection-value';
+import { Card, GroupLabel, gridColumns, ListRow, Loading, showToast, useLayout, type IconName } from '@/components/ui';
 import { TOTAL_SPECIES } from '@/data/pokedex';
-import { dexRange } from '@/lib/binder';
-import { collectionHistory, type HistoryPoint } from '@/lib/history';
-import { collectionTotals, formatBRL, formatBRLShort, formatBRLTight, formatRange, formatWhen, priceFreshness } from '@/lib/quotes';
+import { dexRange, isPlaced } from '@/lib/binder';
+import { formatPct } from '@/lib/format';
+import { entryParams } from '@/lib/lists';
+import { collectionTotals, priceFreshness, purchaseSummary } from '@/lib/quotes';
+import { supabase } from '@/lib/supabase';
 import { clearCatalogCache } from '@/lib/tcgdex';
 import { POKEDEX_BINDER, type Entry } from '@/lib/types';
-import { isSpread, valuation, type Valuation, type ValueRange } from '@/lib/valuation';
-import { entriesOf, useCollection } from '@/store/collection';
-import { colors, MAX_WIDTH, radius, shadow } from '@/theme';
+import { entriesOf, useBinders, useCollectionReady, useEntries, useSession, useSettings, useSyncStatus, type SyncStatus } from '@/store/collection';
+import { colors, radius, semantic, shadow, space, typography, widths } from '@/theme';
 
-const RANGES = [
-  { id: '1M', label: '1M', days: 30 },
-  { id: '3M', label: '3M', days: 91 },
-  { id: '6M', label: '6M', days: 182 },
-  { id: '1A', label: '1A', days: 365 },
-] as const;
-
+/** Minha coleção: o valor, a evolução, as cartas que mais pesam, as compras e os ajustes. */
 export default function MenuScreen() {
-  const { entries, session, syncError, binders, settings, setActiveBinder } = useCollection();
-  const [cacheMsg, setCacheMsg] = useState<string | null>(null);
-  const range = settings ? dexRange(settings) : { from: 1, to: TOTAL_SPECIES, count: TOTAL_SPECIES };
-  const stats = useMemo(() => {
-    const list = Object.values(entries);
-    const pokedex = entriesOf(entries, POKEDEX_BINDER).filter((e) => e.dex >= range.from && e.dex <= range.to);
-    return { cards: list.length, species: new Set(pokedex.map((e) => e.dex)).size, ...collectionTotals(list), ...priceFreshness(list) };
-  }, [entries, range.from, range.to]);
-  const pct = Math.round((stats.species / range.count) * 1000) / 10;
-  // As 5 cartas mais valiosas (pelo valor de cada uma: a média ou o valor escolhido nela).
-  const top = useMemo(
-    () =>
-      Object.values(entries)
-        .map((e) => ({ e, ref: valuation(e) }))
-        .filter((x): x is { e: Entry; ref: Valuation & { value: number; range: ValueRange } } => x.ref.value != null && !!x.ref.range)
-        .sort((a, b) => b.ref.value - a.ref.value)
-        .slice(0, 5),
-    [entries],
-  );
+  const ready = useCollectionReady();
+  const entries = useEntries();
+  const settings = useSettings();
+  const binders = useBinders();
+  const session = useSession();
+  const syncStatus = useSyncStatus();
+  const { isDesktop, width } = useLayout();
+  const [rangeId, setRangeId] = useState<RangeId>('1M');
+  const [info, setInfo] = useState(false);
+  const signedIn = !!session;
+  // Sem conta (e com a nuvem configurada): no lugar do gráfico, o convite para entrar.
+  const canSignIn = !signedIn && !!supabase;
+  const history = useValueHistory(session?.user.id, rangeId);
 
-  async function openCard(e: Entry) {
-    await setActiveBinder(e.binderId ?? POKEDEX_BINDER);
-    router.push(e.binderId ? { pathname: '/card', params: { binder: e.binderId, slot: e.slot } } : { pathname: '/card', params: { dex: e.dex, slot: e.slot } });
+  const range = settings ? dexRange(settings) : { from: 1, to: TOTAL_SPECIES, count: TOTAL_SPECIES };
+  const list = useMemo(() => Object.values(entries), [entries]);
+  const totals = useMemo(() => collectionTotals(list), [list]);
+  const freshness = useMemo(() => priceFreshness(list), [list]);
+  const purchases = useMemo(() => purchaseSummary(list), [list]);
+  const top = useMemo(() => topCards(entries), [entries]);
+  const moves = useMemo(() => moverItems(history.change, entries), [history.change, entries]);
+  // Pokémon com carta num espaço que existe na configuração atual, como no topo da tela inicial e na estante (F2).
+  const species = useMemo(
+    () => new Set(entriesOf(entries, POKEDEX_BINDER).filter((e) => e.dex > 0 && (!settings || isPlaced(settings, e))).map((e) => e.dex)).size,
+    [entries, settings],
+  );
+  const binderCount = binders.length + 1;
+  if (!ready) return <Loading />;
+
+  // Abre a carta sem trocar o fichário aberto na tela inicial (U8): a tela da carta acha o fichário pelo parâmetro.
+  // `origem: 'colecao'`: remover, mover e trocar voltam para cá (router.back) em vez de fechar a Minha coleção.
+  function openCard(e: Entry) {
+    router.push({ pathname: '/card', params: { ...entryParams(e), origem: 'colecao' } });
   }
 
-  return (
-    <ScrollView contentContainerStyle={styles.screen}>
-      {/* Valor da coleção */}
-      <View style={styles.hero}>
-        <View style={styles.heroTop}>
-          <MaterialCommunityIcons name="pokeball" size={18} color="rgba(255,255,255,0.85)" />
-          <Text style={styles.heroLabel}>Valor da coleção</Text>
-        </View>
-        {/* Valor calculado (a média de cada carta, ou o valor escolhido nela) e, embaixo, as somas do MYP. */}
-        <Text style={styles.heroValue} numberOfLines={1} adjustsFontSizeToFit>
-          {stats.valued ? formatBRL(stats.value) : '—'}
-        </Text>
-        {stats.valued ? <Text style={styles.heroCaption}>valor calculado · a média de cada carta, ou o valor escolhido nela</Text> : null}
-        {stats.valued && isSpread(stats.range) ? (
-          <View style={styles.heroRange}>
-            <ValueRangeRow range={stats.range} emphasis={null} onPrimary size="lg" />
-          </View>
-        ) : null}
-        <Text style={styles.heroNote}>
-          {stats.valued
-            ? [
-                `${stats.valued} de ${stats.cards} cartas com preço`,
-                stats.newest ? `atualizado em ${formatWhen(stats.newest)}` : null,
-              ]
-                .filter(Boolean)
-                .join(' · ')
-            : stats.cards
-              ? `Nenhuma das ${stats.cards} cartas tem preço ainda. Os preços chegam em alguns minutos.`
-              : 'Coloque cartas no fichário para ver o valor da coleção.'}
-        </Text>
-        <Text style={styles.heroSource}>
-          Preços: mínimo, média e máximo dos anúncios do{' '}
-          <Text style={styles.heroLink} accessibilityRole="link" onPress={() => WebBrowser.openBrowserAsync('https://mypcards.com')}>
-            MYP Cards
-          </Text>
-          ; nas cartas em inglês, da TCGplayer (EUA), em reais pela PTAX. Somados (ou &quot;Meu valor&quot;, fixo até a média da fonte
-          passar dele). Em cada carta você escolhe qual dos três entra no valor calculado.
-        </Text>
-      </View>
+  const stats: StatItem[] = [
+    { icon: 'grid-outline', label: 'Pokédex', value: String(species), sub: `de ${range.count} · ${formatPct((species / Math.max(1, range.count)) * 100)}`, progress: species / Math.max(1, range.count) },
+    { icon: 'albums-outline', label: 'Cartas', value: String(list.length), sub: binders.length ? `em ${binderCount} fichários` : 'no fichário' },
+    ...(isDesktop
+      ? [
+          { icon: 'pricetag-outline' as IconName, label: 'Com preço', value: String(totals.valued), sub: `de ${list.length} ${list.length === 1 ? 'carta' : 'cartas'}` },
+          {
+            icon: 'library-outline' as IconName,
+            label: 'Fichários',
+            value: String(binderCount),
+            sub: binders.length ? `Pokédex + ${binders.length} ${binders.length === 1 ? 'livre' : 'livres'}` : 'Pokédex',
+          },
+        ]
+      : []),
+  ];
 
-      <CollectionChart signedIn={!!session} />
-
-      <View style={styles.stats}>
-        <Stat icon="grid-outline" label="Pokédex" value={`${stats.species}`} sub={`de ${range.count} · ${pct}%`} />
-        <Stat icon="albums-outline" label="Cartas" value={String(stats.cards)} sub={binders.length ? `em ${binders.length + 1} fichários` : 'no fichário'} />
-      </View>
-
-      {top.length ? (
-        <>
-          <GroupLabel>Mais valiosas</GroupLabel>
-          <View style={styles.group}>
-            {top.map(({ e, ref: { value, range } }, i) => (
-              <View key={e.id}>
-                {i > 0 ? <View style={[styles.divider, { marginLeft: 50 }]} /> : null}
-                <Pressable
-                  style={({ pressed }) => [styles.topRow, pressed && { opacity: 0.7 }]}
-                  onPress={() => openCard(e)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${e.cardName}, ${formatBRL(value)}${isSpread(range) ? `, de ${formatBRL(range.min)} a ${formatBRL(range.max)}` : ''}`}>
-                  <View style={[styles.rank, i === 0 && { backgroundColor: colors.yellow }]}>
-                    <Text style={styles.rankText}>{i + 1}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.itemTitle} numberOfLines={1}>
-                      {e.cardName}
-                    </Text>
-                    <Text style={styles.itemSub} numberOfLines={1}>
-                      {e.setName}
-                    </Text>
-                  </View>
-                  <View style={styles.topValues}>
-                    <Text style={styles.topValue}>{formatBRLTight(value)}</Text>
-                    {isSpread(range) ? <Text style={styles.topRange}>{formatRange(range.min, range.max)}</Text> : null}
-                  </View>
-                </Pressable>
-              </View>
-            ))}
-          </View>
-        </>
-      ) : null}
-
+  const hero = <ValueHero totals={totals} cards={list.length} binderCount={binderCount} freshness={freshness} onInfo={() => setInfo(true)} />;
+  const chart = signedIn ? <ValueChartCard data={history} rangeId={rangeId} onRange={setRangeId} height={isDesktop ? 240 : 170} /> : null;
+  const historyPrompt = !canSignIn ? null : (
+    <Card style={styles.rowCard}>
+      <ListRow
+        title="Guarde o histórico do valor"
+        subtitle="Entre na conta para ver a evolução"
+        left={<RowIcon icon="trending-up-outline" />}
+        right={<Chevron />}
+        onPress={() => router.push('/account')}
+        accessibilityLabel="Guarde o histórico do valor: entrar na conta"
+      />
+    </Card>
+  );
+  const movers = <MoversCard change={history.change} entries={entries} onOpen={openCard} />;
+  const purchasesCard = <PurchasesCard summary={purchases} />;
+  // Buscar na coleção (E2) e as listas para trocar (E1).
+  const findGroup = (
+    <View>
+      <GroupLabel>Buscar e trocar</GroupLabel>
+      <LinkRows
+        items={[
+          { icon: 'search-outline', title: 'Buscar na coleção', subtitle: 'Tenho essa carta? Onde ela está?', onPress: () => router.push('/find') },
+          { icon: 'list-outline', title: 'Preciso', subtitle: 'Pokémon que faltam no fichário', onPress: () => router.push('/lists') },
+          {
+            icon: 'copy-outline',
+            title: 'Tenho repetida',
+            subtitle: 'Cartas repetidas e de trocas',
+            onPress: () => router.push({ pathname: '/lists', params: { tab: 'have' } }),
+          },
+        ]}
+      />
+    </View>
+  );
+  const settingsGroup = (
+    <View>
       <GroupLabel>Ajustes</GroupLabel>
-      <View style={styles.group}>
-        <Item
-          icon="library-outline"
-          title="Meus fichários"
-          subtitle={binders.length ? `Pokédex + ${binders.length} fichário${binders.length > 1 ? 's' : ''} livre${binders.length > 1 ? 's' : ''}` : 'Crie fichários de coleção, trocas, deck…'}
-          onPress={() => router.push('/binders')}
-        />
-        <View style={styles.divider} />
-        <Item icon="book-outline" title="Fichário Pokédex" subtitle="Nome, capa, região, bolsos e idiomas" onPress={() => router.push('/setup')} />
-        <View style={styles.divider} />
-        <Item
-          icon={session ? 'cloud-done-outline' : 'cloud-offline-outline'}
-          title="Conta e sincronização"
-          subtitle={session ? (session.user.email ?? 'Conectado') : 'Entre para salvar na nuvem'}
-          onPress={() => router.push('/account')}
-        />
-        <View style={styles.divider} />
-        <Item
-          icon="refresh-outline"
-          title="Limpar cache de cartas"
-          subtitle={cacheMsg ?? 'Baixa de novo listas e imagens (suas cartas não são apagadas)'}
-          onPress={async () => setCacheMsg(`${await clearCatalogCache()} itens apagados do cache`)}
-        />
-      </View>
-      {syncError ? (
-        <View style={styles.error}>
-          <Ionicons name="warning-outline" size={16} color={colors.danger} />
-          <Text style={styles.errorText}>Erro de sincronização: {syncError}</Text>
+      <SettingsGroup
+        email={session?.user.email}
+        syncStatus={syncStatus}
+        bindersSubtitle={
+          binders.length
+            ? `Pokédex + ${binders.length} ${binders.length > 1 ? 'fichários livres' : 'fichário livre'}`
+            : 'Crie fichários para trocas, deck, favoritas…'
+        }
+      />
+    </View>
+  );
+  // Vitrine do computador: cartas de ~140 px que cabem na largura útil (a tela tem no máximo `widths.wide`, com 32 px
+  // de margem, e o cartão tem 16 px de cada lado).
+  const columns = isDesktop
+    ? gridColumns(Math.min(width, widths.wide) - space.xxl * 2 - space.lg * 2, { cell: 140, gap: space.lg, min: 4, max: 8 })
+    : undefined;
+
+  // A coluna da esquerda (computador) só existe se algum dos seus cartões for aparecer.
+  const hasLower = moves.up.length + moves.down.length > 0 || purchases.bought > 0 || canSignIn;
+
+  return (
+    <ScrollView contentContainerStyle={[styles.screen, { maxWidth: isDesktop ? widths.wide : widths.reading }, isDesktop && styles.screenDesktop]}>
+      <SyncNotice status={syncStatus} />
+      <MyValueNotice entries={entries} />
+
+      {isDesktop ? (
+        <>
+          {/* Computador (W8): o valor ao lado do gráfico (ou, sem conta, dos indicadores). */}
+          <View style={styles.row}>
+            <View style={styles.col5}>{hero}</View>
+            <View style={styles.col7}>{chart ?? <Stats items={stats} columns={2} />}</View>
+          </View>
+          {chart ? <Stats items={stats} columns={4} /> : null}
+        </>
+      ) : (
+        <>
+          {hero}
+          {chart}
+          <Stats items={stats} columns={2} />
+        </>
+      )}
+
+      <TopCards items={top} total={totals.value} columns={columns} onOpen={openCard} />
+
+      {isDesktop ? (
+        <View style={styles.row}>
+          {hasLower ? (
+            <View style={styles.col7}>
+              {movers}
+              {purchasesCard}
+              {historyPrompt}
+            </View>
+          ) : null}
+          <View style={hasLower ? styles.col5 : styles.colFull}>
+            {findGroup}
+            {settingsGroup}
+          </View>
         </View>
-      ) : null}
+      ) : (
+        <>
+          {movers}
+          {purchasesCard}
+          {historyPrompt}
+          {findGroup}
+          {settingsGroup}
+        </>
+      )}
+
+      <HowWeCalculateSheet visible={info} onClose={() => setInfo(false)} totals={totals} />
     </ScrollView>
   );
 }
 
-/** Valor da coleção ao longo do tempo (histórico diário gravado pelo servidor), com 1M/3M/6M/1A. */
-function CollectionChart({ signedIn }: { signedIn: boolean }) {
-  const [history, setHistory] = useState<HistoryPoint[] | null | undefined>(undefined);
-  const [error, setError] = useState<string | null>(null);
-  const [rangeId, setRangeId] = useState<(typeof RANGES)[number]['id']>('1M');
+type StatItem = { icon: IconName; label: string; value: string; sub: string; progress?: number };
 
-  useEffect(() => {
-    if (!signedIn) return;
-    let alive = true;
-    collectionHistory()
-      .then((h) => alive && setHistory(h))
-      .catch((e) => alive && setError(e instanceof Error ? e.message : String(e)));
-    return () => {
-      alive = false;
-    };
-  }, [signedIn]);
-
-  const days = RANGES.find((r) => r.id === rangeId)!.days;
-  const points = useMemo(() => {
-    if (!history?.length) return [];
-    const lastDay = new Date(`${history[history.length - 1].day}T12:00:00`).getTime();
-    return history
-      .map((h) => ({ t: new Date(`${h.day}T12:00:00`).getTime(), v: h.value, lo: h.min, hi: h.max }))
-      .filter((p) => p.t >= lastDay - days * 86_400_000);
-  }, [history, days]);
-  const first = points[0];
-  const last = points[points.length - 1];
-  // Variação pelo valor calculado; a faixa (mínimo a máximo) aparece embaixo.
-  const change = first && last && first.v > 0 ? ((last.v - first.v) / first.v) * 100 : null;
-  const spread = points.some((p) => p.hi - p.lo >= 0.005);
-
+/** Indicadores (Pokédex, cartas…): 2 por linha no celular, 4 no computador. */
+function Stats({ items, columns }: { items: StatItem[]; columns: number }) {
+  const rows: StatItem[][] = [];
+  for (let i = 0; i < items.length; i += columns) rows.push(items.slice(i, i + columns));
   return (
-    <Card style={{ gap: 10 }}>
-      <View style={styles.chartHead}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.chartTitle}>Evolução do valor</Text>
-          {change != null && points.length > 1 ? (
-            <Text style={[styles.change, { color: change >= 0 ? colors.success : colors.danger }]}>
-              {change >= 0 ? '▲' : '▼'} {Math.abs(change).toFixed(1).replace('.', ',')}% no período
-            </Text>
-          ) : null}
-        </View>
-        <View style={styles.ranges}>
-          {RANGES.map((r) => (
-            <Chip key={r.id} label={r.label} selected={rangeId === r.id} onPress={() => setRangeId(r.id)} />
+    <View style={styles.statsGrid}>
+      {rows.map((row, i) => (
+        <View key={i} style={styles.statsRow}>
+          {row.map((s) => (
+            <View key={s.label} style={styles.stat} accessible accessibilityLabel={`${s.label}: ${s.value}, ${s.sub}`}>
+              <View style={styles.statHead}>
+                <Ionicons name={s.icon} size={14} color={colors.textMuted} />
+                <Text style={styles.statLabel}>{s.label}</Text>
+              </View>
+              <Text style={styles.statValue}>{s.value}</Text>
+              {s.progress != null ? (
+                <View style={styles.track}>
+                  <View style={[styles.fill, { width: `${Math.min(100, Math.max(s.progress > 0 ? 2 : 0, s.progress * 100))}%` }]} />
+                </View>
+              ) : null}
+              <Text style={styles.statSub}>{s.sub}</Text>
+            </View>
           ))}
         </View>
-      </View>
-      {!signedIn ? (
-        <Text style={styles.chartNote}>Entre na sua conta (em Conta e sincronização) para guardar o histórico do valor da coleção.</Text>
-      ) : error ? (
-        <Text style={styles.chartNote}>Não consegui carregar o histórico ({error}).</Text>
-      ) : history === undefined ? (
-        <Text style={styles.chartNote}>Carregando o histórico…</Text>
-      ) : points.length < 2 ? (
-        <>
-          {points.length ? <LineChart points={points} format={formatBRLShort} /> : null}
-          {spread ? <ChartLegend last={last} /> : null}
-          <Text style={styles.chartNote}>O valor da coleção é guardado todo dia às 23:50. O gráfico ganha forma a cada dia.</Text>
-        </>
-      ) : (
-        <>
-          <LineChart points={points} format={formatBRLShort} />
-          {spread ? <ChartLegend last={last} /> : null}
-        </>
-      )}
+      ))}
+    </View>
+  );
+}
+
+function RowIcon({ icon, color = colors.text }: { icon: IconName; color?: string }) {
+  return (
+    <View style={styles.rowIcon}>
+      <Ionicons name={icon} size={18} color={color} />
+    </View>
+  );
+}
+
+function Chevron() {
+  return <Ionicons name="chevron-forward" size={18} color={colors.iconFaint} />;
+}
+
+/** Ajustes: fichários, conta (com o estado da sincronização), cópia, cache e Sobre. */
+function SettingsGroup({ email, syncStatus, bindersSubtitle }: { email?: string | null; syncStatus: SyncStatus; bindersSubtitle: string }) {
+  const sync = syncSummary(syncStatus, email, { signInHint: true });
+  const [clearing, setClearing] = useState(false);
+  async function clearCache() {
+    if (clearing) return;
+    setClearing(true);
+    const n = await clearCatalogCache();
+    setClearing(false);
+    showToast({ message: n ? `Catálogo recarregado: ${n} ${n === 1 ? 'item apagado' : 'itens apagados'} do cache` : 'O cache já estava vazio' });
+  }
+  const items: LinkItem[] = [
+    { icon: 'library-outline', title: 'Meus fichários', subtitle: bindersSubtitle, onPress: () => router.push('/binders') },
+    { icon: 'book-outline', title: 'Fichário Pokédex', subtitle: 'Nome, capa, região, bolsos e idiomas', onPress: () => router.push('/setup') },
+    { icon: sync.icon, iconColor: sync.color, title: 'Conta e sincronização', subtitle: sync.text, onPress: () => router.push('/account') },
+    {
+      icon: 'document-text-outline',
+      title: 'Cópia da coleção',
+      subtitle: 'Exportar ou importar um arquivo',
+      onPress: () => router.push({ pathname: '/account', params: { secao: 'copia' } }),
+    },
+    { icon: 'refresh-outline', title: 'Recarregar catálogo e imagens', subtitle: clearing ? 'Apagando o cache…' : 'Suas cartas continuam salvas', onPress: clearCache },
+    { icon: 'information-circle-outline', title: 'Sobre e fontes', subtitle: 'Como calculamos, créditos e versão', onPress: () => router.push('/about') },
+  ];
+  return <LinkRows items={items} />;
+}
+
+type LinkItem = { icon: IconName; iconColor?: string; title: string; subtitle: string; onPress: () => void };
+
+/** Cartão com linhas que levam a outra tela (ícone, título, linha de apoio e a seta). */
+function LinkRows({ items }: { items: LinkItem[] }) {
+  return (
+    <Card style={styles.rowCard}>
+      {items.map((it, i) => (
+        <Divided key={it.title} first={i === 0}>
+          <ListRow
+            title={it.title}
+            subtitle={it.subtitle}
+            left={<RowIcon icon={it.icon} color={it.iconColor} />}
+            right={<Chevron />}
+            onPress={it.onPress}
+            accessibilityLabel={`${it.title}: ${it.subtitle}`}
+          />
+        </Divided>
+      ))}
     </Card>
   );
 }
 
-/** Legenda do gráfico: a linha é o valor calculado e a faixa vai do mínimo ao máximo (valores do último dia). */
-function ChartLegend({ last }: { last: { v: number; lo: number; hi: number } }) {
+function Divided({ first, children }: { first: boolean; children: ReactNode }) {
   return (
-    <View style={styles.legend}>
-      <View style={styles.legendItem}>
-        <View style={styles.legendLine} />
-        <Text style={styles.legendText}>Valor calculado {formatBRLTight(last.v)}</Text>
-      </View>
-      <View style={styles.legendItem}>
-        <View style={styles.legendBand} />
-        <Text style={styles.legendText}>Mín a máx {formatRange(last.lo, last.hi)}</Text>
-      </View>
-    </View>
-  );
-}
-
-function Stat({ icon, label, value, sub }: { icon: IconName; label: string; value: string; sub: string }) {
-  return (
-    <View style={styles.stat}>
-      <View style={styles.statHead}>
-        <Ionicons name={icon} size={14} color={colors.primary} />
-        <Text style={styles.statLabel}>{label}</Text>
-      </View>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statSub}>{sub}</Text>
-    </View>
-  );
-}
-
-function Item({ icon, title, subtitle, onPress }: { icon: IconName; title: string; subtitle: string; onPress: () => void }) {
-  return (
-    <Pressable style={({ pressed }) => [styles.item, pressed && { opacity: 0.7 }]} onPress={onPress} accessibilityRole="button">
-      <View style={styles.itemIcon}>
-        <Ionicons name={icon} size={18} color={colors.primary} />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.itemTitle}>{title}</Text>
-        <Text style={styles.itemSub} numberOfLines={1}>
-          {subtitle}
-        </Text>
-      </View>
-      <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
-    </Pressable>
+    <>
+      {first ? null : <View style={styles.divider} />}
+      {children}
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { padding: 16, gap: 12, maxWidth: MAX_WIDTH, width: '100%', alignSelf: 'center', paddingBottom: 40 },
-  hero: { backgroundColor: colors.primary, borderRadius: radius.lg, padding: 20, ...shadow },
-  heroTop: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  heroLabel: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '800', letterSpacing: 1.2, textTransform: 'uppercase' },
-  heroValue: { color: colors.onPrimary, fontSize: 36, fontWeight: '900', marginTop: 6 },
-  heroCaption: { color: 'rgba(255,255,255,0.85)', fontSize: 12, fontWeight: '700', marginTop: 2 },
-  heroRange: { marginTop: 12, marginHorizontal: -4, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.35)' },
-  heroNote: { color: 'rgba(255,255,255,0.9)', fontSize: 13, marginTop: 6, lineHeight: 18 },
-  heroSource: { color: 'rgba(255,255,255,0.8)', fontSize: 12, marginTop: 8, lineHeight: 17 },
-  heroLink: { color: colors.yellow, fontWeight: '800', textDecorationLine: 'underline' },
-  chartHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, flexWrap: 'wrap' },
-  chartTitle: { color: colors.text, fontSize: 16, fontWeight: '900' },
-  change: { fontSize: 13, fontWeight: '800', marginTop: 2 },
-  ranges: { flexDirection: 'row', gap: 4 },
-  chartNote: { color: colors.textMuted, fontSize: 13, lineHeight: 18 },
-  legend: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 16, rowGap: 4 },
-  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  legendLine: { width: 16, height: 3, borderRadius: 2, backgroundColor: colors.primary },
-  legendBand: { width: 16, height: 10, borderRadius: 3, backgroundColor: colors.primary, opacity: 0.2 },
-  legendText: { color: colors.textMuted, fontSize: 12, fontWeight: '700' },
-  stats: { flexDirection: 'row', gap: 12 },
-  stat: { flex: 1, backgroundColor: colors.surface, borderRadius: radius.lg, padding: 14, ...shadow },
-  statHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  statLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1 },
-  statValue: { color: colors.text, fontSize: 26, fontWeight: '900', marginTop: 4 },
-  statSub: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
-  group: { backgroundColor: colors.surface, borderRadius: radius.lg, overflow: 'hidden', ...shadow },
-  divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginLeft: 60 },
-  item: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
-  itemIcon: { width: 34, height: 34, borderRadius: 17, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
-  itemTitle: { color: colors.text, fontSize: 15, fontWeight: '800' },
-  itemSub: { color: colors.textMuted, fontSize: 13, marginTop: 2 },
-  topRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 11 },
-  rank: { width: 26, height: 26, borderRadius: 13, backgroundColor: colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' },
-  rankText: { color: colors.text, fontSize: 13, fontWeight: '900' },
-  topValues: { alignItems: 'flex-end' },
-  topValue: { color: colors.money, fontSize: 15, fontWeight: '900' },
-  topRange: { color: colors.textMuted, fontSize: 11, fontWeight: '700', marginTop: 1 },
-  error: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
-  errorText: { color: colors.danger, fontSize: 13, flex: 1 },
+  screen: { padding: space.lg, gap: space.md, width: '100%', alignSelf: 'center', paddingBottom: space.xxxl },
+  screenDesktop: { padding: space.xxl, gap: space.lg },
+  row: { flexDirection: 'row', gap: space.lg, alignItems: 'flex-start' },
+  col5: { flex: 5, minWidth: 0, gap: space.lg },
+  col7: { flex: 7, minWidth: 0, gap: space.lg },
+  colFull: { flex: 1, minWidth: 0, maxWidth: widths.reading, gap: space.lg },
+  statsGrid: { gap: space.md },
+  statsRow: { flexDirection: 'row', gap: space.md },
+  stat: { flex: 1, minWidth: 0, backgroundColor: colors.surface, borderRadius: radius.lg, padding: space.lg, gap: space.xxs, ...shadow },
+  statHead: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
+  statLabel: { ...typography.label, color: colors.textMuted },
+  statValue: { ...typography.title, ...typography.tabular, color: colors.text },
+  statSub: { ...typography.caption, ...typography.tabular, color: colors.textMuted },
+  track: { height: 4, borderRadius: 2, backgroundColor: colors.surfaceAlt, overflow: 'hidden', marginVertical: space.xxs },
+  fill: { height: 4, borderRadius: 2, backgroundColor: semantic.special.fill },
+  rowCard: { paddingVertical: space.xs },
+  rowIcon: { width: 36, height: 36, borderRadius: radius.pill, backgroundColor: colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' },
+  divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginLeft: 48 },
 });

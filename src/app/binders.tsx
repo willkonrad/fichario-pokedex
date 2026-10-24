@@ -1,21 +1,24 @@
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
-import * as WebBrowser from 'expo-web-browser';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { Button, onCover, type IconName } from '@/components/ui';
+import { HowWeCalculateSheet, SourceCreditsLine } from '@/components/collection-value';
+import { type PressState } from '@/components/icon-button';
+import { Badge, Button, IconButton, InfoButton, onCover, PokeballIcon, type IconName } from '@/components/ui';
 import { TOTAL_SPECIES } from '@/data/pokedex';
-import { customTotalSlots, dexRange } from '@/lib/binder';
-import { collectionTotals, formatBRLTight, formatRange } from '@/lib/quotes';
+import { customTotalSlots, dexRange, isPlaced, isPlacedCustom } from '@/lib/binder';
+import { collectionTotalText } from '@/lib/copy';
+import { formatBRL, formatBRLTight } from '@/lib/format';
+import { collectionTotals } from '@/lib/quotes';
 import { BINDER_PURPOSES, POKEDEX_BINDER } from '@/lib/types';
-import { isSpread } from '@/lib/valuation';
 import { entriesOf, useCollection } from '@/store/collection';
-import { colors, MAX_WIDTH, radius, shadow } from '@/theme';
+import { colors, radius, semantic, shadow, space, typography, widths } from '@/theme';
 
 /** Estante: todos os fichários do usuário, para abrir, editar ou criar um novo. */
 export default function BindersScreen() {
   const { settings, entries, binders, activeBinderId, setActiveBinder } = useCollection();
+  const [info, setInfo] = useState(false);
 
   const rows = useMemo(() => {
     const pokedex = entriesOf(entries, POKEDEX_BINDER);
@@ -27,7 +30,8 @@ export default function BindersScreen() {
         color: settings?.color ?? colors.primary,
         icon: null as IconName | null,
         kind: range && range.count < TOTAL_SPECIES ? `Pokédex #${range.from}–#${range.to}` : 'Pokédex completa',
-        filled: new Set(pokedex.filter((e) => !range || (e.dex >= range.from && e.dex <= range.to)).map((e) => e.dex)).size,
+        // Pokémon com carta num espaço que existe na configuração atual, como no topo da tela inicial (F2).
+        filled: new Set(pokedex.filter((e) => e.dex > 0 && (!settings || isPlaced(settings, e))).map((e) => e.dex)).size,
         total: range?.count ?? 0,
         unit: 'Pokémon',
         totals: collectionTotals(pokedex),
@@ -42,7 +46,8 @@ export default function BindersScreen() {
           icon: purpose.icon as IconName,
           // Descrição; senão a finalidade; e o tamanho quando o nome já diz a finalidade.
           kind: b.description || (purpose.label !== b.name ? purpose.label : `${b.rows * b.cols} bolsos por página · ${b.pages} páginas`),
-          filled: list.length,
+          // Só as cartas que cabem nas páginas (as de fora continuam no valor), como na tela inicial (F2).
+          filled: list.filter((e) => isPlacedCustom(b, e)).length,
           total: customTotalSlots(b),
           unit: 'bolsos',
           totals: b.showPrices ? collectionTotals(list) : null,
@@ -50,6 +55,8 @@ export default function BindersScreen() {
       }),
     ];
   }, [settings, entries, binders]);
+  // Total da coleção inteira (o mesmo de Minha coleção), também com os fichários que escondem os preços.
+  const all = useMemo(() => collectionTotals(Object.values(entries)), [entries]);
 
   async function open(id: string) {
     await setActiveBinder(id);
@@ -61,79 +68,76 @@ export default function BindersScreen() {
       {rows.map((r) => {
         const active = r.id === activeBinderId;
         const ink = onCover(r.color);
+        const value = r.totals?.valued ? r.totals.value : null;
         return (
           // Linha com dois botões lado a lado (abrir e personalizar): botão dentro de botão é inválido na web.
           <View key={r.id} style={[styles.card, active && styles.cardActive]}>
-          <Pressable
-            onPress={() => open(r.id)}
-            style={({ pressed }) => [styles.main, pressed && { opacity: 0.85 }]}
-            accessibilityRole="button"
-            accessibilityLabel={`Abrir ${r.name}${active ? ' (aberto)' : ''}`}>
-            <View style={[styles.spine, { backgroundColor: r.color }]}>
-              {r.icon ? <Ionicons name={r.icon} size={22} color={ink} /> : <MaterialCommunityIcons name="pokeball" size={24} color={ink} />}
-            </View>
-            <View style={styles.body}>
-              <View style={styles.titleRow}>
-                <Text style={styles.name} numberOfLines={1}>
-                  {r.name}
-                </Text>
-                {active ? (
-                  <View style={styles.activeTag}>
-                    <Text style={styles.activeText}>aberto</Text>
-                  </View>
-                ) : null}
-              </View>
-              <Text style={styles.kind} numberOfLines={1}>
-                {r.kind}
-              </Text>
-              <View style={styles.track}>
-                <View style={[styles.fill, { width: `${Math.min(100, (r.filled / Math.max(1, r.total)) * 100)}%`, backgroundColor: r.color }]} />
-              </View>
-              <View style={styles.statsRow}>
-                <Text style={styles.stat}>
-                  {r.filled}/{r.total} {r.unit}
-                </Text>
-                {r.totals?.valued ? <Text style={styles.value}>{formatBRLTight(r.totals.value)}</Text> : null}
-              </View>
-              {/* Mínimo a máximo numa linha própria (ao lado do valor, seria cortado no celular). */}
-              {r.totals?.valued && isSpread(r.totals.range) ? (
-                <Text style={styles.valueRange}>({formatRange(r.totals.min, r.totals.max)})</Text>
-              ) : null}
-            </View>
-          </Pressable>
             <Pressable
-              hitSlop={10}
+              onPress={() => open(r.id)}
+              style={(s) => {
+                const { pressed, hovered } = s as PressState;
+                return [styles.main, hovered && styles.mainHover, pressed && { opacity: 0.85 }];
+              }}
+              role="button"
+              accessibilityLabel={`Abrir ${r.name}, ${r.filled} de ${r.total} ${r.unit}${value != null ? `, ${formatBRL(value)}` : ''}${active ? ', aberto' : ''}`}>
+              <View style={[styles.spine, { backgroundColor: r.color }]}>
+                {r.icon ? <Ionicons name={r.icon} size={22} color={ink} /> : <PokeballIcon size={24} color={ink} />}
+              </View>
+              <View style={styles.body}>
+                <View style={styles.titleRow}>
+                  <Text style={styles.name} numberOfLines={1}>
+                    {r.name}
+                  </Text>
+                  {active ? <Badge label="aberto" tone="selected" /> : null}
+                </View>
+                <Text style={styles.kind} numberOfLines={1}>
+                  {r.kind}
+                </Text>
+                <View style={styles.track}>
+                  <View style={[styles.fill, { width: `${Math.min(100, (r.filled / Math.max(1, r.total)) * 100)}%`, backgroundColor: r.color }]} />
+                </View>
+                <View style={styles.statsRow}>
+                  <Text style={styles.stat}>
+                    {r.filled}/{r.total} {r.unit}
+                  </Text>
+                  {value != null ? <Text style={styles.value}>{formatBRLTight(value)}</Text> : null}
+                </View>
+              </View>
+            </Pressable>
+            <IconButton
+              icon="settings-outline"
+              label={`Personalizar ${r.name}`}
+              color={colors.textMuted}
               style={styles.edit}
               onPress={() => (r.id === POKEDEX_BINDER ? router.push('/setup') : router.push({ pathname: '/binder-edit', params: { id: r.id } }))}
-              accessibilityRole="button"
-              accessibilityLabel={`Personalizar ${r.name}`}>
-              <Ionicons name="settings-outline" size={20} color={colors.textMuted} />
-            </Pressable>
+            />
           </View>
         );
       })}
 
-      {/* Crédito obrigatório da API do MYP Cards (os valores dos fichários vêm dela). */}
-      <Text style={styles.hint}>
-        Valores: valor calculado com os anúncios do{' '}
-        <Text style={styles.link} accessibilityRole="link" onPress={() => WebBrowser.openBrowserAsync('https://mypcards.com')}>
-          MYP Cards ↗
-        </Text>{' '}
-        (a média de cada carta, ou o valor escolhido nela) e, entre parênteses, a soma dos mínimos e dos máximos (ou &quot;Meu
-        valor&quot;).
-      </Text>
+      {all.valued ? (
+        <View style={styles.footer}>
+          <View style={styles.totalRow}>
+            <Text style={styles.total}>{collectionTotalText(all.value)}</Text>
+            <InfoButton label="Como calculamos o valor" onPress={() => setInfo(true)} />
+          </View>
+          {/* Crédito das fontes (o MYP Cards sempre, com link). */}
+          <SourceCreditsLine byBasis={all.byBasis} style={styles.center} />
+        </View>
+      ) : null}
 
-      <Button title="Novo fichário" icon="add" onPress={() => router.push('/binder-edit')} />
-      <Text style={styles.hint}>
-        Fichários livres servem para o que você quiser: coleções completas, favoritas, trocas, deck ou graduadas. Você escolhe a carta de cada
-        bolso, a capa, o tamanho e o número de páginas.
-      </Text>
+      <View style={styles.newBinder}>
+        <Button title="Novo fichário" icon="add" onPress={() => router.push('/binder-edit')} />
+        <Text style={[styles.hint, styles.center]}>Para trocas, deck, favoritas ou uma coleção</Text>
+      </View>
+
+      <HowWeCalculateSheet visible={info} onClose={() => setInfo(false)} totals={all} />
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { padding: 16, gap: 12, maxWidth: MAX_WIDTH, width: '100%', alignSelf: 'center' },
+  screen: { padding: space.lg, gap: space.md, maxWidth: widths.reading, width: '100%', alignSelf: 'center', paddingBottom: space.xxxl },
   card: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -144,22 +148,24 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     ...shadow,
   },
-  cardActive: { borderColor: colors.primary },
+  cardActive: { borderColor: semantic.selected.border },
   main: { flex: 1, flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch' },
+  mainHover: { backgroundColor: semantic.hover.onLight },
   spine: { width: 56, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center' },
-  body: { flex: 1, padding: 14, gap: 3 },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  name: { color: colors.text, fontSize: 17, fontWeight: '900', flexShrink: 1 },
-  activeTag: { backgroundColor: colors.primarySoft, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2 },
-  activeText: { color: colors.primary, fontSize: 11, fontWeight: '800' },
-  kind: { color: colors.textMuted, fontSize: 12 },
-  track: { height: 6, backgroundColor: colors.surfaceAlt, borderRadius: 3, overflow: 'hidden', marginTop: 6 },
+  body: { flex: 1, minWidth: 0, padding: space.lg, gap: space.xxs },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  name: { ...typography.heading, color: colors.text, flexShrink: 1 },
+  kind: { ...typography.caption, color: colors.textMuted },
+  track: { height: 6, backgroundColor: colors.surfaceAlt, borderRadius: 3, overflow: 'hidden', marginTop: space.sm },
   fill: { height: 6, borderRadius: 3 },
-  statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
-  stat: { color: colors.textMuted, fontSize: 12, fontWeight: '600' },
-  value: { color: colors.money, fontSize: 13, fontWeight: '800' },
-  valueRange: { color: colors.textMuted, fontSize: 11, fontWeight: '700', textAlign: 'right', marginTop: 1 },
-  edit: { padding: 14, alignSelf: 'stretch', justifyContent: 'center' },
-  hint: { color: colors.textMuted, fontSize: 12, lineHeight: 17, textAlign: 'center' },
-  link: { color: colors.blue, fontWeight: '800' },
+  statsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: space.sm, marginTop: space.xs },
+  stat: { ...typography.caption, ...typography.tabular, color: colors.textMuted },
+  value: { ...typography.numeric, color: semantic.money.fg },
+  edit: { marginHorizontal: space.xs },
+  footer: { gap: space.xxs, alignItems: 'center', paddingVertical: space.xs },
+  totalRow: { flexDirection: 'row', alignItems: 'center' },
+  total: { ...typography.bodyStrong, ...typography.tabular, color: semantic.money.fg },
+  center: { textAlign: 'center' },
+  newBinder: { gap: space.sm, marginTop: space.sm },
+  hint: { ...typography.caption, color: colors.textMuted },
 });

@@ -1,4 +1,4 @@
-import { cached } from './tcgdex';
+import { cached, cardDetail } from './tcgdex';
 
 /**
  * Imagem reserva da pokemontcg.io, para cartas que a TCGdex ainda não tem imagem
@@ -9,29 +9,39 @@ import { cached } from './tcgdex';
 type PtcgCard = { id: string; name: string; number: string; set: { name: string }; images: { small: string; large: string } };
 
 const API = 'https://api.pokemontcg.io/v2/cards';
+/** API fora do ar: a falha vale por 10 minutos, para cada miniatura não esperar as tentativas de novo. */
+const FAILURE_TTL = 1000 * 60 * 10;
+let failedAt = 0;
 
-// A API às vezes responde 500/502 sem motivo: tenta de novo algumas vezes.
-async function getWithRetry(url: string, tries = 4): Promise<{ data: PtcgCard[] }> {
+// A API às vezes responde 500/502 sem motivo: tenta uma segunda vez (a pausa é só entre as tentativas).
+async function getWithRetry(url: string, tries = 2): Promise<{ data: PtcgCard[] }> {
   let last: unknown;
   for (let i = 0; i < tries; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, 800));
     try {
       const res = await fetch(url);
-      if (res.ok) return res.json();
+      if (res.ok) return (await res.json()) as { data: PtcgCard[] };
       last = new Error(`pokemontcg.io ${res.status}`);
     } catch (e) {
       last = e;
     }
-    await new Promise((r) => setTimeout(r, 600 * (i + 1)));
   }
   throw last;
 }
 
-function cardsNamed(name: string) {
-  return cached(`ptcg:name:${name.toLowerCase()}`, async () => {
-    const q = encodeURIComponent(`name:"${name.replace(/"/g, '')}"`);
-    const body = await getWithRetry(`${API}?q=${q}&pageSize=250&select=id,name,number,set,images`);
-    return body.data ?? [];
-  });
+/** Cartas com este nome na pokemontcg.io (undefined = a API não respondeu agora ou há pouco). */
+async function cardsNamed(name: string) {
+  if (Date.now() - failedAt < FAILURE_TTL) return undefined;
+  try {
+    return await cached(`ptcg:name:${name.toLowerCase()}`, async () => {
+      const q = encodeURIComponent(`name:"${name.replace(/"/g, '')}"`);
+      const body = await getWithRetry(`${API}?q=${q}&pageSize=250&select=id,name,number,set,images`);
+      return body.data ?? [];
+    });
+  } catch {
+    failedAt = Date.now();
+    return undefined;
+  }
 }
 
 // ---------- Scrydex (CDN de imagens da pokemontcg.io, acessível direto pelo id) ----------
@@ -95,15 +105,17 @@ const sameName = (a: string, b: string) => {
   return norm(a) === norm(b);
 };
 
-/** Nome em inglês da carta pela TCGdex (PT e EN usam o mesmo id). */
+/**
+ * Nome em inglês da carta pela ficha em inglês da TCGdex (PT e EN usam o mesmo id), a mesma que a tela da carta e as
+ * versões com selo já baixam. Carta que não existe em inglês: undefined; erro de rede propaga (não entra no cache).
+ */
 async function englishName(cardId: string) {
-  const d = await cached(`tcgdex:en-name:${cardId}`, async () => {
-    const res = await fetch(`https://api.tcgdex.net/v2/en/cards/${encodeURIComponent(cardId)}`);
-    if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`TCGdex ${res.status}`);
-    return ((await res.json()) as { name?: string }).name ?? null;
-  });
-  return d ?? undefined;
+  try {
+    return (await cardDetail(cardId, 'en')).name;
+  } catch (e) {
+    if (/\b404\b/.test(String(e instanceof Error ? e.message : e))) return undefined;
+    throw e;
+  }
 }
 
 /**
@@ -119,7 +131,8 @@ async function englishName(cardId: string) {
 export function scrydexImage(cardId: string, localId?: string, nameEn?: string) {
   return cached(`scrydex:v5:${cardId}`, async () => {
     const cut = cardId.lastIndexOf('-');
-    if (cut <= 0) return null;
+    // Carta que só existe no catálogo do TCGCSV ("tcgp-<produto>"): não tem id de coleção para a Scrydex.
+    if (cut <= 0 || cardId.startsWith('tcgp-')) return null;
     const setId = cardId.slice(0, cut).toLowerCase();
     const num = (localId ?? cardId.slice(cut + 1)).replace(/^0+(?=\w)/, '');
     const name = nameEn ?? (await englishName(cardId));
@@ -157,7 +170,7 @@ const tokens = (s: string) =>
 
 /** URL da imagem (small/large) da carta com este nome em inglês, nesta coleção (nome em inglês). */
 export async function ptcgImage(cardNameEn: string, setNameEn: string, localId?: string) {
-  const list = await cardsNamed(cardNameEn);
+  const list = (await cardsNamed(cardNameEn)) ?? [];
   const want = tokens(setNameEn);
   const num = localId?.replace(/^0+(?=\d)/, '');
   let best: { card: PtcgCard; score: number } | undefined;

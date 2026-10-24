@@ -2,7 +2,7 @@
   "expo": {
     "name": "Fichário Pokédex",
     "slug": "pokedex-binder",
-    "version": "2.0.0",
+    "version": "3.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "pokedexbinder",
@@ -21,7 +21,10 @@
     },
     "web": {
       "output": "single",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "lang": "pt-BR",
+      "description": "Seu fichário de cartas Pokémon TCG, bolso por bolso, com o valor em reais.",
+      "themeColor": "#E3350D"
     },
     "plugins": [
       "expo-router",

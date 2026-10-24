@@ -30,17 +30,16 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
-.env*.local
+# local env files (segredos do Supabase); só o modelo vai para o repositório
+.env*
+!.env.example
 
 # typescript
 *.tsbuildinfo
-
-example
 
 # generated native folders
 /ios
 /android
 
-# segredos do Supabase
-.env
+# Supabase CLI (projeto vinculado e cache local)
+supabase/.temp/

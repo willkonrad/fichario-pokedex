@@ -1,20 +1,22 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import type { ReactNode } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import Svg, { Defs, LinearGradient, Mask, Rect, Stop } from 'react-native-svg';
 
-import { Button } from '@/components/ui';
+import { Button, gridColumns } from '@/components/ui';
 import { VARIANTS } from '@/lib/types';
 import type { VersionOption } from '@/lib/variants';
-import { CARD_RATIO, colors, radius, shadow } from '@/theme';
+import { CARD_RATIO, colors, elevation, radius, semantic, space, typography } from '@/theme';
 
-const GAP = 12;
+const GAP = space.md;
+/** Na web, o título vira <h2> (sem o nível, o react-native-web faz <h1>, e o <h1> da página é o nome da carta). */
+const HEADING_LEVEL_2 = (Platform.OS === 'web' ? { 'aria-level': 2 } : {}) as object;
 
 export const versionLabel = (o: VersionOption) => VARIANTS.find((v) => v.id === o.variant)?.label ?? o.variant;
 
 /**
- * "Qual é a sua versão?": as versões visuais da carta lado a lado (a mesma imagem, com o brilho, a marca ou o selo
- * de cada versão desenhados por cima), para o colecionador tocar na que tem.
+ * "Qual é a sua versão?": as versões da carta lado a lado — as da TCGdex (a mesma imagem, com o brilho, a marca ou o
+ * selo de cada versão desenhados por cima) e as do catálogo, com a foto oficial —, para o colecionador tocar na que tem.
  */
 export function VersionPicker({
   visible,
@@ -26,51 +28,62 @@ export function VersionPicker({
 }: {
   visible: boolean;
   options: VersionOption[];
-  selected?: VersionOption;
-  /** Imagem da carta (a TCGdex tem uma imagem por carta, não por versão). */
+  /** Versão salva; só fica destacada quando bate exatamente com uma opção (variação e selo). */
+  selected?: Pick<VersionOption, 'variant' | 'stamp'>;
   /** Imagem da carta na versão (a foto oficial da versão com selo, quando existir). */
   image: (o: VersionOption) => ReactNode;
   onPick: (o: VersionOption) => void;
   onClose: () => void;
 }) {
   const { width } = useWindowDimensions();
-  const boxWidth = Math.min(width - 32, 560);
-  const cols = options.length <= 2 ? 2 : 3;
-  const tileWidth = Math.floor((boxWidth - 40 - GAP * (cols - 1)) / cols);
-  const exact = (o: VersionOption) => selected?.variant === o.variant && (selected.stamp ?? '') === (o.stamp ?? '');
-  // Sem a versão exata (ex.: promo salva sem o nome do selo), destaca a primeira da mesma variação.
-  const fallback = options.some(exact) ? undefined : options.find((o) => o.variant === selected?.variant);
-  const same = (o: VersionOption) => exact(o) || o === fallback;
+  // Muitas versões no computador: caixa mais larga, com mais colunas.
+  const boxWidth = Math.min(width - space.xxl, options.length > 6 ? 760 : 560);
+  const inner = boxWidth - space.xl * 2;
+  const cols = options.length <= 2 ? 2 : Math.min(options.length, gridColumns(inner, { cell: 120, gap: GAP, min: 3, max: 5 }));
+  const tileWidth = Math.floor((inner - GAP * (cols - 1)) / cols);
+  const same = (o: VersionOption) => !!selected && selected.variant === o.variant && (selected.stamp ?? '') === (o.stamp ?? '');
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.backdrop}>
-        <View style={[styles.box, { width: boxWidth }]}>
-          <Text style={styles.title}>Qual é a sua versão?</Text>
-          <Text style={styles.text}>Esta carta tem {options.length} versões. Toque na que você tem; dá para mudar depois em &quot;Variação&quot;.</Text>
-          <ScrollView contentContainerStyle={styles.grid}>
-            {options.map((o) => (
-              <Pressable
-                key={`${o.variant}|${o.stamp ?? ''}`}
-                style={({ pressed }) => [{ width: tileWidth }, pressed && { opacity: 0.8, transform: [{ scale: 0.97 }] }]}
-                onPress={() => onPick(o)}
-                accessibilityRole="button"
-                accessibilityState={{ selected: same(o) }}
-                accessibilityLabel={`${versionLabel(o)}${o.stamp ? `, selo ${o.stamp}` : ''}`}>
-                <View style={[styles.thumb, { height: tileWidth / CARD_RATIO }, same(o) && styles.thumbSelected]}>
-                  {image(o)}
-                  <VersionEffect option={o} />
-                </View>
-                <Text style={[styles.label, same(o) && { color: colors.primary }]} numberOfLines={2}>
-                  {versionLabel(o)}
-                </Text>
-                {o.stamp ? (
-                  <Text style={styles.stamp} numberOfLines={3}>
-                    Selo: {o.stamp}
+        <View style={[styles.box, { width: boxWidth }]} role="dialog" aria-modal aria-label="Qual é a sua versão?">
+          <Text style={styles.title} role="heading" {...HEADING_LEVEL_2}>
+            Qual é a sua versão?
+          </Text>
+          <Text style={styles.text}>
+            {options.length === 1 ? '1 versão' : `${options.length} versões`} no catálogo. Toque na que você tem (dá para mudar depois).
+          </Text>
+          <ScrollView contentContainerStyle={styles.grid} role="radiogroup" aria-label="Versões da carta">
+            {options.map((o) => {
+              const on = same(o);
+              return (
+                <Pressable
+                  key={`${o.variant}|${o.stamp ?? ''}`}
+                  style={({ pressed }) => [{ width: tileWidth }, pressed && styles.pressed]}
+                  onPress={() => onPick(o)}
+                  role="radio"
+                  aria-checked={on}
+                  accessibilityLabel={`${versionLabel(o)}${o.stamp ? `, selo ${o.stamp}` : ''}${o.photo ? ', com foto oficial' : ''}`}>
+                  <View style={[styles.thumb, { height: tileWidth / CARD_RATIO }, on && styles.thumbSelected]}>
+                    {image(o)}
+                    {o.photo ? null : <VersionEffect option={o} />}
+                    {on ? (
+                      <View style={styles.check} aria-hidden>
+                        <Ionicons name="checkmark" size={14} color={semantic.selected.fg} />
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text style={[styles.label, on && styles.labelSelected]} numberOfLines={2}>
+                    {versionLabel(o)}
                   </Text>
-                ) : null}
-              </Pressable>
-            ))}
+                  {o.stamp ? (
+                    <Text style={styles.stamp} numberOfLines={3}>
+                      {o.stamp}
+                    </Text>
+                  ) : null}
+                </Pressable>
+              );
+            })}
           </ScrollView>
           <Button title="Escolher depois" variant="secondary" onPress={onClose} />
         </View>
@@ -82,6 +95,11 @@ export function VersionPicker({
 /** Área da ilustração na carta (proporções de uma carta Pokémon comum). */
 const ART = { x: 0.08, y: 0.11, w: 0.84, h: 0.4 };
 
+/** Cores do brilho holográfico desenhado sobre a imagem (ilustração, não interface). */
+const SHEEN = ['#ff6ec7', '#ffe46b', '#6bffb8', '#6bb8ff', '#c46bff'];
+/** Roxo da Master Ball, no selo da versão. */
+const MASTER_BALL = '#7B3FC4';
+
 /** Desenho por cima da imagem: brilho holo na ilustração, brilho reverse fora dela, marcas e selos. */
 function VersionEffect({ option }: { option: VersionOption }) {
   const v = option.variant;
@@ -89,16 +107,14 @@ function VersionEffect({ option }: { option: VersionOption }) {
   const mark =
     v === 'firstEdition' ? '1ª ED' : v === 'shadowless' ? 'Shadowless' : v === 'pokeball' ? 'Poké Ball' : v === 'masterball' ? 'Master Ball' : null;
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+    <View style={[StyleSheet.absoluteFill, styles.noTouch]} aria-hidden>
       {sheen ? (
         <Svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
           <Defs>
             <LinearGradient id="sheen" x1="0" y1="0" x2="1" y2="1">
-              <Stop offset="0" stopColor="#ff6ec7" stopOpacity="0.3" />
-              <Stop offset="0.3" stopColor="#ffe46b" stopOpacity="0.26" />
-              <Stop offset="0.55" stopColor="#6bffb8" stopOpacity="0.26" />
-              <Stop offset="0.8" stopColor="#6bb8ff" stopOpacity="0.3" />
-              <Stop offset="1" stopColor="#c46bff" stopOpacity="0.3" />
+              {SHEEN.map((c, i) => (
+                <Stop key={c} offset={String(i / (SHEEN.length - 1))} stopColor={c} stopOpacity={i % 2 ? 0.26 : 0.3} />
+              ))}
             </LinearGradient>
             <Mask id="frame">
               <Rect x="0" y="0" width="100" height="100" fill="#fff" />
@@ -113,9 +129,9 @@ function VersionEffect({ option }: { option: VersionOption }) {
         </Svg>
       ) : null}
       {mark ? (
-        <View style={[styles.mark, v === 'firstEdition' && { left: 6, right: undefined }]}>
+        <View style={[styles.mark, v === 'firstEdition' && styles.markLeft]}>
           {v === 'pokeball' || v === 'masterball' ? (
-            <Ionicons name="radio-button-on" size={10} color={v === 'masterball' ? '#7B3FC4' : colors.primary} />
+            <Ionicons name="radio-button-on" size={10} color={v === 'masterball' ? MASTER_BALL : colors.primary} />
           ) : null}
           <Text style={styles.markText}>{mark}</Text>
         </View>
@@ -125,15 +141,30 @@ function VersionEffect({ option }: { option: VersionOption }) {
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', alignItems: 'center', justifyContent: 'center', padding: 16 },
-  box: { maxHeight: '92%', backgroundColor: colors.surface, borderRadius: radius.lg, padding: 20, gap: 12, ...shadow },
-  title: { color: colors.text, fontSize: 20, fontWeight: '900' },
-  text: { color: colors.textMuted, fontSize: 14 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: GAP, paddingVertical: 4 },
+  backdrop: { flex: 1, backgroundColor: colors.backdrop, alignItems: 'center', justifyContent: 'center', padding: space.lg },
+  box: { maxHeight: '92%', backgroundColor: colors.surface, borderRadius: radius.lg, padding: space.xl, gap: space.md, ...elevation[2] },
+  title: { ...typography.title, color: colors.text },
+  text: { ...typography.caption, color: colors.textMuted },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: GAP, paddingVertical: space.xs },
+  pressed: { opacity: 0.8, transform: [{ scale: 0.97 }] },
   thumb: { borderRadius: radius.sm, overflow: 'hidden', backgroundColor: colors.surfaceAlt, borderWidth: 2, borderColor: 'transparent' },
-  thumbSelected: { borderColor: colors.primary },
-  label: { color: colors.text, fontSize: 13, fontWeight: '800', marginTop: 6 },
-  stamp: { color: colors.textMuted, fontSize: 11, marginTop: 1 },
+  // Escolhida: borda grafite (a cor da seleção), sem vermelho.
+  thumbSelected: { borderColor: semantic.selected.border },
+  check: {
+    position: 'absolute',
+    top: space.xs,
+    right: space.xs,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: semantic.selected.bg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  label: { ...typography.caption, fontWeight: '600', color: colors.text, marginTop: space.xs },
+  labelSelected: { fontWeight: '800' },
+  stamp: { ...typography.caption, fontSize: 12, lineHeight: 16, color: colors.textMuted },
+  noTouch: { pointerEvents: 'none' },
   mark: {
     position: 'absolute',
     right: 6,
@@ -141,10 +172,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    backgroundColor: 'rgba(255,255,255,0.92)',
+    backgroundColor: colors.surface,
     borderRadius: radius.pill,
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
-  markText: { color: colors.text, fontSize: 10, fontWeight: '900' },
+  markLeft: { left: 6, right: undefined },
+  markText: { color: colors.text, fontSize: 11, fontWeight: '800' },
 });

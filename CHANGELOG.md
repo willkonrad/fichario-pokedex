@@ -1,5 +1,109 @@
 # Notas da versão
 
+## 3.0.0 — Fichário mais fácil de usar, valor mais claro e cópia diária (24/10/2026)
+
+Revisão completa do app a partir de duas revisões da 2.8.0 (a geral e a "de estúdio"), em fundações, telas e qualidade.
+
+### Fichário
+- **Topo compacto e fixo**: menu, nome do fichário ⌄ com o progresso ("48 de 1.025 Pokémon"), busca e ajustes, com uma linha de progresso. A barra usa a **cor da capa** do fichário e ocupa bem menos altura, então a página sobe.
+- **Botão "+ Carta"** (flutuante no celular, na barra no computador): abre o novo fluxo de adicionar.
+- **Cada fichário lembra a página** em que você parou. Toque em "Pág. N de M" para **ir direto a uma página**, com o quanto cada uma está cheia. "Vazio" virou **"Próxima falta"**, e a linha embaixo mostra "#241–#260 · 15/20" ou "completa ✓".
+- **Régua de regiões** no Pokédex ("Kanto 31/151", ✓ quando completa): acompanha a página e leva à região com um toque.
+- **Busca ao vivo** enquanto você digita, sem depender de acento, apóstrofo ou hífen ("farfetchd", "mr mime"): Pokémon (tenho/falta, valor e página), cartas deste fichário, bolso pelo número (inclusive vazio), outros fichários, "Procurar em toda a coleção" e "Adicionar carta de …". O destaque fica enquanto há texto na busca, e Enter de novo vai para o próximo resultado.
+- **Folha com cara de página de fichário**: furos na lombada, bolsos como capas plásticas. A **borda amarela fica só nas especiais de verdade** (1ª edição, Shadowless, Poké/Master Ball, promo com selo, staff, raras altas), e só depois que a imagem aparece; holo e reverse ganham uma marca no canto (✦ / R). O preço do bolso é neutro, com ≈ (aproximado) ou ✎ (Meu valor).
+- **Folhear acompanha o dedo** e a carta recém-colocada entra com um pequeno salto (sem animação com "reduzir movimento").
+- Bolso vazio do Pokédex com o número, o Pokémon maior e o nome. No celular, **toque longo num bolso** mostra uma prévia da carta.
+- **Cartas fora do fichário** na configuração atual (faixa, espaços por Pokémon ou tamanho menores) não somem mais em silêncio: "N cartas fora do fichário nesta configuração · Ver" lista cada uma com o motivo. Elas continuam salvas e no valor. Ao salvar uma configuração que muda cartas de lugar no fichário físico, o app avisa quantas mudam e pede confirmação, e mostra quantos fichários físicos o Pokédex ocupa ("Cabe em 2 fichários de 40 folhas").
+- Valor do topo: **"Valor deste fichário"**, a linha de créditos ("Preços: MYP Cards ↗ · TCGplayer ↗ · Meu valor") e, com conta, a variação de 7 dias. Saiu a linha mín · méd · máx.
+- Enquanto a coleção carrega, aparece a página em esboço, e as miniaturas das páginas vizinhas já vêm baixadas.
+
+### Carta
+- **Corrigido**: trocar uma carta por outra podia gravar na nova o estado, as observações e o "Meu valor" da antiga.
+- **Trocar pela mesma carta em outro idioma ou com selo** agora funciona. A tela avisa "Vai substituir X", oferece "Manter estado, origem e observações" e "Mover a antiga para…".
+- **"Mover para…"**: outro fichário, outro bolso ou os espaços do Pokémon no Pokédex, com a posição física; se o bolso estiver ocupado, as duas cartas trocam de lugar.
+- **Toast com "Desfazer"** ao colocar, trocar, mover e remover. Remover não pede mais confirmação: o Desfazer traz a carta de volta com tudo.
+- **"Meu valor" e "Valor pago" lidos como no Brasil**: "1.500" e "1500" viram R$ 1.500,00 (antes, "1.500" virava R$ 1,50), e a tela mostra "= R$ 1.500,00". Texto inválido mostra o erro e não apaga o valor salvo.
+- **Quadro de preço mais curto**: os nomes verdadeiros de cada preço (MYP: menor anúncio, média dos anúncios, maior anúncio; TCGplayer: menor anúncio, mercado, mediana), "Usar na soma", "≈ Aproximado" só quando vale, um link por loja e os detalhes da cotação recolhidos. O ⓘ abre "Como calculamos o valor".
+- Carta em inglês com o preço dos EUA longe dos anúncios daqui: um aviso mostra a faixa do MYP Cards e oferece "✎ Usar meu valor". "✎ Definir meu valor" leva direto ao campo.
+- "Meu valor" trocado em segundo plano (o mercado passou dele) não volta mais na próxima edição, e a tela avisa.
+- **Histórico do preço** de cada carta, com gráfico quando há dois dias ou mais.
+- **"Qual é a sua versão?"** mostra também as versões com selo do catálogo, cada uma com a foto oficial.
+- **Posição física de verdade**: "Fichário 2 · folha 5 (frente) · bolso 8" quando o Pokédex ocupa mais de um fichário. "Ver no fichário" abre a página e destaca o bolso.
+- **No celular**, a imagem fica ao lado do nome e o Estado perto do topo; Trocar, Mover e Remover ficam no menu ⋯. Carta nova mostra só Estado e Variação, com "Mais detalhes (opcional)".
+- "Você já tem esta carta" agora separa as versões: outro selo, reverse ou holo aparecem como "outra versão".
+- Carta nova cuja ficha não carrega: mensagem própria e "Tentar de novo".
+- Textos corrigidos ("Existe 1 versão", "bolso extra", "Mais variações") e nenhum erro técnico na tela.
+
+### Coleção e valores
+- **Um nome para cada valor**: "Valor da carta", "Valor deste fichário", "Valor da coleção · N fichários", "Usar na soma", com a mesma regra e os mesmos textos em todas as telas.
+- **Minha coleção**: cartão de valor em grafite (sem vermelho sobre vermelho), total sem centavos e, com menos destaque, "Se cada carta saísse pelo menor anúncio … · pela média …". A soma dos maiores anúncios foi para "Como calculamos", com o aviso de que não é preço de venda.
+- **"Como calculamos o valor"** numa folha que abre pelo ⓘ, no lugar dos parágrafos espalhados pelas telas.
+- **Variação do período só com as mesmas cartas** nos dois dias: carta nova, removida ou trocada aparece à parte ("+3 cartas novas · −1 removida") e não conta como alta ou queda.
+- Gráfico com a linha do valor em tinta neutra e um resumo para leitor de tela. O total de cada dia vem somado do servidor (o gráfico abre mais rápido).
+- **Mais valiosas** com miniatura, a base do valor ("pelo menor anúncio", "✎ Meu valor") e a participação de cada carta no total; "Ver as 20 mais valiosas".
+- **Maiores altas e quedas** do período e **Compras**: quanto você pagou × quanto as cartas compradas valem hoje.
+- Aviso quando o mercado passa de um "Meu valor" que você digitou.
+- **A foto diária** guarda só as cartas com preço, e as cartas em inglês entram com o preço da TCGplayer do dia mesmo sem o app aberto. A TCGplayer vale só para cartas em inglês, também no histórico.
+- "Atualizado em" virou a idade dos preços ("Preços de 15/10 a 22/10 · 3 cartas com preço de mais de 7 dias").
+- **MYP Cards**: as cartas não encontradas antes e as promos de coleções de promos (SWSH, DP, HGSS…) são buscadas de novo, também pelo número sem a letra. As cartas em inglês que já têm preço da TCGplayer vão para o fim da fila.
+- Nova tela **"Sobre e fontes"**: como calculamos, fontes e créditos com link, estado do servidor (última atualização do catálogo, falhas nas últimas 24 h, data dos preços e do câmbio) e a versão do app.
+
+### Busca, adicionar e listas
+- **"+ Carta"**: busque, toque na carta e escolha a versão, o estado e **onde colocar**, com sugestões prontas (o fichário aberto, o espaço vazio do Pokémon no Pokédex, o primeiro bolso livre de cada fichário, o bolso extra). "Colocar" salva na hora, com "Desfazer", e a tela segue pronta para a próxima ("N cartas adicionadas · Concluir").
+- **Adicionar por código**: "MEG 133", "133/132 MEG", "SIT 186", "swsh12-186"…
+- **Busca sem acento e sem apóstrofo** ("pocao", "farfetchd", "flabebe", "nidoran♀") e **por nome e número** ("Gengar TG06", "Charizard 4/102"). Os avisos dizem o que aconteceu: "Nenhuma carta com o nº X; mostrando todas", "As 1.200 mais recentes, refine a busca" (antes, cortava em 300 sem avisar).
+- **Lista de cartas agrupada por coleção**, com ordem (Mais novas, Mais antigas, Nº), atalhos por série e filtro por nome, coleção, selo e número. A grade usa de 3 a 8 colunas conforme a largura.
+- A lista de um Pokémon aparece antes e as versões com selo chegam logo depois. Quando uma fonte não responde, o app avisa e oferece "Buscar de novo" (antes, guardava a lista incompleta por 24 h).
+- O selo "tenho" na lista considera a versão.
+- **Buscar na coleção**: em todos os fichários, sem internet, por nome, coleção, selo, variação ou número, com a posição física de cada carta.
+- **Listas "Preciso" e "Tenho repetida"**, prontas para mandar no WhatsApp ou copiar. Sem preço por padrão; com "Mostrar preços", a lista leva a atribuição ao MYP Cards e à TCGplayer.
+
+### Sincronização e backup
+- **Carta removida não volta mais** pela sincronização de outro aparelho: a remoção fica registrada no servidor e chega a todos os aparelhos.
+- **Sincronização incremental**: depois da primeira, só o que mudou vai e vem.
+- **Gravar um preço não conta mais como edição**: um preço não passa por cima de uma edição ou remoção ainda não enviada, e um aparelho atrasado não desfaz um preço mais novo.
+- **Aparelho novo não apaga mais a nuvem**: na primeira sincronização, vale a configuração da nuvem, e os fichários livres dos dois lados são juntados.
+- **A coleção no aparelho ficou mais segura**: uma carta por chave (cada mudança grava só a carta que mudou); uma falha de leitura não apaga mais nada, e dado ilegível é guardado à parte.
+- **Estado da sincronização em português**, no menu e na conta: salvo só neste aparelho, sincronizando, sem conexão · N aguardando, erro, sincronizado em… Uma falha é tentada de novo sozinha (30 s, 2 min e depois a cada 10 min).
+- **Cópia da coleção**: exporte em JSON ou em planilha (CSV, sem preços por padrão) e importe de volta (na web, pelo arquivo; no celular, colando o texto). Funciona também sem conta.
+- **Cópia diária automática no servidor**, às 00:20, guardada por 14 dias.
+- Primeira abertura: sem a seta de voltar que não levava a lugar nenhum e com **"Já uso em outro aparelho · Entrar"**, que traz o fichário da nuvem.
+- Campos antigos das fontes que saíram foram tirados das cartas (cada carta ficou bem menor).
+
+### Catálogo
+- **Mais cartas ligadas à TCGdex**: Nidoran ♀/♂, Unown, Gold Star (☆), Prism Star (◇), promos SWSH e DP e cartas dos kits de treinador. Nomes quebrados do catálogo foram corrigidos (ex.: "Deoxys (Delta Species" → "Deoxys").
+- **Cartas do Zukan não aparecem mais em dobro** com a versão "só do catálogo".
+- A foto do catálogo fica salva na carta, e as imagens reserva vêm em tamanho de miniatura. A versão com selo usa a foto conhecida sem buscar de novo.
+- Listas e fichas ficam guardadas no aparelho com validade, e a limpeza tira só o que é grande quando o armazenamento enche.
+- **Registro de cada atualização do catálogo** no servidor (a cada 10 min), visível em "Sobre e fontes".
+
+### Visual e acessibilidade
+- **Cada cor com um significado só**: dinheiro em tinta neutra, amarelo só para especiais, seleção em grafite, ciano para destaque e foco, verde e vermelho só para alta e queda.
+- **Contraste AA** nos textos claros, bordas de campo visíveis e texto escuro nas capas claras (laranja, amarelo, verde, turquesa, rosa e cinza).
+- Escala de tipografia e de espaçamento; números com algarismos tabulares; nada abaixo de 10 px nos bolsos, nem cortado com a fonte do sistema em 130%.
+- Alvos de toque de 44 px; chips, segmentos e interruptores dizem ao leitor de tela se estão marcados.
+- **Leitores de tela**: o bolso diz nome, coleção, variação, estado, preço e "destacado"; troca de página, resultados da busca e avisos são anunciados; o custo de ataque é lido ("Custo: Fogo e Incolor").
+- **Esboços no lugar do carregando** nas listas de cartas e na página do fichário.
+- Poké Ball desenhada em SVG, no lugar do ícone da fonte MaterialCommunityIcons.
+- Erro numa tela mostra uma tela amigável com "Tentar de novo" e "Voltar ao fichário", em vez do app quebrado.
+
+### Computador e web
+- **Home no computador**: uma barra só (busca no meio, "+ Carta"), a página cabe na altura da janela e um painel lateral mostra valor, créditos, variação, avisos, regiões e atalhos. A partir de ~1280 px, fichários frente e verso abrem duas páginas, com "Faltam N Pokémon" na capa.
+- **Teclado**: ←/→ e PgUp/PgDn folheiam, Home/End, "/" busca, F vai para a próxima falta, Esc limpa. Foco visível e hover em bolsos, botões e sugestões.
+- **Tudo tem URL**: o fichário e a página ficam no endereço (recarregar volta ao mesmo lugar), e os bolsos são links de verdade (Ctrl+clique abre em outra aba).
+- **Carta no computador**: sem a faixa vermelha vazia, a imagem fica parada à esquerda enquanto a direita rola; a partir de 1280 px, "Valor da carta" e "Minha carta" lado a lado.
+- **Minha coleção no computador** em colunas: valor ao lado do gráfico, números da coleção, vitrine das mais valiosas com as artes e os ajustes à direita.
+- Links externos abrem numa aba nova, pelo teclado também. O título da aba diz onde você está ("Charizard · Fichário Pokédex"), a página é marcada como português e o voltar é anunciado "Voltar".
+
+### Bastidores
+- **Testes automatizados** (Jest, com o `jest-expo`) da lógica pura, com `npm test`; `npm run typecheck` e `npm run lint` conferem o resto. O GitHub roda tudo isso a cada envio (`.github/workflows/ci.yml`), mais uma varredura de segredos (gitleaks).
+- `supabase/schema.sql` é o retrato completo do banco e pode rodar mais de uma vez; as mudanças de banco ficam em `supabase/migrations/`.
+- Regras fixas do projeto em `AGENTS.md`, mapa para quem chega em `docs/arquitetura.md` e o sistema visual em `docs/design.md`.
+- No servidor ficaram só as Edge Functions em uso (`catalog-sync` e `stamp-image`). As tabelas das fontes que saíram foram guardadas no schema `backup`, fora da API, e o histórico do pg_cron e os registros de remoção são limpos todo dia.
+- Trocar uma carta pela mesma em outro idioma não herda mais o preço da antiga.
+- Formatação de dinheiro e datas num lugar só (`src/lib/format.ts`) e os textos do valor em `src/lib/copy.ts`. A coleção é lida por assunto (cartas, fichários, configuração, sincronização), então gravar um preço não redesenha mais a página do fichário.
+- Versão 3.0.0 no app; pacotes sem uso removidos e as dependências do Expo atualizadas.
+
 ## 2.8.0 — Cartas em inglês pelo preço da TCGplayer (23/10/2026)
 
 - **Cartas em inglês valem pelo preço da TCGplayer (EUA)**, o principal mercado de cartas em inglês, em reais pela **PTAX do Banco Central**: mínimo = menor anúncio, média = valor de mercado (vendas recentes), máximo = mediana dos anúncios. A escolha de mínimo/média/máximo de cada carta continua valendo. O MYP aparece como referência (ele mistura todos os idiomas).

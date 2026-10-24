@@ -14,6 +14,7 @@ import {
   searchMypByName,
 } from '@/lib/myp-api';
 import type { MypProduct } from '@/lib/myp-match';
+import { tcgplayerFor } from '@/lib/tcgplayer';
 import type { Entry } from '@/lib/types';
 import { useCollection } from '@/store/collection';
 
@@ -24,6 +25,13 @@ const RETRY_MS = 60 * 60_000;
 const MAX_FAILS = 3;
 /** Resultado de uma busca por nome reaproveitado pelas outras cartas com o mesmo nome. */
 const SEARCH_CACHE_MS = 30 * 60_000;
+/**
+ * Renovação que não acha uma carta já encontrada (pode ser uma falha passageira do MYP): o preço achado fica, e a carta
+ * tenta de novo mais tarde; só vira "não encontrada" quando esse preço passa de 30 dias.
+ */
+const KEEP_FOUND_MS = 30 * 24 * 60 * 60_000;
+/** Soma na ordem da fila das cartas em inglês com preço da TCGplayer (passa de qualquer data em milissegundos). */
+const AFTER_MYP = 1e15;
 
 /** Carta, versão e selo: uma busca serve todos os bolsos com a mesma carta (a API não separa idioma). */
 const groupKey = (e: Entry) => `${e.cardId}|${e.variant}|${mypApiNote(e)}`;
@@ -31,7 +39,8 @@ const groupKey = (e: Entry) => `${e.cardId}|${e.variant}|${mypApiNote(e)}`;
 /**
  * Busca, em segundo plano, o mínimo/média/máximo das cartas da coleção na API pública do MYP Cards: cartas novas e
  * alteradas primeiro, depois as que passaram de 7 dias, no máximo uma consulta a cada 6,5 s (sem token, o limite é 10
- * por minuto). Roda só no app do celular: sem token, a API não atende o servidor (403) nem o navegador (sem CORS).
+ * por minuto). Cartas em inglês que já têm preço da TCGplayer (o MYP é só referência nelas) vão depois das que dependem
+ * do MYP. Roda só no app do celular: sem token, a API não atende o servidor (403) nem o navegador (sem CORS).
  * Com conta, começa depois da primeira sincronização, e cada preço é gravado no banco mesclado sobre a carta atual
  * (applyMypPrice), onde também vale a regra do "Meu valor".
  */
@@ -118,16 +127,32 @@ export function MypRefresher() {
           continue;
         }
         // Carta aberta na tela primeiro; depois as nunca buscadas (ou de outra carta/versão/selo); depois a busca
-        // mais antiga.
-        const order = (e: Entry) =>
-          urgent.has(e.id) ? -1 : e.mypApi && mypApiMatches(e, e.mypApi) ? new Date(e.mypApi.checkedAt).getTime() : 0;
+        // mais antiga. Carta em inglês com preço da TCGplayer vai depois de todas as que dependem do MYP.
+        const order = (e: Entry) => {
+          if (urgent.has(e.id)) return -1;
+          const last = e.mypApi && mypApiMatches(e, e.mypApi) ? new Date(e.mypApi.checkedAt).getTime() : 0;
+          // Entre elas, a mesma ordem (nunca buscada, depois a busca mais antiga).
+          return e.lang === 'en' && tcgplayerFor(e)?.avg != null ? AFTER_MYP + last : last;
+        };
         due.sort((a, b) => order(a) - order(b));
         const key = groupKey(due[0]);
         const group = due.filter((e) => groupKey(e) === key);
         for (const e of group) urgent.delete(e.id);
+        // A busca serve o grupo todo; pela cópia em português, que também traz a foto em português do MYP.
+        const target = group.find((e) => e.lang === 'pt') ?? group[0];
         try {
-          const price = await fetchMypPrice(group[0], consult, consultCode);
+          const price = await fetchMypPrice(target, consult, consultCode);
           if (!alive) break;
+          // Renovação que não achou uma carta já encontrada: fica o preço achado (ver KEEP_FOUND_MS).
+          const priced = (e: Entry) => !!e.mypApi && mypApiMatches(e, e.mypApi) && e.mypApi.avg != null;
+          const found = group.find(priced)?.mypApi;
+          if (price.notFound && found && Date.now() - new Date(found.checkedAt).getTime() < KEEP_FOUND_MS) {
+            // As cópias do grupo ainda sem preço ficam com o achado (a busca serve o grupo todo), em vez de esperar.
+            for (const e of group) if (!priced(e)) await applyRef.current(e.id, found);
+            const f = failures.get(key);
+            failures.set(key, { count: (f?.count ?? 0) + 1, until: Date.now() + RETRY_MS });
+            continue;
+          }
           for (const e of group) await applyRef.current(e.id, price);
           // Preço que não ficou gravado (ex.: carta que ainda não chegou ao banco): espera como uma falha, para a
           // busca guardada por nome não virar um laço sem pausa.

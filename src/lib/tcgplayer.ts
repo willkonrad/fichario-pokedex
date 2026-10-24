@@ -1,6 +1,6 @@
 import { catalogByTcgdexIds, catalogProduct, stampVariant, type CatalogRow } from './catalog';
 import { supabase } from './supabase';
-import type { Entry, TcgplayerPrice, Variant } from './types';
+import type { Entry, TcgplayerPrice, ValueBasis, Variant } from './types';
 
 /**
  * Preço das cartas em inglês pela TCGplayer (EUA), o principal mercado de cartas em inglês. O servidor copia 1×/dia
@@ -8,7 +8,8 @@ import type { Entry, TcgplayerPrice, Variant } from './types';
  * US$) e a PTAX do dólar (fx_rates); o app só lê essas tabelas — nunca chama o TCGCSV — e grava o resultado na carta.
  *
  * Em reais, pela PTAX: mínimo = menor anúncio, média = valor de mercado (vendas recentes), máximo = mediana dos
- * anúncios. Todos os estados juntos (a TCGplayer não separa por produto). Carta sem vendas recentes fica sem preço
+ * anúncios (a faixa sempre contém o mercado; ver tcgplayerColumns). Todos os estados juntos (a TCGplayer não separa
+ * por produto). Carta sem vendas recentes fica sem preço
  * (o app não estima).
  */
 
@@ -42,6 +43,19 @@ export function tcgplayerDue(e: Entry, latestBuild: string | undefined, now: num
   if (!s.builtAt) return age > HOUR;
   if (latestBuild) return s.builtAt < latestBuild && age > HOUR;
   return age > 24 * HOUR;
+}
+
+/**
+ * Colunas da faixa da TCGplayer que têm preço próprio. A faixa sempre contém o mercado (mínimo ≤ média ≤ máximo, aqui,
+ * no servidor e no histórico): com a mediana abaixo do mercado (ou sem mediana), o "máximo" é o próprio mercado, e com
+ * o menor anúncio acima dele (ou sem menor anúncio), o "mínimo" também. Essas colunas ficam de fora, para não mostrar o
+ * mercado com o nome de mediana ou de menor anúncio. Sem os valores em dólar (preço antigo), vale a faixa em reais.
+ */
+export function tcgplayerColumns(p: Pick<TcgplayerPrice, 'usdLow' | 'usdMid' | 'usdMarket' | 'min' | 'avg' | 'max'>): ValueBasis[] {
+  const m = p.usdMarket;
+  const low = m != null && p.usdLow != null ? p.usdLow <= m : p.min != null && p.avg != null && p.avg - p.min >= 0.005;
+  const mid = m != null && p.usdMid != null ? p.usdMid >= m : p.max != null && p.avg != null && p.max - p.avg >= 0.005;
+  return [...(low ? (['min'] as const) : []), 'avg', ...(mid ? (['max'] as const) : [])];
 }
 
 /** Motivo de não ter preço, sem repetir o nome da loja (para frases que já dizem "na TCGplayer"). */
@@ -95,7 +109,7 @@ const SUBTYPES: Partial<Record<Variant, string[]>> = {
  *   - as outras: o produto comum (sem selo), fora da coleção "(Shadowless)".
  * Cartas gigantes (Jumbo) nunca entram.
  */
-function pickProduct(e: Entry, rows: CatalogRow[]): { row: CatalogRow; base: boolean } | undefined {
+export function pickProduct(e: Entry, rows: CatalogRow[]): { row: CatalogRow; base: boolean } | undefined {
   const usable = rows.filter((r) => !/jumbo|oversize/i.test(r.stamp ?? ''));
   const shadowless = (r: CatalogRow) => /shadowless/i.test(r.tcg_groups?.name ?? '');
   const plain = usable.filter((r) => !r.stamp);
@@ -136,10 +150,10 @@ function pickProduct(e: Entry, rows: CatalogRow[]): { row: CatalogRow; base: boo
   }
 }
 
-type PriceRow = { product_id: number; sub_type: string; low: number | null; mid: number | null; market: number | null; built_at: string };
+export type PriceRow = { product_id: number; sub_type: string; low: number | null; mid: number | null; market: number | null; built_at: string };
 
 /** Impressão do produto que vale para a variação da carta: a única, ou a da variação (nunca a de outra impressão). */
-function pickSubType(e: Entry, rows: PriceRow[], base: boolean) {
+export function pickSubType(e: Entry, rows: PriceRow[], base: boolean) {
   if (rows.length === 1) return rows[0];
   const want = base || !SUBTYPES[e.variant] ? ['Holofoil', 'Normal'] : SUBTYPES[e.variant]!;
   for (const name of want) {

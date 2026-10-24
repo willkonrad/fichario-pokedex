@@ -157,8 +157,6 @@ export type Entry = {
    * `source` diz qual fonte foi (ausente = MYP, como nas versões anteriores à 2.8.0).
    */
   myValueReplaced?: { value: number; mypValue: number; at: string; source?: 'myp' | 'tcgplayer' };
-  /** Imagem reserva salva por versões antigas do app (de quando os preços vinham da Liga). */
-  ligaImage?: string;
   /** Busca exata da carta na Liga ("Nome (número/total)"), gravada por versões antigas; usada no link "Ver na Liga". */
   ligaQuery?: string;
   updatedAt: string;
@@ -181,6 +179,11 @@ export type BinderSettings = {
   dexTo?: number;
   /** Fichários livres (não Pokédex). */
   extras?: CustomBinder[];
+  /**
+   * Fichários livres apagados (id → quando), para a remoção chegar aos outros aparelhos. Mantido pelo store (lembrado
+   * por 1 ano); as telas não mexem.
+   */
+  removedBinders?: Record<string, string>;
   /** Última alteração (para a sincronização saber qual versão é a mais nova). */
   updatedAt?: string;
 };
@@ -227,6 +230,8 @@ export type CustomBinder = {
   /** Idioma inicial da busca de cartas. */
   searchLang: CardLang;
   createdAt: string;
+  /** Última alteração, gravada pelo store (os aparelhos juntam fichário por fichário: vence a mais recente). */
+  updatedAt?: string;
 };
 
 export const DEFAULT_CUSTOM_BINDER: Omit<CustomBinder, 'id' | 'createdAt'> = {

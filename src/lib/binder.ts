@@ -1,6 +1,6 @@
 import { TOTAL_SPECIES } from '@/data/pokedex';
 
-import type { BinderSettings, CustomBinder } from './types';
+import type { BinderSettings, CustomBinder, Entry } from './types';
 
 export type SlotRef = { dex: number; slot: number; index: number };
 
@@ -80,13 +80,188 @@ export function indexOfExtra(s: BinderSettings, k: number) {
   return totalSlots(s) + k;
 }
 
-/** Posição física: folha, frente/verso e bolso — útil para achar a carta no fichário. */
-export function physicalPosition(s: Grid, index: number) {
+/** Posição (índice corrido) de uma carta do fichário Pokédex: espaço do Pokémon ou bolso livre (`dex` 0). */
+export function indexOfEntry(s: BinderSettings, e: Pick<Entry, 'dex' | 'slot'>) {
+  return e.dex === 0 ? indexOfExtra(s, e.slot) : indexOfDex(s, e.dex, e.slot);
+}
+
+// ---------- Cartas fora do fichário (F2) ----------
+
+/**
+ * A carta do fichário Pokédex aparece na configuração atual? Fica de fora (continua salva e somada, mas sem bolso)
+ * quando o Pokémon saiu da faixa, quando o espaço passou de "Espaços por Pokémon" ou quando sobraram menos bolsos
+ * livres na última página.
+ */
+export function isPlaced(s: BinderSettings, e: Pick<Entry, 'dex' | 'slot'>) {
+  if (e.slot < 0) return false;
+  if (e.dex === 0) return e.slot < extraSlots(s);
+  return inDexRange(s, e.dex) && e.slot < s.slotsPerPokemon;
+}
+
+/** A carta do fichário livre cabe nas páginas dele (diminuir as páginas deixa as do fim de fora). */
+export function isPlacedCustom(b: CustomBinder, e: Pick<Entry, 'slot'>) {
+  return e.slot >= 0 && e.slot < customTotalSlots(b);
+}
+
+// ---------- Regiões (régua da home) ----------
+
+/** Regiões da Pokédex nacional, na ordem dos jogos. */
+export const REGIONS = [
+  { id: 'kanto', label: 'Kanto', from: 1, to: 151 },
+  { id: 'johto', label: 'Johto', from: 152, to: 251 },
+  { id: 'hoenn', label: 'Hoenn', from: 252, to: 386 },
+  { id: 'sinnoh', label: 'Sinnoh', from: 387, to: 493 },
+  { id: 'unova', label: 'Unova', from: 494, to: 649 },
+  { id: 'kalos', label: 'Kalos', from: 650, to: 721 },
+  { id: 'alola', label: 'Alola', from: 722, to: 809 },
+  { id: 'galar', label: 'Galar', from: 810, to: 905 },
+  { id: 'paldea', label: 'Paldea', from: 906, to: TOTAL_SPECIES },
+] as const;
+
+export type Region = { id: string; label: string; from: number; to: number; count: number };
+
+/** Regiões que o fichário Pokédex cobre, cortadas na faixa dele (ex.: #100–#200 → Kanto 100–151 e Johto 152–200). */
+export function regionsIn(s: BinderSettings): Region[] {
+  const { from, to } = dexRange(s);
+  return REGIONS.filter((r) => r.to >= from && r.from <= to).map((r) => {
+    const a = Math.max(r.from, from);
+    const b = Math.min(r.to, to);
+    return { id: r.id, label: r.label, from: a, to: b, count: b - a + 1 };
+  });
+}
+
+/** Região de um Pokémon (pelo número). */
+export function regionOf(dex: number) {
+  return REGIONS.find((r) => dex >= r.from && dex <= r.to);
+}
+
+// ---------- Posição física (folha, frente/verso, bolso e volume) ----------
+
+export type PhysicalPosition = {
+  page: number;
+  sheet: number;
+  side: 'frente' | 'verso' | null;
+  pocket: number;
+  /**
+   * Com as folhas do fichário físico informadas (`sheets`): em qual fichário físico a página cai (1, 2…) e a folha
+   * dentro dele. A Pokédex completa em 3×3 frente e verso precisa de 57 folhas, mais que um fichário de 40.
+   */
+  volume?: number;
+  volumeSheet?: number;
+};
+
+/** Posição física: folha, frente/verso e bolso (e o volume, com `sheets`) — útil para achar a carta no fichário. */
+export function physicalPosition(s: Grid & { sheets?: number }, index: number): PhysicalPosition {
   const size = pageSize(s);
   const page = Math.floor(index / size);
   const pocket = (index % size) + 1;
-  if (!s.doubleSided) return { page: page + 1, sheet: page + 1, side: null, pocket };
-  return { page: page + 1, sheet: Math.floor(page / 2) + 1, side: page % 2 === 0 ? 'frente' : 'verso', pocket };
+  const sheet = s.doubleSided ? Math.floor(page / 2) + 1 : page + 1;
+  const side = s.doubleSided ? (page % 2 === 0 ? 'frente' : 'verso') : null;
+  const pos: PhysicalPosition = { page: page + 1, sheet, side, pocket };
+  if (s.sheets && s.sheets > 0) {
+    pos.volume = Math.floor((sheet - 1) / s.sheets) + 1;
+    pos.volumeSheet = ((sheet - 1) % s.sheets) + 1;
+  }
+  return pos;
+}
+
+/** Folhas que o fichário Pokédex ocupa (com os bolsos livres da última página). */
+export function sheetsNeeded(s: BinderSettings) {
+  return Math.ceil(totalPages(s) / (s.doubleSided ? 2 : 1));
+}
+
+/** Quantos fichários físicos a Pokédex ocupa, com as folhas informadas (1 sem elas). */
+export function volumesNeeded(s: BinderSettings) {
+  return s.sheets && s.sheets > 0 ? Math.max(1, Math.ceil(sheetsNeeded(s) / s.sheets)) : 1;
+}
+
+/** Para o setup: "Cabe em 2 fichários de 40 folhas" (só quando passa de um). */
+export function volumesText(s: BinderSettings) {
+  const n = volumesNeeded(s);
+  return n > 1 && s.sheets ? `Cabe em ${n} fichários de ${s.sheets} folhas` : undefined;
+}
+
+/**
+ * Posição física em texto: "Pág. 3 · folha 2 (frente) · bolso 4" e, quando a Pokédex ocupa mais de um fichário físico
+ * (`volumes` > 1), "Fichário 2 · folha 5 (frente) · bolso 8".
+ */
+export function physicalLabel(pos: PhysicalPosition, volumes = 1) {
+  if (volumes > 1 && pos.volume != null) {
+    return `Fichário ${pos.volume} · folha ${pos.volumeSheet}${pos.side ? ` (${pos.side})` : ''} · bolso ${pos.pocket}`;
+  }
+  return `Pág. ${pos.page}${pos.side ? ` · folha ${pos.sheet} (${pos.side})` : ''} · bolso ${pos.pocket}`;
+}
+
+/**
+ * "pág. 2, bolso 5": a página e o bolso dentro dela (`index` corrido, a partir de 0). "Bolso" é sempre a posição na
+ * página, a física (como na tela da carta, no "+ Carta" e na busca na coleção).
+ */
+export function pagePocketText(s: Pick<Grid, 'rows' | 'cols'>, index: number) {
+  const size = pageSize(s);
+  return `pág. ${Math.floor(index / size) + 1}, bolso ${(index % size) + 1}`;
+}
+
+/**
+ * Bolso do fichário livre em texto: "pág. 2, bolso 5 · nº 25". O "nº" é o número corrido do bolso no fichário (o que
+ * aparece no bolso, a busca da home procura e o "Mover para…" pede), para não se confundir com o bolso da página.
+ */
+export function customPlaceText(b: Pick<Grid, 'rows' | 'cols'>, slot: number) {
+  return `${pagePocketText(b, slot)} · nº ${slot + 1}`;
+}
+
+/**
+ * Mesmo lugar no fichário físico: mesma folha, lado e bolso (folha só de frente = o lado da frente). O volume só conta
+ * quando as duas configurações informam as folhas.
+ */
+const samePlace = (a: PhysicalPosition, b: PhysicalPosition) =>
+  a.sheet === b.sheet &&
+  (a.side ?? 'frente') === (b.side ?? 'frente') &&
+  a.pocket === b.pocket &&
+  (a.volume == null || b.volume == null || (a.volume === b.volume && a.volumeSheet === b.volumeSheet));
+
+/**
+ * Quantas cartas do fichário Pokédex mudam de lugar no fichário físico (página ou bolso; ou de volume, com as folhas)
+ * ao trocar a configuração `before` por `after`, quantas ficam de fora por causa da troca (`hidden`) e quantas que
+ * estavam fora voltam a ter bolso (`shown`) (F7: o setup avisa antes de salvar). As que já estavam fora e continuam fora
+ * não entram em nenhuma conta.
+ */
+export function physicalMoves(before: BinderSettings, after: BinderSettings, entries: Pick<Entry, 'binderId' | 'dex' | 'slot'>[]) {
+  let moved = 0;
+  let hidden = 0;
+  let shown = 0;
+  for (const e of entries) {
+    if (e.binderId) continue;
+    if (!isPlaced(before, e)) {
+      if (isPlaced(after, e)) shown++;
+      continue;
+    }
+    if (!isPlaced(after, e)) {
+      hidden++;
+      continue;
+    }
+    if (!samePlace(physicalPosition(before, indexOfEntry(before, e)), physicalPosition(after, indexOfEntry(after, e)))) moved++;
+  }
+  return { moved, hidden, shown };
+}
+
+/** O mesmo para um fichário livre (grade, frente e verso ou páginas): cartas que mudam de lugar, saem e voltam. */
+export function customPhysicalMoves(before: CustomBinder, after: CustomBinder, entries: Pick<Entry, 'binderId' | 'slot'>[]) {
+  let moved = 0;
+  let hidden = 0;
+  let shown = 0;
+  for (const e of entries) {
+    if (e.binderId !== before.id) continue;
+    if (!isPlacedCustom(before, e)) {
+      if (isPlacedCustom(after, e)) shown++;
+      continue;
+    }
+    if (!isPlacedCustom(after, e)) {
+      hidden++;
+      continue;
+    }
+    if (!samePlace(physicalPosition(before, e.slot), physicalPosition(after, e.slot))) moved++;
+  }
+  return { moved, hidden, shown };
 }
 
 // ---------- Fichários livres ----------

@@ -71,20 +71,27 @@ const plainName = (s?: string | null) =>
  * Sem o número exato: o número com uma letra no fim ("079a", como o MYP cadastra algumas promos) e, nas coleções
  * que o MYP numera de outro jeito (`byName`, ex.: as coleções clássicas, com o número da carta original), o único
  * produto da edição com o nome da carta.
+ * `abbr` e `localId` aceitam listas: siglas possíveis da edição (promos sem sigla na TCGdex) e jeitos de escrever o
+ * número ("SWSH001" ou "001"); vale qualquer combinação.
  */
 export function pickMypProduct(
   products: MypProduct[],
-  abbr: string,
-  localId: string,
+  abbr: string | string[],
+  localId: string | string[],
   variant: string,
   note = '',
   byName?: string[],
 ) {
-  const want = num(localId);
-  const ed = abbr.split(':')[0].trim().toLowerCase();
-  const edition = products.filter((p) => (p.edition_code ?? '').trim().toLowerCase() === ed);
-  let same = edition.filter((p) => parseMypCode(p.card_code).number === want);
-  if (!same.length) same = edition.filter((p) => /^(.+\d)[a-z]$/.exec(parseMypCode(p.card_code).number)?.[1] === want);
+  const wants = (Array.isArray(localId) ? localId : [localId]).map(num);
+  const eds = (Array.isArray(abbr) ? abbr : [abbr]).map((a) => a.split(':')[0].trim().toLowerCase());
+  const edition = products.filter((p) => eds.includes((p.edition_code ?? '').trim().toLowerCase()));
+  let same = edition.filter((p) => wants.includes(parseMypCode(p.card_code).number));
+  if (!same.length) {
+    same = edition.filter((p) => {
+      const base = /^(.+\d)[a-z]$/.exec(parseMypCode(p.card_code).number)?.[1];
+      return !!base && wants.includes(base);
+    });
+  }
   if (!same.length && byName?.length) {
     const names = byName.map(plainName);
     const hits = edition.filter((p) => !parseMypCode(p.card_code).version && names.includes(plainName(p.name_en)));

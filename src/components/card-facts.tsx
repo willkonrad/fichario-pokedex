@@ -1,9 +1,10 @@
+import type { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import type { CardDetail } from '@/lib/tcgdex';
-import { colors, radius } from '@/theme';
+import { colors, radius, space, typography } from '@/theme';
 
-/** Cor de cada tipo de energia (nomes em inglês e em português, como vêm da TCGdex). */
+/** Cor de cada tipo de energia (nomes em inglês e em português, como vêm da TCGdex). São cores do jogo, não da interface. */
 const ENERGY: Record<string, { color: string; pt: string }> = {
   fire: { color: '#E5484D', pt: 'Fogo' },
   water: { color: '#0090FF', pt: 'Água' },
@@ -17,9 +18,7 @@ const ENERGY: Record<string, { color: string; pt: string }> = {
   dragon: { color: '#B08D3A', pt: 'Dragão' },
   colorless: { color: '#C4C8D0', pt: 'Incolor' },
 };
-const PT_TO_EN: Record<string, string> = Object.fromEntries(
-  Object.entries(ENERGY).map(([en, v]) => [v.pt.toLowerCase(), en]),
-);
+const PT_TO_EN: Record<string, string> = Object.fromEntries(Object.entries(ENERGY).map(([en, v]) => [v.pt.toLowerCase(), en]));
 const energyKey = (t: string) => {
   const k = t.toLowerCase();
   return ENERGY[k] ? k : (PT_TO_EN[k] ?? (k === 'eletrico' ? 'lightning' : k === 'agua' ? 'water' : k));
@@ -29,18 +28,10 @@ const energyName = (t: string) => ENERGY[energyKey(t)]?.pt ?? t;
 const STAGE_PT: Record<string, string> = { basic: 'Básico', stage1: 'Estágio 1', stage2: 'Estágio 2' };
 const stageName = (s?: string) => (s ? (STAGE_PT[s.toLowerCase().replace(/\s/g, '')] ?? s) : undefined);
 
-/** Bolinha de energia (custo de ataque, fraqueza, recuo). */
+/** Bolinha de energia (custo de ataque, fraqueza, recuo). O nome vai no rótulo do grupo, para o leitor de tela. */
 function Energy({ type, size = 16 }: { type: string; size?: number }) {
   const e = ENERGY[energyKey(type)];
-  return (
-    <View
-      style={[
-        styles.energy,
-        { width: size, height: size, borderRadius: size / 2, backgroundColor: e?.color ?? colors.textFaint },
-      ]}
-      accessibilityLabel={energyName(type)}
-    />
-  );
+  return <View style={[styles.energy, { width: size, height: size, borderRadius: size / 2, backgroundColor: e?.color ?? colors.iconFaint }]} />;
 }
 
 /** Grade de atributos, no estilo das fichas de catálogo: rótulo pequeno em cima, valor embaixo. */
@@ -50,7 +41,7 @@ export function CardAttributes({ items }: { items: [string, string | number | un
   return (
     <View style={styles.grid}>
       {shown.map(([label, value]) => (
-        <View key={label} style={styles.attr}>
+        <View key={label} style={styles.attr} accessible accessibilityLabel={`${label}: ${value}`}>
           <Text style={styles.attrLabel}>{label}</Text>
           <Text style={styles.attrValue}>{value}</Text>
         </View>
@@ -73,6 +64,12 @@ export function cardAttributeItems(detail: CardDetail | null): [string, string |
   ];
 }
 
+/** "Fogo, Fogo e Incolor". */
+function energyList(types: string[]) {
+  const names = types.map(energyName);
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} e ${names[names.length - 1]}` : (names[0] ?? '');
+}
+
 /** Habilidades, ataques, fraqueza, resistência e recuo. */
 export function CardMoves({ detail }: { detail: CardDetail | null }) {
   if (!detail) return null;
@@ -81,14 +78,14 @@ export function CardMoves({ detail }: { detail: CardDetail | null }) {
   if (!abilities?.length && !attacks?.length && !hasStats) return null;
 
   return (
-    <View style={{ gap: 12 }}>
+    <View style={styles.moves}>
       {abilities?.length ? (
-        <View style={{ gap: 8 }}>
+        <View style={styles.group}>
           <Text style={styles.groupLabel}>Habilidades</Text>
           {abilities.map((a) => (
             <View key={a.name} style={styles.box}>
               <Text style={styles.boxTitle}>
-                {a.type ? <Text style={styles.boxKind}>{a.type.toUpperCase()}  </Text> : null}
+                {a.type ? <Text style={styles.boxKind}>{a.type.toUpperCase()} </Text> : null}
                 {a.name}
               </Text>
               {a.effect ? <Text style={styles.boxText}>{a.effect}</Text> : null}
@@ -98,18 +95,24 @@ export function CardMoves({ detail }: { detail: CardDetail | null }) {
       ) : null}
 
       {attacks?.length ? (
-        <View style={{ gap: 8 }}>
+        <View style={styles.group}>
           <Text style={styles.groupLabel}>Ataques</Text>
           {attacks.map((a) => (
             <View key={a.name} style={styles.box}>
               <View style={styles.attackHead}>
-                <View style={styles.cost}>
-                  {(a.cost ?? []).map((c, i) => (
-                    <Energy key={i} type={c} />
-                  ))}
-                </View>
-                <Text style={[styles.boxTitle, { flex: 1 }]}>{a.name}</Text>
-                {a.damage != null && a.damage !== '' ? <Text style={styles.damage}>{a.damage}</Text> : null}
+                {a.cost?.length ? (
+                  <View style={styles.cost} accessible accessibilityLabel={`Custo: ${energyList(a.cost)}`}>
+                    {a.cost.map((c, i) => (
+                      <Energy key={i} type={c} />
+                    ))}
+                  </View>
+                ) : null}
+                <Text style={[styles.boxTitle, styles.flex]}>{a.name}</Text>
+                {a.damage != null && a.damage !== '' ? (
+                  <Text style={styles.damage} accessibilityLabel={`Dano: ${a.damage}`}>
+                    {a.damage}
+                  </Text>
+                ) : null}
               </View>
               {a.effect ? <Text style={styles.boxText}>{a.effect}</Text> : null}
             </View>
@@ -119,27 +122,31 @@ export function CardMoves({ detail }: { detail: CardDetail | null }) {
 
       {hasStats ? (
         <View style={styles.stats}>
-          <Stat label="Fraqueza">
-            {weaknesses?.length
-              ? weaknesses.map((w) => (
-                  <View key={w.type} style={styles.statRow}>
-                    <Energy type={w.type} size={14} />
-                    <Text style={styles.statValue}>{w.value ?? ''}</Text>
-                  </View>
-                ))
-              : <Text style={styles.statValue}>—</Text>}
+          <Stat label="Fraqueza" spoken={weaknesses?.length ? weaknesses.map((w) => `${energyName(w.type)} ${w.value ?? ''}`.trim()).join(', ') : 'nenhuma'}>
+            {weaknesses?.length ? (
+              weaknesses.map((w) => (
+                <View key={w.type} style={styles.statRow}>
+                  <Energy type={w.type} size={14} />
+                  <Text style={styles.statValue}>{w.value ?? ''}</Text>
+                </View>
+              ))
+            ) : (
+              <Text style={styles.statValue}>—</Text>
+            )}
           </Stat>
-          <Stat label="Resistência">
-            {resistances?.length
-              ? resistances.map((r) => (
-                  <View key={r.type} style={styles.statRow}>
-                    <Energy type={r.type} size={14} />
-                    <Text style={styles.statValue}>{r.value ?? ''}</Text>
-                  </View>
-                ))
-              : <Text style={styles.statValue}>—</Text>}
+          <Stat label="Resistência" spoken={resistances?.length ? resistances.map((r) => `${energyName(r.type)} ${r.value ?? ''}`.trim()).join(', ') : 'nenhuma'}>
+            {resistances?.length ? (
+              resistances.map((r) => (
+                <View key={r.type} style={styles.statRow}>
+                  <Energy type={r.type} size={14} />
+                  <Text style={styles.statValue}>{r.value ?? ''}</Text>
+                </View>
+              ))
+            ) : (
+              <Text style={styles.statValue}>—</Text>
+            )}
           </Stat>
-          <Stat label="Recuo">
+          <Stat label="Recuo" spoken={retreat ? `${retreat} ${retreat === 1 ? 'energia' : 'energias'}` : retreat === 0 ? '0' : 'sem informação'}>
             {retreat ? (
               <View style={styles.statRow}>
                 {Array.from({ length: retreat }, (_, i) => (
@@ -156,34 +163,39 @@ export function CardMoves({ detail }: { detail: CardDetail | null }) {
   );
 }
 
-function Stat({ label, children }: { label: string; children: React.ReactNode }) {
+function Stat({ label, spoken, children }: { label: string; spoken: string; children: ReactNode }) {
   return (
-    <View style={styles.stat}>
-      <Text style={[styles.attrLabel, styles.statLabel]} numberOfLines={1} adjustsFontSizeToFit>
+    <View style={styles.stat} accessible accessibilityLabel={`${label}: ${spoken}`}>
+      {/* "Resistência" não cabe inteira na coluna de um celular de 375 px: no celular, a letra diminui um pouco. */}
+      <Text style={styles.statLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
         {label}
       </Text>
-      <View style={{ gap: 4, marginTop: 4 }}>{children}</View>
+      <View style={styles.statBody}>{children}</View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  grid: { flexDirection: 'row', flexWrap: 'wrap', rowGap: 14 },
-  attr: { width: '50%', paddingRight: 8 },
-  attrLabel: { color: colors.textFaint, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, textTransform: 'uppercase' },
-  attrValue: { color: colors.text, fontSize: 15, fontWeight: '600', marginTop: 3 },
-  groupLabel: { color: colors.textFaint, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, textTransform: 'uppercase' },
-  box: { backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 14, gap: 6 },
-  boxKind: { color: colors.textFaint, fontSize: 11, fontWeight: '700', letterSpacing: 1 },
-  boxTitle: { color: colors.text, fontSize: 15, fontWeight: '800' },
-  boxText: { color: colors.textMuted, fontSize: 14, lineHeight: 20 },
-  attackHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  flex: { flex: 1 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', rowGap: space.md },
+  attr: { width: '50%', paddingRight: space.sm },
+  attrLabel: { ...typography.label, color: colors.textFaint },
+  attrValue: { ...typography.bodyStrong, color: colors.text, marginTop: space.xxs },
+  moves: { gap: space.md },
+  group: { gap: space.sm },
+  groupLabel: { ...typography.label, color: colors.textFaint },
+  box: { backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: space.md, gap: space.xs },
+  boxKind: { ...typography.label, color: colors.textFaint },
+  boxTitle: { ...typography.bodyStrong, fontWeight: '700', color: colors.text },
+  boxText: { ...typography.body, fontSize: 14, lineHeight: 20, color: colors.textMuted },
+  attackHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   cost: { flexDirection: 'row', gap: 3 },
-  damage: { color: colors.text, fontSize: 17, fontWeight: '800' },
-  energy: { borderWidth: 1.5, borderColor: 'rgba(0,0,0,0.18)' },
-  stats: { flexDirection: 'row', gap: 8 },
-  stat: { flex: 1, backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: 12 },
-  statLabel: { letterSpacing: 0.4, fontSize: 10 },
-  statRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  statValue: { color: colors.text, fontSize: 14, fontWeight: '700' },
+  damage: { ...typography.heading, ...typography.tabular, color: colors.text },
+  energy: { borderWidth: 1.5, borderColor: colors.border },
+  stats: { flexDirection: 'row', gap: space.sm },
+  stat: { flex: 1, backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: space.md },
+  statLabel: { ...typography.label, fontSize: 11, letterSpacing: 0.4, color: colors.textFaint },
+  statBody: { gap: space.xs, marginTop: space.xs },
+  statRow: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
+  statValue: { ...typography.bodyStrong, fontSize: 14, color: colors.text },
 });

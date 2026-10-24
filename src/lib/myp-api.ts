@@ -1,6 +1,7 @@
 import { catalogByTcgdexIds, catalogProduct } from './catalog';
-import { cached, cardDetail } from './tcgdex';
 import { pickMypProduct, price, type MypProduct } from './myp-match';
+import { supabase } from './supabase';
+import { cached, cardDetail } from './tcgdex';
 import type { Entry, MypApiPrice } from './types';
 
 /**
@@ -21,8 +22,11 @@ export const MYP_API_REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
  * 4: sem achar pelo nome, busca pelo código do produto ("pokemon_por_031/088"), para cartas que o MYP cadastra com o
  *    número no nome e sem nome em português (ex.: "Mega Clefable ex - 031/088", "Nidorina (30th Celebration)",
  *    "Gengar (Prime)" da coleção clássica, pelo número original que vem do catálogo do TCGCSV).
+ * 5: promos SWSH, DP, HGSS e Nintendo (sem sigla na TCGdex) pelas siglas prováveis do MYP; cartas só do catálogo
+ *    ("tcgp-") pela sigla da coleção da TCGdex ligada ao grupo do TCGCSV (a sigla do grupo, como "SWSD" ou "MCAP",
+ *    não é a do MYP), que também decide se é coleção de promos.
  */
-export const MYP_MATCHER = 4;
+export const MYP_MATCHER = 5;
 
 /**
  * Coleções da TCGdex que o MYP cadastra com outra sigla e com o número da carta original (ex.: Charizard da coleção
@@ -31,6 +35,18 @@ export const MYP_MATCHER = 4;
 const MYP_EDITION: Record<string, string> = {
   '30th-c': '30CC',
   cel25cc: 'CCC',
+};
+
+/**
+ * Coleções de promos sem sigla na TCGdex: siglas que o MYP pode usar (as do PTCGO/Limitless primeiro). A busca pelo
+ * nome traz todas as edições, então conferir várias siglas não gasta consulta; a busca pelo código fica de fora.
+ * A confirmar com o app no celular (GET /pokemon/edicoes): a primeira que achar a carta vale.
+ */
+const MYP_PROMO_EDITIONS: Record<string, string[]> = {
+  swshp: ['PR-SW', 'SWSHP', 'PRSW'],
+  dpp: ['PR-DPP', 'DPP', 'PRDPP'],
+  hgssp: ['PR-HS', 'HGSSP', 'PRHS'],
+  np: ['PR-NP', 'NP', 'PRNP'],
 };
 
 /** Coleção de promos (MEP, SVP, SWSHP…): o produto do MYP é a própria promo. */
@@ -108,28 +124,88 @@ function setAbbr(setId: string) {
 }
 
 /**
- * O que a busca precisa da carta: nomes para buscar (inglês primeiro), sigla da coleção no MYP, número e total
+ * Coleção da TCGdex ligada a um grupo do TCGCSV: a mais comum entre as cartas do grupo já ligadas à TCGdex (o grupo
+ * pode trazer a galeria de treinadores, que na TCGdex é outra coleção). Guardada por 7 dias; sem nenhuma, null.
+ */
+function groupTcgdexSet(groupId: number) {
+  return cached(`tcgdex:groupset:${groupId}`, async () => {
+    if (!supabase) return null;
+    const { data, error } = await supabase.from('tcg_catalog').select('tcgdex_id').eq('group_id', groupId).not('tcgdex_id', 'is', null).limit(200);
+    if (error) throw error;
+    const count = new Map<string, number>();
+    for (const r of (data ?? []) as { tcgdex_id: string | null }[]) {
+      const id = r.tcgdex_id ?? '';
+      const set = id.slice(0, id.lastIndexOf('-'));
+      if (set) count.set(set, (count.get(set) ?? 0) + 1);
+    }
+    return [...count].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  });
+}
+
+/** Siglas da coleção no MYP: a da lista acima, a oficial da TCGdex ou as prováveis (`guessed`) das promos sem sigla. */
+async function setEditions(setId: string): Promise<{ abbrs: string[]; guessed: boolean }> {
+  if (MYP_EDITION[setId]) return { abbrs: [MYP_EDITION[setId]], guessed: false };
+  // Falha de rede propaga (a carta tenta de novo depois); coleção inexistente na TCGdex vira "sem sigla".
+  const abbr = await setAbbr(setId);
+  if (abbr) return { abbrs: [abbr], guessed: false };
+  return { abbrs: MYP_PROMO_EDITIONS[setId] ?? [], guessed: !!MYP_PROMO_EDITIONS[setId] };
+}
+
+/** Número da promo também sem as letras ("SWSH001" → "001"), para as siglas prováveis. */
+function numberForms(localId: string, guessed: boolean) {
+  const bare = localId.replace(/^[a-z]+(?=\d)/i, '');
+  return guessed && bare !== localId ? [localId, bare] : [localId];
+}
+
+type CardKeys = {
+  names: string[];
+  /** Siglas possíveis da edição no MYP (uma, quando conhecida). */
+  abbrs: string[];
+  /** As siglas são as prováveis de uma coleção de promos sem sigla (sem busca pelo código). */
+  guessed: boolean;
+  localId: string;
+  total?: number;
+  byName: boolean;
+  promoSet: boolean;
+};
+
+/**
+ * O que a busca precisa da carta: nomes para buscar (inglês primeiro), siglas da coleção no MYP, número e total
  * oficial, se a carta é achada pelo nome dentro da edição e se é de uma coleção de promos.
  */
-async function cardKeys(
-  e: Entry,
-): Promise<{ names: string[]; abbr?: string; localId: string; total?: number; byName: boolean; promoSet: boolean } | undefined> {
+async function cardKeys(e: Entry): Promise<CardKeys | undefined> {
   if (e.cardId.startsWith('tcgp-')) {
     const r = await catalogProduct(Number(e.cardId.slice(5)));
     if (!r) return undefined;
-    const abbr = r.tcg_groups?.abbr ?? undefined;
     const [localId, total] = (r.number ?? '').split('/');
-    return { names: nameVariants(r.name), abbr, localId, total: Number(total) || undefined, byName: false, promoSet: /p$/i.test(abbr ?? '') };
+    const base = { names: nameVariants(r.name), localId: localId.trim(), total: Number(total) || undefined };
+    const abbr = r.tcg_groups?.abbr?.trim() || undefined;
+    // A sigla e as promos pela coleção da TCGdex ligada ao grupo; sem ela, pela sigla e pelo nome do grupo. A sigla do
+    // grupo continua valendo na busca pelo nome (era a única até a regra 5; conferir mais uma não gasta consulta).
+    const setId = await groupTcgdexSet(r.group_id);
+    if (setId) {
+      const ed = await setEditions(setId);
+      if (ed.abbrs.length) {
+        const abbrs = abbr && !ed.abbrs.some((a) => a.toLowerCase() === abbr.toLowerCase()) ? [...ed.abbrs, abbr] : ed.abbrs;
+        return { ...base, ...ed, abbrs, byName: setId in MYP_EDITION, promoSet: isPromoSet(setId) };
+      }
+    }
+    return {
+      ...base,
+      abbrs: abbr ? [abbr] : [],
+      guessed: false,
+      byName: false,
+      promoSet: /black star|promo cards?\b/i.test(r.tcg_groups?.name ?? ''),
+    };
   }
   const cut = e.cardId.lastIndexOf('-');
   const setId = e.cardId.slice(0, cut);
   const en = await cardDetail(e.cardId, 'en').catch(() => undefined);
-  // Falha de rede propaga (a carta tenta de novo depois); coleção inexistente na TCGdex vira "sem sigla".
-  const abbr = MYP_EDITION[setId] ?? (await setAbbr(setId)) ?? undefined;
+  const ed = await setEditions(setId);
   const names = [...new Set([en?.name, e.cardName].filter((n): n is string => !!n?.trim()).flatMap(nameVariants))];
   return {
     names,
-    abbr,
+    ...ed,
     localId: e.localId || e.cardId.slice(cut + 1),
     total: e.setTotal || en?.set.cardCount?.official || undefined,
     byName: setId in MYP_EDITION,
@@ -150,8 +226,8 @@ export async function fetchMypPrice(
   const note = mypApiNote(e);
   const base = { cardId: e.cardId, variant: e.variant, note: note || undefined, checkedAt: new Date().toISOString(), v: MYP_MATCHER };
   const keys = await cardKeys(e);
-  if (!keys?.abbr) return { ...base, notFound: 'coleção sem sigla para buscar no MYP' };
-  const abbr = keys.abbr;
+  if (!keys?.abbrs.length) return { ...base, notFound: 'coleção sem sigla para buscar no MYP' };
+  const abbrs = keys.abbrs;
   const toPrice = async (hit: NonNullable<ReturnType<typeof pickMypProduct>>): Promise<MypApiPrice> => {
     const p = hit.product;
     return {
@@ -168,15 +244,19 @@ export async function fetchMypPrice(
       ownVersion: hit.ownVersion || (keys.promoSet && e.variant === 'wPromo' && !note) || undefined,
     };
   };
+  const localIds = numberForms(keys.localId, keys.guessed);
   for (const name of keys.names) {
-    const hit = pickMypProduct(await consult(name), abbr, keys.localId, e.variant, note, keys.byName ? keys.names : undefined);
+    const hit = pickMypProduct(await consult(name), abbrs, localIds, e.variant, note, keys.byName ? keys.names : undefined);
     if (hit) return await toPrice(hit);
   }
-  if (consultCode) {
+  // Pelo código só com a sigla conhecida (com as prováveis, cada código seria uma consulta a mais).
+  const abbr = abbrs[0];
+  if (consultCode && !keys.guessed) {
     // Coleções que o MYP numera pela carta original (byName): o número original vem do catálogo do TCGCSV, que liga a
-    // carta da coleção clássica à TCGdex (ex.: 30th-c-018 = "Gengar (Prime)" 94/102 = "pokemon_30cc_094/102").
-    const numbers = keys.byName
-      ? (await catalogByTcgdexIds([e.cardId]).catch(() => [])).filter((r) => !r.stamp && r.number).map((r) => r.number!.split('/'))
+    // carta da coleção clássica à TCGdex (ex.: 30th-c-018 = "Gengar (Prime)" 94/102 = "pokemon_30cc_094/102"). Carta
+    // só do catálogo ("tcgp-") já tem esse número.
+    const numbers = keys.byName && !e.cardId.startsWith('tcgp-')
+      ?(await catalogByTcgdexIds([e.cardId]).catch(() => [])).filter((r) => !r.stamp && r.number).map((r) => r.number!.split('/'))
       : [[keys.localId, String(keys.total ?? '')]];
     for (const [localId, total] of numbers) {
       for (const code of mypCodes(abbr, localId, Number(total) || undefined, keys.promoSet)) {
@@ -185,7 +265,7 @@ export async function fetchMypPrice(
       }
     }
   }
-  return { ...base, notFound: `${keys.names[0] ?? 'carta'} ${keys.localId} (${abbr}) não encontrada no MYP` };
+  return { ...base, notFound: `${keys.names[0] ?? 'carta'} ${keys.localId} (${abbrs.join('/')}) não encontrada no MYP` };
 }
 
 /**

@@ -1,3 +1,4 @@
+import { catalogByTcgdexIds, isOversize, sameStampVersion, stampVariant, type CatalogRow } from './catalog';
 import type { CardDetail } from './tcgdex';
 import { VARIANTS, type Variant } from './types';
 
@@ -57,7 +58,18 @@ export function availableVariants(detail?: CardDetail | null, enDetail?: CardDet
 }
 
 /** Uma versão visual da carta: a variação do app e, para promos, o selo (ex.: "Logo da coleção (Booster Box)"). */
-export type VersionOption = { variant: Variant; stamp?: string; /** Selos da TCGdex ("set-logo", "prerelease"…). */ stampKeys?: string[] };
+export type VersionOption = {
+  variant: Variant;
+  stamp?: string;
+  /** Selos da TCGdex ("set-logo", "prerelease"…). */
+  stampKeys?: string[];
+  /** Foto oficial desta versão (TCGplayer, via catálogo do TCGCSV), quando o catálogo a tem. */
+  photo?: string;
+  /** Versão que só o catálogo do TCGCSV conhece (selo no nome da TCGplayer, ex.: "Pokemon Center Exclusive"). */
+  fromCatalog?: boolean;
+};
+
+const variantOrder = (v: Variant) => VARIANTS.findIndex((x) => x.id === v);
 
 /**
  * Versões visuais que existem para a carta, uma por impressão da TCGdex (ex.: holo comum e holo com o selo da
@@ -84,6 +96,49 @@ export function versionOptions(detail?: CardDetail | null, enDetail?: CardDetail
   }
   if (!out.size) for (const id of availableVariants(detail, enDetail).ids) add({ variant: id });
 
-  const order = (v: Variant) => VARIANTS.findIndex((x) => x.id === v);
-  return [...out.values()].sort((a, b) => order(a.variant) - order(b.variant));
+  return [...out.values()].sort((a, b) => variantOrder(a.variant) - variantOrder(b.variant));
+}
+
+/**
+ * Junta às versões da TCGdex as versões com selo que o catálogo do TCGCSV tem da carta (as mesmas que a lista de
+ * escolha mostra): a mesma versão nas duas fontes fica uma só, com a foto do catálogo (inclusive o "Poke Ball Pattern"
+ * do catálogo com a impressão Poké Ball da TCGdex, que não tem selo); a que só o catálogo tem entra
+ * com o selo dele ("Pokemon Center Exclusive", "Cosmos Holo"…) e a foto. Cartas gigantes (Jumbo) ficam de fora.
+ * `setNameEn` = nome da coleção em inglês (para reconhecer o selo da Booster Box, "<Coleção> Stamped").
+ */
+export function withCatalogVersions(options: VersionOption[], rows: CatalogRow[], setNameEn: string): VersionOption[] {
+  const out = options.map((o) => ({ ...o }));
+  const matched = new Set<VersionOption>();
+  const stamped = rows.filter((r) => r.stamp && !isOversize(r.stamp)).sort((a, b) => a.product_id - b.product_id);
+  for (const r of stamped) {
+    const stamp = r.stamp!;
+    const variant = stampVariant(stamp);
+    // Poké Ball/Master Ball: a TCGdex descreve o padrão como acabamento, sem selo ("Poke Ball Pattern" do catálogo =
+    // impressão pokeball da TCGdex); o par é a opção dessa variação sem selo.
+    const ball = variant === 'pokeball' || variant === 'masterball';
+    const twin = out.find(
+      (o) =>
+        !matched.has(o) &&
+        !o.fromCatalog &&
+        (ball ? o.variant === variant && !o.stamp : !!o.stamp && sameStampVersion(o.stampKeys ?? [], o.stamp, setNameEn, stamp)),
+    );
+    if (twin) {
+      matched.add(twin);
+      twin.photo ??= r.image;
+      continue;
+    }
+    if (!out.some((o) => o.variant === variant && o.stamp === stamp)) out.push({ variant, stamp, photo: r.image, fromCatalog: true });
+  }
+  return out.sort((a, b) => variantOrder(a.variant) - variantOrder(b.variant));
+}
+
+/**
+ * Todas as versões da carta para o "Qual é a sua versão?": as da TCGdex mais as do catálogo (ver withCatalogVersions).
+ * Sem internet, ou para carta que só existe no catálogo ("tcgp-"), ficam só as da TCGdex.
+ */
+export async function cardVersions(cardId: string | undefined, detail?: CardDetail | null, enDetail?: CardDetail | null): Promise<VersionOption[]> {
+  const base = versionOptions(detail, enDetail);
+  if (!cardId || cardId.startsWith('tcgp-')) return base;
+  const rows = await catalogByTcgdexIds([cardId]).catch(() => [] as CatalogRow[]);
+  return withCatalogVersions(base, rows, enDetail?.set.name ?? detail?.set.name ?? '');
 }
