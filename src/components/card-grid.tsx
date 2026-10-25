@@ -1,4 +1,4 @@
-import { memo, type ReactElement } from 'react';
+import { memo, useEffect, useState, type ReactElement } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { CardImage } from '@/components/card-image';
@@ -6,7 +6,7 @@ import { OwnedBadge, useOwnership, type Ownership } from '@/components/owned-bad
 import { Badge, CardSkeleton, gridColumns, TextSkeleton } from '@/components/ui';
 import { getSpecies } from '@/data/pokedex';
 import { plainName } from '@/lib/catalog';
-import { groupCardsBySet, sortCards, type CardBrief, type CardOrder } from '@/lib/tcgdex';
+import { groupCardsBySet, setReleaseYears, sortCards, type CardBrief, type CardOrder } from '@/lib/tcgdex';
 import { CARD_RATIO, colors, gutterFor, radius, semantic, shadow, typography, widths } from '@/theme';
 
 const GAP = 10;
@@ -78,6 +78,21 @@ export function CardGrid({
   const species = speciesName ?? (dex ? getSpecies(dex)?.name : undefined);
   const sorted = order ? sortCards(cards, order) : cards;
 
+  // Ano de lançamento de cada coleção, ao lado do nome no título (carregado uma vez e guardado por 7 dias).
+  const [years, setYears] = useState<Record<string, number>>({});
+  useEffect(() => {
+    if (!groupBySet) return;
+    let alive = true;
+    setReleaseYears()
+      .then((y) => {
+        if (alive) setYears(y);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [groupBySet]);
+
   const rows: Row[] = [];
   const addCards = (list: CardBrief[], prefix: string) => {
     for (let i = 0; i < list.length; i += cols) rows.push({ kind: 'cards', key: `${prefix}:${i}`, cards: list.slice(i, i + cols) });
@@ -103,6 +118,7 @@ export function CardGrid({
           <View style={styles.header} accessibilityRole="header">
             <Text style={styles.headerTitle} numberOfLines={2}>
               {row.title}
+              {years[row.key.slice(2)] ? <Text style={styles.headerCount}> · {years[row.key.slice(2)]}</Text> : null}
             </Text>
             <Text style={styles.headerCount}>
               {row.count} {row.count === 1 ? 'carta' : 'cartas'}

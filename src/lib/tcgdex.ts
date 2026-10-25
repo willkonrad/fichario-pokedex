@@ -5,6 +5,7 @@ import {
   catalogByName,
   catalogByTcgdexIds,
   catalogGroupSet,
+  catalogGroupYears,
   catalogNumber,
   catalogProduct,
   ENGLISH,
@@ -360,6 +361,33 @@ async function mapPool<T, R>(items: T[], size: number, fn: (item: T) => Promise<
  * da imagem sem o idioma ("<série>/<coleção>/<número>").
  */
 const STAMPED_PT_SCANS = new Set(['xy/xy3/44']);
+
+/**
+ * Ano de lançamento de cada coleção, para mostrar ao lado do nome ("Realeza Absoluta Galeria de Galar · 2023"): as da
+ * TCGdex numa consulta só (GraphQL, todas as coleções com a data) e as que só existem no catálogo ("tcgp<grupo>", pela
+ * data do TCGCSV). Guardado por 7 dias; se a TCGdex não responder, nada é guardado (tenta de novo depois).
+ */
+export function setReleaseYears(): Promise<Record<string, number>> {
+  return cached(
+    'tcgdex:set-years:v1',
+    async () => {
+      const res = await fetch(`${API}/graphql`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: '{ sets { id releaseDate } }' }),
+      });
+      if (!res.ok) throw new Error(`TCGdex ${res.status}`);
+      const body = (await res.json()) as { data?: { sets?: { id: string; releaseDate?: string | null }[] } };
+      const out: Record<string, number> = await catalogGroupYears().catch(() => ({}));
+      for (const s of body.data?.sets ?? []) {
+        const year = Number(String(s.releaseDate ?? '').slice(0, 4));
+        if (year > 1990) out[s.id] = year;
+      }
+      return out;
+    },
+    CACHE_TTL,
+  );
+}
 
 /** Sufixo de qualidade exigido pelas imagens da TCGdex (e a foto em inglês no lugar das fotos em português com selo). */
 export function cardImage(base: string | undefined, quality: 'low' | 'high' = 'low') {

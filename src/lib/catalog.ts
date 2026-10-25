@@ -141,6 +141,25 @@ export async function catalogByTcgdexIds(ids: string[], opts: { signal?: AbortSi
   return pages.flat();
 }
 
+/**
+ * Ano de lançamento das coleções em inglês do catálogo (publishedOn do TCGCSV), pela chave que as listas usam para a
+ * coleção que só existe no catálogo ("tcgp<grupo>"). Banco sem a coluna ainda: nenhum ano.
+ */
+export async function catalogGroupYears(): Promise<Record<string, number>> {
+  if (!supabase) return {};
+  const { data, error } = await supabase.from('tcg_groups').select('group_id, published_on').eq('category', ENGLISH).not('published_on', 'is', null);
+  if (error) {
+    if (error.code === '42703') return {};
+    throw error;
+  }
+  const out: Record<string, number> = {};
+  for (const r of (data ?? []) as { group_id: number; published_on: string }[]) {
+    const year = Number(r.published_on.slice(0, 4));
+    if (year > 1990) out[`tcgp${r.group_id}`] = year;
+  }
+  return out;
+}
+
 /** Ids da TCGdex de algumas cartas já ligadas de uma coleção do catálogo (para saber de qual coleção da TCGdex ela é). */
 export async function catalogGroupSet(groupId: number): Promise<string[]> {
   if (!supabase) return [];

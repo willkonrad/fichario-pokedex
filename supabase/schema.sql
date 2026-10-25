@@ -1,8 +1,8 @@
--- Fichário Pokédex · banco de dados (Supabase, Postgres 17) — retrato completo da versão 3.0.1.
+-- Fichário Pokédex · banco de dados (Supabase, Postgres 17) — retrato completo da versão 3.0.2.
 --
 -- Este arquivo é o espelho do banco em produção: tabelas, regras de acesso (RLS), funções, gatilhos e crons, já com as
 -- migrações de supabase/migrations/ aplicadas (20261024a_sync, 20261024b_catalog, 20261024c_pricing,
--- 20261024d_fixes e 20261025a_hardening). Pode rodar mais de uma vez (idempotente): cria o que falta e troca as funções
+-- 20261024d_fixes, 20261025a_hardening e 20261025b_group_dates). Pode rodar mais de uma vez (idempotente): cria o que falta e troca as funções
 -- pela versão daqui, sem apagar dados.
 --
 -- Projeto novo: troque SEU_PROJECT_REF (cron do catalog-sync, no fim) e rode o arquivo inteiro no SQL Editor, ou com
@@ -322,11 +322,14 @@ create table if not exists public.tcg_groups (
   -- Versão da regra de ligação TCGCSV → TCGdex aplicada (sobe quando a regra melhora, para religar sem baixar de novo).
   link_version integer not null default 0,
   -- Versão dos preços da TCGplayer copiada (built_at do TCGCSV).
-  prices_at timestamptz
+  prices_at timestamptz,
+  -- Data de lançamento da coleção (publishedOn do TCGCSV): o ano aparece ao lado do nome da coleção no app.
+  published_on date
 );
 -- Colunas que chegaram depois da criação da tabela (bancos antigos).
 alter table public.tcg_groups add column if not exists link_version integer not null default 0;
 alter table public.tcg_groups add column if not exists prices_at timestamptz;
+alter table public.tcg_groups add column if not exists published_on date;
 
 -- Cartas do TCGCSV, ligadas ao id da TCGdex quando a carta existe lá (mesma coleção, número e nome).
 create table if not exists public.tcg_catalog (

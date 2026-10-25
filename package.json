@@ -1,6 +1,6 @@
 {
   "name": "pokedex-binder",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "main": "expo-router/entry",
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",

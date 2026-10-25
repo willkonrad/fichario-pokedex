@@ -1,5 +1,9 @@
 # Notas da versão
 
+## 3.0.2 — Ano das coleções (25/10/2026)
+
+- **Ano ao lado da coleção** na lista de cartas de um Pokémon e na busca para adicionar ("Realeza Absoluta Galeria de Galar · 2023"). O ano vem da TCGdex (todas as coleções numa consulta só, guardada por 7 dias) e, para as coleções que só existem no catálogo (promos, Battle Academy…), da data de lançamento do TCGCSV, que o servidor passou a guardar.
+
 ## 3.0.1 — Preparação para publicar (24/10/2026)
 
 - **Fichário no computador usa a tela inteira**: sem o teto de 1.440 px, o bolso cresce até a página caber na altura da janela (até 220 px). Numa tela de 2000 px o bolso passou de ~75 para ~126 px, e páginas, painel e barra do topo ficam centralizados e alinhados.

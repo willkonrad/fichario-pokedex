@@ -51,7 +51,7 @@ async function get<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-type Group = { groupId: number; name: string; abbreviation?: string; modifiedOn?: string };
+type Group = { groupId: number; name: string; abbreviation?: string; modifiedOn?: string; publishedOn?: string };
 type Product = { productId: number; name: string; extendedData?: { name: string; value: string }[] };
 
 /**
@@ -225,7 +225,15 @@ async function run(admin: SupabaseClient, report: Report) {
       for (const category of CATEGORIES) {
         const { results } = await get<{ results: Group[] }>(`${TCGCSV}/tcgplayer/${category}/groups`);
         const { error } = await admin.from('tcg_groups').upsert(
-          results.map((g) => ({ group_id: g.groupId, category, name: g.name, abbr: g.abbreviation ?? null, modified_on: g.modifiedOn ?? null })),
+          results.map((g) => ({
+            group_id: g.groupId,
+            category,
+            name: g.name,
+            abbr: g.abbreviation ?? null,
+            modified_on: g.modifiedOn ?? null,
+            // Data de lançamento ("2023-01-20T00:00:00" → 2023-01-20), para o ano ao lado da coleção no app.
+            published_on: /^\d{4}-\d{2}-\d{2}/.test(g.publishedOn ?? '') ? g.publishedOn!.slice(0, 10) : null,
+          })),
           { onConflict: 'group_id' },
         );
         if (error) throw error;
