@@ -28,6 +28,7 @@ Valem para qualquer mudança, feita por pessoa ou por agente. Na dúvida, pare e
 ### Segredos e repositório
 
 - **Segredos só nos Secrets do Supabase** (Edge Functions), no Vault (chave do cron) ou no `.env` local, que fica fora do git. Nunca no código, em commit, em log, em captura de tela nem na documentação. O `.env.example` só tem os nomes das variáveis.
+- **As `EXPO_PUBLIC_*`** (URL e chave publicável do Supabase) vão embutidas no app e na web, por isso não são segredo (quem protege os dados é o RLS), mas também ficam fora do código: no `.env` local e nas **variáveis de ambiente do EAS** (`preview` e `production`, para os builds e o `eas update`), com visibilidade *plaintext* ou *sensitive*, nunca *secret*. Nunca no `eas.json` (campo `env`) nem no `app.json`. Segredo de verdade (chave `service_role`/secreta, senha do banco) nunca vai para o EAS nem para variável `EXPO_PUBLIC_`.
 - **O repositório é público.** Antes de cada push, procure segredos no que vai subir: uma varredura (ex.: `gitleaks git`) ou, no mínimo, uma busca no diff por `key`, `token`, `secret`, `password`, `service_role` e `eyJ`.
 - Commit e push só quando o dono pedir.
 
@@ -76,6 +77,10 @@ Run tests, lint and typecheck before declaring any task done.
 
 Use EAS to build, sign, and submit the app in the cloud (`eas build`, `eas submit`) and to ship over-the-air updates (`eas update`) — no local Xcode or Android Studio required. Run EAS CLI as `npx eas-cli@latest <command>`; substitute that for bare `eas` in docs examples.
 Docs: https://docs.expo.dev/eas/index.md
+
+- Passo a passo para publicar a web e o APK: [docs/arquitetura.md](docs/arquitetura.md#publicar-web-e-apk-android). Login na conta Expo, build, update e deploy só com o ok do dono.
+- `android.package` / `ios.bundleIdentifier` (`com.willkonrad.fichariopokedex`) são permanentes: nunca troque. O keystore do Android (e as senhas dele) fica no EAS e numa cópia do dono, nunca no repositório: nem o `.jks` nem um `credentials.json`.
+- `runtimeVersion` usa o `fingerprint`: mudança nativa (biblioteca com código nativo, plugin, ícone, abertura, campo do `app.json`) exige build novo; o resto vai por `eas update --environment <ambiente>`.
 
 ## Rules
 

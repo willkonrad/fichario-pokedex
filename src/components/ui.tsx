@@ -21,6 +21,7 @@ import {
 
 import { IconButton, type IconName, type PressState } from '@/components/icon-button';
 import { PokeballIcon } from '@/components/icons';
+import { useToastClearance } from '@/components/toast';
 import { colors, contrastRatio, radius, semantic, shadow, space, TOUCH, typography } from '@/theme';
 
 // Componentes que moram em arquivos próprios, reexportados para as telas importarem tudo de um lugar só.
@@ -30,7 +31,7 @@ export { InfoButton, InfoParagraph, InfoSheet, InfoTopic } from '@/components/in
 export { gridColumns, layoutSize, useKeyboardHeight, useLayout, type LayoutSize } from '@/components/layout';
 export { useReducedMotion } from '@/components/motion';
 export { CardSkeleton, Skeleton, TextSkeleton } from '@/components/skeleton';
-export { hideToast, showToast, ToastHost, useToast, type ToastOptions } from '@/components/toast';
+export { hideToast, showToast, ToastHost, useToast, useToastClearance, type ToastOptions } from '@/components/toast';
 
 const WEB = Platform.OS === 'web';
 
@@ -497,9 +498,21 @@ export function ColorPicker({ value, onChange, label = 'Cor da capa' }: { value?
 
 /** Barra fixa no rodapé com a ação principal da tela (respeita a área segura do aparelho). */
 export function BottomBar({ children, bottomInset }: { children: ReactNode; bottomInset: number }) {
+  // Os avisos (toast) ficam acima da barra quando passariam por cima do botão principal ("Colocar"); no computador, o
+  // aviso no canto direito fica embaixo se o botão estiver no meio.
+  const [height, setHeight] = useState(0);
+  const [span, setSpan] = useState<{ left: number; right: number } | undefined>();
+  useToastClearance(height, span);
   return (
-    <View style={[styles.bottomBar, { paddingBottom: 12 + bottomInset }]}>
-      <View style={styles.bottomInner}>{children}</View>
+    <View style={[styles.bottomBar, { paddingBottom: 12 + bottomInset }]} onLayout={(e) => setHeight(Math.ceil(e.nativeEvent.layout.height))}>
+      <View
+        style={styles.bottomInner}
+        onLayout={(e) => {
+          const { x, width } = e.nativeEvent.layout;
+          setSpan({ left: Math.floor(x), right: Math.ceil(x + width) });
+        }}>
+        {children}
+      </View>
     </View>
   );
 }

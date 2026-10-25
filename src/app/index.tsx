@@ -29,7 +29,7 @@ import { HomeValueSummary, NoticeSlot, type HomeChange, type HomeNotice, type Ho
 import { HomeTopBar } from '@/components/home-top-bar';
 import { NATIVE_DRIVER, useReducedMotion } from '@/components/motion';
 import { type PressState } from '@/components/icon-button';
-import { Card, CardSkeleton, ListRow, onCover, PokeballIcon, useLayout, type IconName } from '@/components/ui';
+import { Card, CardSkeleton, ListRow, onCover, PokeballIcon, useLayout, useToastClearance, type IconName } from '@/components/ui';
 import { formatDex, getSpecies, searchSpeciesList } from '@/data/pokedex';
 import {
   customPlaceText,
@@ -96,10 +96,16 @@ const PANEL_GAP = 24;
 const SPREAD_MIN_MAIN = 860;
 /** Bolso mínimo no tablet e no computador (a página cabe na altura da janela). */
 const MIN_SLOT_WIDE = 56;
+/** Bolso máximo no computador: as miniaturas das cartas têm ~245 px; maior que isso, a imagem fica borrada. */
+const MAX_SLOT_DESKTOP = 220;
+/** Coluna mínima das páginas no computador, para o paginador (setas, página e "Próxima falta") caber numa linha. */
+const MIN_MAIN_DESKTOP = 480;
 /** Paginador fixo (48 px + margens). */
 const PAGER_SPACE = 60;
 /** Espaço livre no fim da rolagem para o botão "+ Carta" não cobrir a última linha. */
 const FAB_SPACE = 88;
+/** Altura do botão "+ Carta" do celular. */
+const FAB_HEIGHT = 48;
 
 /** O que o fichário põe em cada bolso de uma página. */
 type PageItem = {
@@ -943,18 +949,25 @@ function BinderFrame(p: FrameProps) {
   const value = useMemo(() => homeValue(p.entries), [p.entries]);
 
   // ----- Medidas: a página cabe na largura (celular) ou na altura da janela (tablet e computador) -----
-  const outer = Math.max(0, Math.min(L.width - L.gutter * 2, desktop ? widths.spread : widths.reading));
-  const main = desktop ? outer - PANEL_WIDTH - PANEL_GAP : outer;
-  const spread = p.doubleSided && desktop && main >= SPREAD_MIN_MAIN && p.pages > 1;
-  const pageWidth = spread ? Math.floor((main - SPREAD_GAP) / 2) : main;
+  // No computador não há teto de largura: o bolso cresce até a página caber na altura da janela, e o fichário (páginas
+  // + painel) fica centralizado. Com o teto de 1.440 px, numa tela grande sobravam as laterais e metade da altura.
+  const avail = Math.max(0, L.width - L.gutter * 2);
+  const mainAvail = desktop ? avail - PANEL_WIDTH - PANEL_GAP : Math.min(avail, widths.reading);
+  const spread = p.doubleSided && desktop && mainAvail >= SPREAD_MIN_MAIN && p.pages > 1;
+  const pageWidth = spread ? Math.floor((mainAvail - SPREAD_GAP) / 2) : mainAvail;
   const byWidth = Math.floor((pageWidth - PAGE_PAD - SPINE_PAD - SHEET_BORDER * 2 - GAP * (p.cols - 1)) / p.cols);
   const priceSpace = p.showPrices ? priceBlockHeight(byWidth, L.fontScale) : 0;
   // No computador, mais o respiro de cima e o número das páginas abertas lado a lado.
   const chrome =
     barHeight + PAGER_SPACE + (PAGE_PAD + SHEET_BORDER) * 2 + insets.bottom + (desktop ? space.xxl + (spread ? space.xl : 0) : FAB_SPACE);
   const byHeight = Math.floor(((L.height - chrome - GAP * (p.rows - 1)) / p.rows - priceSpace) * CARD_RATIO);
-  const slot = L.width >= breakpoints.tablet ? Math.max(MIN_SLOT_WIDE, Math.min(byWidth, byHeight)) : byWidth;
+  const slot =
+    L.width >= breakpoints.tablet ? Math.max(MIN_SLOT_WIDE, Math.min(byWidth, byHeight, desktop ? MAX_SLOT_DESKTOP : Infinity)) : byWidth;
   const sheetWidth = slot * p.cols + GAP * (p.cols - 1) + PAGE_PAD + SPINE_PAD + SHEET_BORDER * 2;
+  // Largura em uso: no computador, só o que as páginas ocupam (com um mínimo para o paginador), mais o painel; no
+  // celular e no tablet, a coluna inteira.
+  const main = desktop ? Math.min(mainAvail, Math.max(spread ? sheetWidth * 2 + SPREAD_GAP : sheetWidth, MIN_MAIN_DESKTOP)) : mainAvail;
+  const outer = desktop ? main + PANEL_WIDTH + PANEL_GAP : main;
 
   const shown = spread ? spreadOf(p.page, p.pages) : [p.page];
   const first = shown[0];
@@ -1323,6 +1336,8 @@ function BinderFrame(p: FrameProps) {
   ) : null;
 
   const bottomSpace = desktop ? space.xxl : FAB_SPACE + insets.bottom;
+  // No celular, os avisos (toast) ficam acima do "+ Carta" enquanto o fichário está na tela.
+  useToastClearance(!desktop && focused ? insets.bottom + space.lg + FAB_HEIGHT : 0);
 
   return (
     <View style={styles.root}>
@@ -1339,6 +1354,7 @@ function BinderFrame(p: FrameProps) {
         progress={progress}
         desktop={desktop}
         gutter={L.gutter}
+        contentWidth={desktop ? Math.max(outer, Math.min(avail, widths.wide)) : undefined}
         search={
           desktop ? (
             // A lista de sugestões fica por cima da página, alinhada com o campo (posição medida na janela).
@@ -1517,7 +1533,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.xs,
-    height: 48,
+    height: FAB_HEIGHT,
     paddingLeft: space.md,
     paddingRight: space.lg + 2,
     borderRadius: radius.pill,

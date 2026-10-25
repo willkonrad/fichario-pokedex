@@ -1,6 +1,8 @@
 // Gera o ícone do app (fichário branco com grade de cartas sobre o vermelho Pokémon), o ícone adaptativo do
-// Android, a imagem da abertura e o favicon. Rode com: node scripts/make-icons.js
-// Desenho por coordenadas de 0 a 1, com 4×4 amostras por pixel para suavizar as bordas.
+// Android, a imagem da abertura, o favicon e os ícones do app instalável na web (public/icons, citados em
+// public/manifest.json e public/index.html). Rode com: node scripts/make-icons.js
+// Desenho por coordenadas de 0 a 1, com 4×4 amostras por pixel para suavizar as bordas. O resultado é sempre
+// o mesmo: rodar de novo não muda os arquivos que já existem.
 
 const fs = require('fs');
 const path = require('path');
@@ -37,9 +39,14 @@ function inside(s, x, y) {
   return (x - cx) ** 2 + (y - cy) ** 2 <= s.r ** 2;
 }
 
+const ROOT = path.join(__dirname, '..');
+const IMAGES = path.join('assets', 'images');
+// Não use public/assets: é um caminho reservado do export web.
+const WEB_ICONS = path.join('public', 'icons');
+
 /**
- * Desenha um PNG `size`×`size`. `bg` = cor de fundo (ou null = transparente); `scale` encolhe o desenho em
- * volta do centro (área segura do ícone adaptativo do Android).
+ * Desenha um PNG `size`×`size` em `file` (caminho a partir da raiz do projeto). `bg` = cor de fundo (ou
+ * null = transparente); `scale` encolhe o desenho em volta do centro (área segura dos ícones adaptativos).
  */
 function render(file, size, { bg, ink, scale = 1 }) {
   const png = new PNG({ width: size, height: size });
@@ -64,17 +71,29 @@ function render(file, size, { bg, ink, scale = 1 }) {
       png.data[i + 3] = Math.round((a / (SS * SS)) * 255);
     }
   }
-  fs.writeFileSync(path.join(__dirname, '..', 'assets', 'images', file), PNG.sync.write(png));
-  console.log('ok', file, size);
+  const out = path.join(ROOT, file);
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  fs.writeFileSync(out, PNG.sync.write(png));
+  console.log('ok', file.split(path.sep).join('/'), size);
 }
 
 const color = { body: WHITE, ring: RING, pocket: POCKET, special: YELLOW };
 const mono = { body: WHITE, ring: [0, 0, 0, 0], pocket: WHITE, special: WHITE };
+const img = (name) => path.join(IMAGES, name);
+const web = (name) => path.join(WEB_ICONS, name);
 
-render('icon.png', 1024, { bg: RED, ink: color });
-render('favicon.png', 48, { bg: RED, ink: color });
-render('splash-icon.png', 288, { bg: null, ink: color });
+render(img('icon.png'), 1024, { bg: RED, ink: color });
+render(img('favicon.png'), 48, { bg: RED, ink: color });
+render(img('splash-icon.png'), 288, { bg: null, ink: color });
 // Android adaptativo: o desenho fica dentro da área segura (66% central).
-render('android-icon-foreground.png', 512, { bg: null, ink: color, scale: 0.62 });
-render('android-icon-background.png', 512, { bg: RED, ink: { body: RED, ring: RED, pocket: RED, special: RED } });
-render('android-icon-monochrome.png', 432, { bg: null, ink: mono, scale: 0.62 });
+render(img('android-icon-foreground.png'), 512, { bg: null, ink: color, scale: 0.62 });
+render(img('android-icon-background.png'), 512, { bg: RED, ink: { body: RED, ring: RED, pocket: RED, special: RED } });
+render(img('android-icon-monochrome.png'), 432, { bg: null, ink: mono, scale: 0.62 });
+
+// Web instalável (manifest.json): quadrados com fundo vermelho opaco, como o ícone do app.
+render(web('icon-192.png'), 192, { bg: RED, ink: color });
+render(web('icon-512.png'), 512, { bg: RED, ink: color });
+// "maskable": o Android recorta em círculo ou gota; o desenho cabe no círculo seguro (80% central).
+render(web('icon-maskable-512.png'), 512, { bg: RED, ink: color, scale: 0.8 });
+// iPhone ("Adicionar à Tela de Início"): 180×180 opaco; o iOS arredonda os cantos sozinho.
+render(web('apple-touch-icon.png'), 180, { bg: RED, ink: color });

@@ -4,6 +4,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { AppState, Platform } from 'react-native';
 
+import { hasAuthFragment, withoutFragment } from './auth-links';
+
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -26,7 +28,39 @@ const fetchWithTimeout: typeof fetch = (input, init) => {
   return fetch(input, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
 };
 
-/** null quando o .env não está configurado — o app funciona só local. */
+/**
+ * Na web, tira da barra de endereço (e do histórico) os tokens de um link de e-mail do Supabase
+ * (`#access_token=…&type=recovery`), deixando o caminho e o `?`. Não mexe em nenhum outro endereço.
+ */
+export function stripAuthFromAddressBar() {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+  const href = window.location.href;
+  if (!hasAuthFragment(href)) return;
+  try {
+    window.history.replaceState(window.history.state, '', withoutFragment(href));
+  } catch {}
+}
+
+/**
+ * Na web, o endereço com que a página abriu, quando veio de um link de e-mail do Supabase (nova senha, confirmação
+ * do cadastro). Guardado quando o app carrega; só a tela /nova-senha usa o que ficou guardado. null no celular, onde o
+ * link chega pelo expo-linking. Os tokens saem da barra já aqui, mas o roteador pode ter lido o endereço antes e
+ * guardar o # como parâmetro '#' da tela (e escrevê-lo de volta): a tela /nova-senha limpa os dois depois.
+ */
+const webAuthLink: string | null =
+  Platform.OS === 'web' && typeof window !== 'undefined' && hasAuthFragment(window.location.href) ? window.location.href : null;
+stripAuthFromAddressBar();
+
+export function initialWebAuthLink() {
+  return webAuthLink;
+}
+
+/**
+ * null quando o .env não está configurado — o app funciona só local. `detectSessionInUrl: false` (de propósito): nenhum
+ * endereço entra sozinho na conta; o link de nova senha é lido só pela tela /nova-senha. O fluxo é o implícito, o
+ * padrão do supabase-js: a sessão volta depois do # e o link vale mesmo aberto fora do aparelho que pediu (no PKCE,
+ * só no mesmo).
+ */
 export const supabase: SupabaseClient | null =
   url && anonKey
     ? createClient(url, anonKey, {

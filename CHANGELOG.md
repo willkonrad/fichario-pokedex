@@ -1,5 +1,16 @@
 # Notas da versão
 
+## 3.0.1 — Preparação para publicar (24/10/2026)
+
+- **Fichário no computador usa a tela inteira**: sem o teto de 1.440 px, o bolso cresce até a página caber na altura da janela (até 220 px). Numa tela de 2000 px o bolso passou de ~75 para ~126 px, e páginas, painel e barra do topo ficam centralizados e alinhados.
+- **Trocar, Mover e Remover à vista** na tela da carta, logo abaixo da posição (continuam também no ⋯ do topo).
+- **Web instalável**: o endereço publicado vira um app na tela inicial ("Instalar app" no Chrome, "Adicionar à Tela de Início" no Safari), com nome, cor e ícone do Fichário.
+- **Pronto para um APK Android** (EAS Build e atualizações pela internet), se um dia for preciso: só o app nativo atualiza os preços do MYP.
+- **Cadastro fechado**: só as contas que já existem entram; "Criar conta" explica e some. Senha com no mínimo 8 caracteres.
+- **Nova senha**: o link do "Esqueci minha senha" abre a tela "Nova senha", no app ou na web.
+- **Menos consumo de dados no servidor**: a cópia do catálogo só relê as cartas guardadas da TCGdex quando há coleção em inglês para ligar (de ~6,7 GB para ~0,2 GB por mês, abaixo do limite de 5 GB do plano grátis).
+- **Segurança**: as funções dos gatilhos saíram da API, e as Edge Functions usam a chave secreta nova do Supabase (as chaves antigas deixam de valer até o fim de 2026).
+
 ## 3.0.0 — Fichário mais fácil de usar, valor mais claro e cópia diária (24/10/2026)
 
 Revisão completa do app a partir de duas revisões da 2.8.0 (a geral e a "de estúdio"), em fundações, telas e qualidade.

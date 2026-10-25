@@ -1,9 +1,9 @@
--- Fichário Pokédex · banco de dados (Supabase, Postgres 17) — retrato completo da versão 3.0.0.
+-- Fichário Pokédex · banco de dados (Supabase, Postgres 17) — retrato completo da versão 3.0.1.
 --
 -- Este arquivo é o espelho do banco em produção: tabelas, regras de acesso (RLS), funções, gatilhos e crons, já com as
--- migrações de supabase/migrations/ aplicadas (20261024a_sync, 20261024b_catalog, 20261024c_pricing e
--- 20261024d_fixes). Pode rodar mais de uma vez (idempotente): cria o que falta e troca as funções pela versão daqui,
--- sem apagar dados.
+-- migrações de supabase/migrations/ aplicadas (20261024a_sync, 20261024b_catalog, 20261024c_pricing,
+-- 20261024d_fixes e 20261025a_hardening). Pode rodar mais de uma vez (idempotente): cria o que falta e troca as funções
+-- pela versão daqui, sem apagar dados.
 --
 -- Projeto novo: troque SEU_PROJECT_REF (cron do catalog-sync, no fim) e rode o arquivo inteiro no SQL Editor, ou com
 -- `supabase db query --linked -f supabase/schema.sql`.
@@ -68,6 +68,9 @@ create or replace trigger entries_touch before insert or update on public.entrie
   for each row execute function public.touch_updated_at();
 create or replace trigger binder_settings_touch before insert or update on public.binder_settings
   for each row execute function public.touch_updated_at();
+-- Funções de gatilho não são chamadas pela API. O Postgres confere o EXECUTE só ao criar o gatilho (o dono, postgres,
+-- continua com ele), não quando ele dispara.
+revoke execute on function public.touch_updated_at() from public, anon, authenticated;
 
 create index if not exists entries_user_updated on public.entries (user_id, updated_at);
 
@@ -120,6 +123,7 @@ $$;
 
 create or replace trigger entries_keep_prices before update on public.entries
   for each row execute function public.entries_keep_newer_prices();
+revoke execute on function public.entries_keep_newer_prices() from public, anon, authenticated;
 
 -- ===== Remoções registradas no servidor =====
 -- Carta apagada (removida, movida de bolso ou de fichário apagado) deixa um registro aqui, para os outros aparelhos
@@ -163,6 +167,9 @@ create or replace trigger entries_tombstone after delete on public.entries
   for each row execute function public.entries_tombstone();
 create or replace trigger entries_untombstone after insert on public.entries
   for each row execute function public.entries_untombstone();
+-- Security definer só para o gatilho gravar em entry_tombstones: ninguém chama pela API (/rest/v1/rpc/...).
+revoke execute on function public.entries_tombstone() from public, anon, authenticated;
+revoke execute on function public.entries_untombstone() from public, anon, authenticated;
 
 -- Apaga várias cartas de uma vez (p = { "<id>": "<quando foi removida, ISO>" }), menos as que foram alteradas depois
 -- da remoção (recolocadas em outro aparelho). Devolve os ids apagados. Roda com as permissões do usuário.

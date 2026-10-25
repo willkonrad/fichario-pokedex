@@ -1,13 +1,16 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { AccessibilityInfo, Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { AccessibilityInfo, Animated, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { FullWindowOverlay } from 'react-native-screens';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useKeyboardHeight } from '@/components/layout';
 import { NATIVE_DRIVER, useReducedMotion } from '@/components/motion';
-import { elevation, radius, semantic, space, TOUCH } from '@/theme';
+import { breakpoints, elevation, radius, semantic, space, TOUCH } from '@/theme';
 
 const WEB = Platform.OS === 'web';
+
+/** Largura máxima do aviso no canto (computador). */
+const CORNER_WIDTH = 400;
 
 /** Rótulo da ação que desfaz; na web, ela também responde ao Ctrl+Z (⌘Z no Mac). */
 const UNDO = 'Desfazer';
@@ -118,9 +121,72 @@ function isTextField(target: EventTarget | null) {
   return target instanceof HTMLInputElement && !/^(checkbox|radio|button|submit|reset|range|color|file)$/.test(target.type);
 }
 
+// Espaço que as telas abertas ocupam no rodapé (barra "Colocar", botão "+ Carta", rodapé de uma folha), da borda de
+// baixo da tela até o topo do elemento: o aviso fica acima dele, para não cobrir o botão de quem adiciona várias
+// cartas seguidas. Vale a maior reserva ativa (uma tela por baixo na pilha só deixa o aviso um pouco mais alto).
+// Com `left`/`right` (posição na janela), a reserva só vale para o aviso que passa por cima dessa faixa: no
+// computador, o aviso no canto direito fica embaixo quando o botão reservado está no meio da tela.
+type Clearance = { height: number; left?: number; right?: number };
+const clearances = new Map<number, Clearance>();
+let clearanceSeq = 0;
+// Cópia imutável das reservas, trocada a cada mudança: é o que a ToastHost lê (o React Compiler memoriza as contas da
+// tela pelos argumentos, então elas não podem ler o Map mutável direto).
+let clearanceList: Clearance[] = [];
+const clearanceListeners = new Set<() => void>();
+
+function subscribeClearance(listener: () => void) {
+  clearanceListeners.add(listener);
+  return () => {
+    clearanceListeners.delete(listener);
+  };
+}
+
+const getClearanceList = () => clearanceList;
+
+function changedClearances() {
+  clearanceList = [...clearances.values()];
+  clearanceListeners.forEach((l) => l());
+}
+
+/** Maior reserva que cruza a faixa horizontal do aviso (de `left` a `right`). */
+function clearanceFor(list: Clearance[], left: number, right: number) {
+  let max = 0;
+  for (const c of list) {
+    const crosses = c.left == null || c.right == null || (c.left < right && c.right > left);
+    if (crosses && c.height > max) max = c.height;
+  }
+  return max;
+}
+
+/**
+ * Reserva `height` px no rodapé enquanto o componente estiver montado (0 ou undefined: nenhuma). `span`: a faixa da
+ * janela que o elemento ocupa (sem ela, a largura inteira).
+ */
+export function useToastClearance(height: number | undefined, span?: { left: number; right: number }) {
+  const [id] = useState(() => ++clearanceSeq);
+  const left = span?.left;
+  const right = span?.right;
+  useEffect(() => {
+    if (!height) return;
+    clearances.set(id, { height, left, right });
+    changedClearances();
+    return () => {
+      clearances.delete(id);
+      changedClearances();
+    };
+  }, [id, height, left, right]);
+}
+
 /** Onde os avisos aparecem: montado uma vez no _layout, por cima de tudo (no iOS, também dos modais). */
 export function ToastHost() {
   const toast = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const reserved = useSyncExternalStore(subscribeClearance, getClearanceList, getClearanceList);
+  const { width } = useWindowDimensions();
+  // No computador o aviso fica no canto de baixo à direita, fora do caminho; no celular, ocupa a largura.
+  const corner = width >= breakpoints.desktop;
+  const toastRight = corner ? width - space.xxl : width - space.lg;
+  const toastLeft = corner ? toastRight - Math.min(CORNER_WIDTH, width - space.xxl * 2) : space.lg;
+  const clearance = clearanceFor(reserved, toastLeft, toastRight);
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboardHeight();
   const reduceMotion = useReducedMotion();
@@ -180,7 +246,8 @@ export function ToastHost() {
   const live = ios ? undefined : error ? 'assertive' : 'polite';
   // Acima do teclado aberto (ex.: "Adicionar por código", que reabre o campo para a próxima carta). No iOS, a altura do
   // teclado já cobre a área segura; no Android, vem sem a barra de navegação, que fica por baixo dele.
-  const bottom = Platform.OS === 'android' ? insets.bottom + keyboard : Math.max(insets.bottom, keyboard);
+  // Acima também do que a tela reservou no rodapé (useToastClearance), que já conta a área segura.
+  const bottom = Math.max(Platform.OS === 'android' ? insets.bottom + keyboard : Math.max(insets.bottom, keyboard), clearance);
   // Na web: mouse por cima e foco dentro seguram o aviso; Esc fecha (com o foco nele).
   const webHold = toast && WEB
     ? ({
@@ -199,7 +266,7 @@ export function ToastHost() {
 
   const content = (
     <View
-      style={[styles.layer, { paddingBottom: bottom + space.lg }]}
+      style={[styles.layer, corner && styles.layerCorner, { paddingBottom: bottom + space.lg }]}
       role={ios ? undefined : 'status'}
       aria-live={live}
       accessibilityLiveRegion={live}>
@@ -208,6 +275,7 @@ export function ToastHost() {
           {...webHold}
           style={[
             styles.toast,
+            corner && styles.toastCorner,
             !toast.actionLabel && { paddingRight: space.lg },
             error && styles.toastError,
             { opacity: progress, transform: [{ translateY }] },
@@ -252,6 +320,7 @@ const styles = StyleSheet.create({
     zIndex: 1000,
     pointerEvents: 'box-none',
   },
+  layerCorner: { alignItems: 'flex-end', paddingHorizontal: space.xxl },
   toast: {
     width: '100%',
     maxWidth: 560,
@@ -265,6 +334,7 @@ const styles = StyleSheet.create({
     paddingRight: space.xs,
     ...elevation[2],
   },
+  toastCorner: { maxWidth: CORNER_WIDTH },
   toastError: { borderLeftWidth: 4, borderLeftColor: semantic.danger.solid },
   body: { flex: 1, paddingVertical: space.md, justifyContent: 'center', minHeight: TOUCH },
   message: { color: semantic.inverse.fg, fontSize: 15, lineHeight: 20, fontWeight: '500' },

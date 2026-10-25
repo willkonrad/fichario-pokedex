@@ -117,6 +117,7 @@ export default function RootLayout() {
           <Stack.Screen name="search" options={{ title: 'Escolher carta' }} />
           <Stack.Screen name="menu" options={{ title: 'Minha coleção', presentation: 'modal' }} />
           <Stack.Screen name="account" options={{ title: 'Conta' }} />
+          <Stack.Screen name="nova-senha" options={{ title: 'Nova senha' }} />
           <Stack.Screen name="pokemon/[dex]" options={{ title: 'Escolher carta' }} />
           <Stack.Screen name="card" options={{ title: 'Carta' }} />
           {/* Telas novas da 3.0 (cada uma pode trocar o título com <Stack.Screen options={{ title }} />). */}

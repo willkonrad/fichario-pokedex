@@ -15,7 +15,22 @@ const cors = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...cors } });
 
-const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+/**
+ * Chave de serviço: a secreta nova (sb_secret_…, a "default" de SUPABASE_SECRET_KEYS, um JSON com as chaves por nome;
+ * SUPABASE_SECRET_KEY na CLI local) e, sem ela, a legada SUPABASE_SERVICE_ROLE_KEY, que a Supabase aposenta até o fim
+ * de 2026. Assim um deploy nunca fica sem chave.
+ */
+function serviceKey(): string {
+  try {
+    const keys = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') ?? '{}') as Record<string, unknown>;
+    if (typeof keys.default === 'string' && keys.default) return keys.default;
+  } catch {
+    // JSON inválido: segue para as outras.
+  }
+  return Deno.env.get('SUPABASE_SECRET_KEY') || Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+}
+
+const admin = createClient(Deno.env.get('SUPABASE_URL')!, serviceKey());
 
 /** Palavras sem acento, com "Pokémon Day" e "Pokeday" (TCGdex) escritos do mesmo jeito. */
 const words = (s: string) =>
@@ -33,10 +48,15 @@ const SET_STOP = new Set(['the', 'and', 'pokemon', 'set', 'series']);
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: cors });
   try {
-    const { cardId, stamps } = (await req.json()) as { cardId?: string; stamps?: string[] };
+    // Corpo que não é JSON, ou é null, vale como pedido vazio.
+    const body: { cardId?: unknown; stamps?: unknown } = (await req.json().catch(() => null)) ?? {};
+    const { cardId, stamps } = body;
+    // Pedido fora do formato do app (a função só devolve dados públicos do catálogo): nada a procurar.
+    const list = Array.isArray(stamps) ? stamps.filter((s): s is string => typeof s === 'string').slice(0, 20) : [];
+    if (typeof cardId !== 'string' || cardId.length > 64) return json({});
     // 1ª edição não é produto à parte na TCGplayer.
-    const keys = (stamps ?? []).filter((s) => s !== 'set-logo' && s !== '1st-edition');
-    const setLogo = (stamps ?? []).includes('set-logo');
+    const keys = list.filter((s) => s !== 'set-logo' && s !== '1st-edition');
+    const setLogo = list.includes('set-logo');
     if (!cardId || (!keys.length && !setLogo)) return json({});
 
     const { data, error } = await admin

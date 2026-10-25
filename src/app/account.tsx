@@ -1,11 +1,13 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import * as Linking from 'expo-linking';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { BackupCard } from '@/components/collection-backup';
 import { SyncNotice, syncSummary } from '@/components/collection-notices';
 import { Button, Card, Input, Notice, Section, showToast } from '@/components/ui';
+import { authErrorText, isSignupDisabled, MIN_PASSWORD, RESET_PATH, SIGNUP_CONFIRM_PATH } from '@/lib/auth-links';
 import { formatWhen } from '@/lib/format';
 import { clearHistoryCache } from '@/lib/history';
 import { supabase } from '@/lib/supabase';
@@ -13,7 +15,6 @@ import { useCollection } from '@/store/collection';
 import { colors, radius, space, typography, widths } from '@/theme';
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const MIN_PASSWORD = 6;
 
 /**
  * Conta e sincronização, e a cópia da coleção (S7). `primeira=1`: veio da primeira abertura ("Já uso em outro
@@ -44,7 +45,9 @@ function AccountContent({ firstRun, backupFirst, title }: { firstRun: boolean; b
   const [busy, setBusy] = useState<'in' | 'up' | 'reset' | 'sync' | 'out' | null>(null);
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
   // Qual botão foi tocado por último (para marcar só os campos que ele precisa).
-  const [checked, setChecked] = useState<'login' | 'reset' | null>(null);
+  const [checked, setChecked] = useState<'in' | 'up' | 'reset' | null>(null);
+  // O servidor disse que o cadastro está fechado: "Criar conta" sai da tela (o aviso explica).
+  const [signupClosed, setSignupClosed] = useState(false);
   // Se o aparelho estava mesmo sem fichário quando a coleção terminou de carregar (recarregar a página em
   // /account?primeira=1 com o fichário já montado não é "receber da nuvem").
   const [startedEmpty, setStartedEmpty] = useState<boolean | null>(null);
@@ -62,30 +65,36 @@ function AccountContent({ firstRun, backupFirst, title }: { firstRun: boolean; b
   }, [arrived]);
 
   const validEmail = EMAIL.test(email.trim());
-  const validPassword = password.length >= MIN_PASSWORD;
+  // O mínimo vale só para senha nova: uma conta antiga pode ter senha mais curta e continua entrando.
+  const passwordMissing = checked === 'in' ? !password : checked === 'up' ? password.length < MIN_PASSWORD : false;
 
   async function run(op: 'in' | 'up') {
     if (busy) return;
-    setChecked('login');
+    setChecked(op);
     // Os botões ficam sempre ativos: o que falta é dito ao tocar (U4).
     if (!validEmail) return setMessage({ text: 'Digite um e-mail válido.', error: true });
-    if (!validPassword) return setMessage({ text: `A senha precisa ter pelo menos ${MIN_PASSWORD} caracteres.`, error: true });
+    if (op === 'in' && !password) return setMessage({ text: 'Digite sua senha.', error: true });
+    if (op === 'up' && password.length < MIN_PASSWORD) return setMessage({ text: `A senha precisa ter pelo menos ${MIN_PASSWORD} caracteres.`, error: true });
     setBusy(op);
     setMessage(null);
     try {
+      // O link de confirmação do cadastro volta para esta tela (no APK, pokedexbinder://account), e não para a Site URL.
       const { error, data } =
         op === 'in'
           ? await sb.auth.signInWithPassword({ email: email.trim(), password })
-          : await sb.auth.signUp({ email: email.trim(), password });
-      if (error) setMessage({ text: translateAuthError(error.message), error: true });
-      else if (op === 'up' && !data.session) setMessage({ text: 'Conta criada! Confirme pelo link enviado ao seu e-mail e depois entre.' });
+          : await sb.auth.signUp({ email: email.trim(), password, options: { emailRedirectTo: Linking.createURL(SIGNUP_CONFIRM_PATH) } });
+      if (error) {
+        if (op === 'up' && isSignupDisabled(error)) setSignupClosed(true);
+        setMessage({ text: authErrorText(error), error: true });
+      } else if (op === 'up' && !data.session) setMessage({ text: 'Conta criada! Confirme pelo link enviado ao seu e-mail e depois entre.' });
     } catch (e) {
-      setMessage({ text: translateAuthError(e instanceof Error ? e.message : String(e)), error: true });
+      setMessage({ text: authErrorText(e), error: true });
     }
     setBusy(null);
   }
 
   async function resetPassword() {
+    if (busy) return;
     if (!validEmail) {
       setChecked('reset');
       return setMessage({ text: 'Digite seu e-mail acima para receber o link de nova senha.', error: true });
@@ -93,10 +102,18 @@ function AccountContent({ firstRun, backupFirst, title }: { firstRun: boolean; b
     setBusy('reset');
     setMessage(null);
     try {
-      const { error } = await sb.auth.resetPasswordForEmail(email.trim());
-      setMessage(error ? { text: translateAuthError(error.message), error: true } : { text: `Enviamos um link para ${email.trim()} criar uma nova senha.` });
+      // O link do e-mail volta para a tela de nova senha: pokedexbinder://nova-senha no APK, https://<site>/nova-senha
+      // na web. O endereço precisa estar nas Redirect URLs do Supabase (senão o link cai na Site URL).
+      const { error } = await sb.auth.resetPasswordForEmail(email.trim(), { redirectTo: Linking.createURL(RESET_PATH) });
+      const where =
+        Platform.OS === 'web' ? 'Toque no link do e-mail para criar uma nova senha.' : 'Abra o e-mail neste celular: o link volta para o app, onde você cria a nova senha.';
+      setMessage(
+        error
+          ? { text: authErrorText(error), error: true }
+          : { text: `Enviamos um link para ${email.trim()}. ${where} Se não chegar em alguns minutos, olhe a caixa de spam.` },
+      );
     } catch (e) {
-      setMessage({ text: translateAuthError(e instanceof Error ? e.message : String(e)), error: true });
+      setMessage({ text: authErrorText(e), error: true });
     }
     setBusy(null);
   }
@@ -118,12 +135,13 @@ function AccountContent({ firstRun, backupFirst, title }: { firstRun: boolean; b
     setBusy('out');
     setMessage(null);
     try {
-      const { error } = await sb.auth.signOut();
+      // Só este aparelho: o padrão do supabase-js ('global') tiraria a conta também do celular ou da web.
+      const { error } = await sb.auth.signOut({ scope: 'local' });
       // O histórico guardado na memória é desta conta.
       clearHistoryCache();
-      if (error) setMessage({ text: translateAuthError(error.message), error: true });
+      if (error) setMessage({ text: authErrorText(error), error: true });
     } catch (e) {
-      setMessage({ text: translateAuthError(e instanceof Error ? e.message : String(e)), error: true });
+      setMessage({ text: authErrorText(e), error: true });
     }
     setBusy(null);
   }
@@ -188,7 +206,7 @@ function AccountContent({ firstRun, backupFirst, title }: { firstRun: boolean; b
         <Text style={[styles.text, styles.center]}>Suas cartas em qualquer aparelho, com o histórico do valor.</Text>
       </View>
       <Card>
-        <Section title="Entrar ou criar conta">
+        <Section title="Entrar na sua conta">
           <Input
             value={email}
             onChangeText={setEmail}
@@ -201,22 +219,18 @@ function AccountContent({ firstRun, backupFirst, title }: { firstRun: boolean; b
             accessibilityLabel="E-mail"
             invalid={!!checked && !validEmail}
           />
-          <View style={styles.field}>
-            <Input
-              value={password}
-              onChangeText={setPassword}
-              placeholder="Senha"
-              secureTextEntry
-              autoComplete="password"
-              textContentType="password"
-              returnKeyType="go"
-              accessibilityLabel="Senha"
-              accessibilityHint={`Pelo menos ${MIN_PASSWORD} caracteres`}
-              invalid={checked === 'login' && !validPassword}
-              onSubmitEditing={() => run('in')}
-            />
-            <Text style={styles.fieldHint}>Pelo menos {MIN_PASSWORD} caracteres</Text>
-          </View>
+          <Input
+            value={password}
+            onChangeText={setPassword}
+            placeholder="Senha"
+            secureTextEntry
+            autoComplete="password"
+            textContentType="password"
+            returnKeyType="go"
+            accessibilityLabel="Senha"
+            invalid={passwordMissing}
+            onSubmitEditing={() => run('in')}
+          />
         </Section>
         {message ? (
           <View style={styles.message}>
@@ -225,24 +239,15 @@ function AccountContent({ firstRun, backupFirst, title }: { firstRun: boolean; b
         ) : null}
         <View style={styles.buttons}>
           <Button title="Entrar" icon="log-in-outline" onPress={() => run('in')} busy={busy === 'in'} />
-          <Button title="Criar conta" variant="secondary" onPress={() => run('up')} busy={busy === 'up'} />
-          <Button title="Esqueci minha senha" variant="ghost" onPress={resetPassword} busy={busy === 'reset'} />
+          <Button title="Esqueci minha senha" variant="secondary" onPress={resetPassword} busy={busy === 'reset'} />
+          {/* App de uso pessoal: o cadastro fica fechado no Supabase. O botão discreto continua para um projeto com
+              cadastro aberto; com ele fechado, o toque explica e o botão some. */}
+          {signupClosed ? null : <Button title="Criar conta" variant="ghost" onPress={() => run('up')} busy={busy === 'up'} />}
         </View>
       </Card>
       {backupFirst ? null : backup}
     </ScrollView>
   );
-}
-
-/** Mensagens comuns do login em português. */
-function translateAuthError(msg: string) {
-  if (/invalid login credentials/i.test(msg)) return 'E-mail ou senha incorretos.';
-  if (/email not confirmed/i.test(msg)) return 'Confirme seu e-mail pelo link que enviamos antes de entrar.';
-  if (/already registered|already exists/i.test(msg)) return 'Já existe uma conta com esse e-mail. Use "Entrar".';
-  if (/rate limit|too many/i.test(msg)) return 'Muitas tentativas seguidas. Espere um pouco e tente de novo.';
-  if (/password/i.test(msg) && /(weak|short|least|characters)/i.test(msg)) return 'Senha fraca: use uma senha mais longa, com letras e números.';
-  if (/network|fetch/i.test(msg)) return 'Sem conexão com a internet.';
-  return `Não consegui concluir agora (${msg}). Tente de novo em instantes.`;
 }
 
 const styles = StyleSheet.create({
@@ -258,8 +263,6 @@ const styles = StyleSheet.create({
   intro: { alignItems: 'center', gap: space.sm, paddingVertical: space.sm },
   introIcon: { width: 56, height: 56, borderRadius: radius.pill, backgroundColor: colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' },
   introTitle: { ...typography.title, color: colors.text, textAlign: 'center' },
-  field: { gap: space.xs },
-  fieldHint: { ...typography.caption, color: colors.textMuted },
   message: { marginBottom: space.md },
   buttons: { gap: space.sm },
 });

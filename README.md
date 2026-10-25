@@ -94,25 +94,66 @@ Rode os três antes de dar uma mudança por pronta. Os testes ficam em `tests/` 
    npx supabase functions deploy stamp-image                    # foto da versão com selo, chamada pelo app
    ```
 5. Os preços do MYP são buscados pelo app no celular (sem token, a API do MYP não atende servidores).
+6. Em **Authentication → URL Configuration**, ponha o endereço do app na *Site URL* e nas *Redirect URLs* (`https://<nome>.expo.app/**`, `pokedexbinder://**`, `http://localhost:8081/**`): é para lá que voltam os links de nova senha. Num app de uso pessoal, desligue também "Allow new users to sign up" depois de criar a sua conta. Detalhes em [docs/arquitetura.md](docs/arquitetura.md#auth-do-supabase-com-o-endereço-no-ar).
 
 Mudanças no banco já em uso vão num arquivo novo em `supabase/migrations/`, aplicado com `npx supabase db query --linked -f supabase/migrations/<arquivo>.sql` (ou pelo MCP do Supabase) e depois espelhado em `supabase/schema.sql`. O passo a passo está em [docs/arquitetura.md](docs/arquitetura.md).
 
-Nenhuma chave ou senha fica no código: todas ficam nos Secrets do Supabase (e no Vault, a chave do cron) ou no `.env` local, que não vai para o repositório. O repositório é público: confira se não há segredo no que vai subir antes de cada push.
+Nenhuma chave ou senha fica no código: todas ficam nos Secrets do Supabase (e no Vault, a chave do cron) ou no `.env` local, que não vai para o repositório. A URL e a chave publicável do Supabase (`EXPO_PUBLIC_*`) vão embutidas no app e na web (quem protege os dados é o RLS) e, para os builds, ficam também nas variáveis de ambiente do EAS, nunca no `eas.json`. O repositório é público: confira se não há segredo no que vai subir antes de cada push.
+
+## Publicar (web e APK Android)
+
+O app sai em dois lugares, no plano grátis da Expo:
+
+- **Web** no EAS Hosting, em `https://<nome>.expo.app`, instalável pelo navegador ("Instalar app" no Chrome, "Adicionar à Tela de Início" no Safari). O manifesto e os ícones ficam em `public/` (ícones gerados por `node scripts/make-icons.js`).
+- **APK Android** pelo EAS Build (perfil `preview`, distribuição interna), instalado pelo link ou QR do build. As versões seguintes chegam pelo **EAS Update**, sem build novo, enquanto a mudança for só no código JS/TS.
+
+O `eas.json` tem os perfis `preview` (APK, canal `preview`) e `production` (canal `production`). O `app.json` já tem `android.package`, `ios.bundleIdentifier` e `runtimeVersion` (`fingerprint`); o `eas init` e o `update:configure` acrescentam `owner`, `extra.eas.projectId` e `updates.url`, que não são segredo.
+
+Uma vez só, antes do primeiro APK (o login é do dono, com a senha dele; o resto pode ser rodado pelo Claude). O `env:push` leva todas as variáveis do arquivo, então o `.env` só pode ter as duas `EXPO_PUBLIC_*`:
+
+```bash
+npx eas-cli@latest login                 # dono
+npx eas-cli@latest whoami
+npx eas-cli@latest init                  # cria o projeto no expo.dev; grava owner e projectId no app.json
+npx eas-cli@latest update:configure      # grava updates.url no app.json
+npx eas-cli@latest env:push --environment preview --environment production --path .env
+npx eas-cli@latest env:list --environment preview    # confira as duas EXPO_PUBLIC_*
+```
+
+APK Android e atualizações:
+
+```bash
+npx eas-cli@latest build -p android --profile preview      # 1º build: responder Y para gerar o keystore
+npx eas-cli@latest update --channel preview --environment preview -p android --message "3.0.1: ..."
+```
+
+Web:
+
+```bash
+npx expo export --platform web --clear           # lê o .env e embute as EXPO_PUBLIC_* no JS
+npx eas-cli@latest deploy --dev-domain <nome>    # 1ª vez: escolhe o subdomínio (reservado para sempre) e cria uma prévia
+npx eas-cli@latest deploy --prod                 # produção em https://<nome>.expo.app
+```
+
+- **Guarde o keystore do Android**: `npx eas-cli@latest credentials -p android` → "Keystore" → "Download existing keystore", mostrando as informações sensíveis. Guarde o `.jks` e as três senhas que aparecem juntos, fora do repositório (não use a opção "credentials.json", que grava as senhas na raiz do projeto). Sem eles, uma versão nova não instala por cima e é preciso desinstalar o app (o que apaga os dados do aparelho).
+- **Build novo** só quando muda o lado nativo: biblioteca com código nativo (ou a versão dela), plugin, ícone, abertura ou outro campo do `app.json`, ou o SDK. O `fingerprint` impede que um update chegue a um build incompatível. Detalhes em [docs/arquitetura.md](docs/arquitetura.md#publicar-web-e-apk-android).
 
 ## Estrutura
 
-- `src/app/` — telas (Expo Router): fichário (`index`), carta, busca e "+ Carta" (`search`), cartas de um Pokémon (`pokemon/[dex]`), buscar na coleção (`find`), listas (`lists`), Minha coleção (`menu`), fichários, configuração, conta e "Sobre e fontes" (`about`).
+- `src/app/` — telas (Expo Router): fichário (`index`), carta, busca e "+ Carta" (`search`), cartas de um Pokémon (`pokemon/[dex]`), buscar na coleção (`find`), listas (`lists`), Minha coleção (`menu`), fichários, configuração, conta, nova senha pelo link do e-mail (`nova-senha`) e "Sobre e fontes" (`about`).
 - `src/store/collection.tsx` — a coleção: armazenamento no aparelho (uma chave por carta), sincronização com o Supabase e os ganchos de leitura por assunto.
 - `src/lib/valuation.ts` — regra do valor da carta; `quotes.ts` — somas da coleção; `history.ts` — histórico e variação; `copy.ts` — nomes e textos do valor; `format.ts` — reais, números e datas.
 - `src/lib/myp-api.ts`, `myp-match.ts`, `tcgplayer.ts` — preços do MYP Cards e da TCGplayer.
 - `src/lib/tcgdex.ts`, `catalog.ts`, `variants.ts`, `ptcg.ts` — catálogo, busca, versões e imagens reserva.
 - `src/lib/binder.ts` — contas das páginas e da posição física; `add-card.ts` — fluxo "+ Carta"; `lists.ts` — buscar na coleção e listas; `backup.ts` — exportar e importar.
+- `src/lib/supabase.ts` — cliente do Supabase (sem `.env`, o app fica só local); `auth-links.ts` — cadastro fechado, links dos e-mails (nova senha) e erros da conta em português.
 - `src/components/` — componentes visuais (`ui.tsx` reexporta toast, folha de informação, esboços e ícones), partes das telas (`home-*`, `collection-*`, `add-*`, `card-*`) e os buscadores de preço em segundo plano (`myp-refresher.tsx`, `tcgplayer-refresher.tsx`).
 - `src/theme.ts` — cores com significado, tipografia, espaços e larguras.
 - `src/data/pokedex.json` — os 1.025 Pokémon (nomes em PT, EN e JP), gerado a partir da PokéAPI.
 - `supabase/schema.sql` — o banco inteiro; `supabase/migrations/` — as mudanças aplicadas em cada versão; `supabase/functions/` — Edge Functions `catalog-sync` e `stamp-image`.
 - `tests/` — testes automatizados (Jest) da lógica pura.
-- `scripts/make-icons.js` — gera o ícone, o ícone adaptativo do Android, o favicon e a imagem de abertura.
+- `scripts/make-icons.js` — gera o ícone, o ícone adaptativo do Android, o favicon, a imagem de abertura e os ícones da web instalável.
+- `public/` — página da web (`index.html`), manifesto (`manifest.json`) e ícones (`icons/`) do app instalável; `eas.json` — perfis de build e canais do EAS.
 - `docs/` — [arquitetura](docs/arquitetura.md) (mapa para quem chega), [design](docs/design.md) (sistema visual) e o registro das revisões da 2.0.0.
 
 ## Licença

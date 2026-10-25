@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="%LANG_ISO_CODE%">
+  <head>
+    <meta charset="utf-8" />
+    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <title>%WEB_TITLE%</title>
+    <!--
+      App instalável (PWA): manifesto e ícones ficam em public/ (ícones gerados por scripts/make-icons.js).
+      A cor do tema (theme-color) e a descrição entram sozinhas no export, vindas de web.themeColor e
+      web.description do app.json; o favicon vem de web.favicon. Sem service worker de propósito: o cache
+      dele impediria o app de receber a versão nova.
+    -->
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="Fichário" />
+    <!-- The `react-native-web` recommended style reset: https://necolas.github.io/react-native-web/docs/setup/#root-element -->
+    <style id="expo-reset">
+      /* These styles make the body full-height */
+      html,
+      body {
+        height: 100%;
+      }
+      /* These styles disable body scrolling if you are using <ScrollView> */
+      body {
+        overflow: hidden;
+      }
+      /* These styles make the root element full-height */
+      #root {
+        display: flex;
+        height: 100%;
+        flex: 1;
+      }
+    </style>
+  </head>
+
+  <body>
+    <noscript>Ative o JavaScript do navegador para usar o Fichário Pokédex.</noscript>
+    <!-- Onde o app é montado. -->
+    <div id="root"></div>
+  </body>
+</html>

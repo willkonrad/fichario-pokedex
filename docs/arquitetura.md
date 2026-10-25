@@ -29,15 +29,17 @@ Minha coleção  <----- lê ---------     price_history  <-- price-snapshot (23:
 
 | Pasta | O que tem |
 |---|---|
-| `src/app/` | Telas (cada arquivo é uma rota): `index` (fichário), `card`, `search` (escolher carta e "+ Carta"), `pokemon/[dex]`, `find`, `lists`, `menu` (Minha coleção), `binders`, `binder-edit`, `setup`, `account`, `about`. `_layout.tsx` monta o provider da coleção, os buscadores de preço, o toast e as telas de erro. |
+| `src/app/` | Telas (cada arquivo é uma rota): `index` (fichário), `card`, `search` (escolher carta e "+ Carta"), `pokemon/[dex]`, `find`, `lists`, `menu` (Minha coleção), `binders`, `binder-edit`, `setup`, `account`, `nova-senha` (aberta pelo link do e-mail de nova senha), `about`. `_layout.tsx` monta o provider da coleção, os buscadores de preço, o toast e as telas de erro. |
 | `src/store/` | `collection.tsx`: estado da coleção, armazenamento no aparelho, sincronização e os ganchos de leitura (`useEntries`, `useEntry`, `useSettings`, `useBinders`, `useActiveBinderId`, `useSyncStatus`, `useCollectionActions`…). |
-| `src/lib/` | Lógica sem tela: valor (`valuation`, `quotes`, `history`), textos e formatos (`copy`, `format`), preços (`myp-api`, `myp-match`, `tcgplayer`), catálogo (`tcgdex`, `catalog`, `variants`, `ptcg`, `stamp-image`), fichário (`binder`), adicionar e listas (`add-card`, `lists`), cópia (`backup`), Supabase (`supabase`) e tipos (`types`). |
+| `src/lib/` | Lógica sem tela: valor (`valuation`, `quotes`, `history`), textos e formatos (`copy`, `format`), preços (`myp-api`, `myp-match`, `tcgplayer`), catálogo (`tcgdex`, `catalog`, `variants`, `ptcg`, `stamp-image`), fichário (`binder`), adicionar e listas (`add-card`, `lists`), cópia (`backup`), Supabase (`supabase`), conta fechada e links dos e-mails do Auth (`auth-links`) e tipos (`types`). |
 | `src/components/` | `ui.tsx` (componentes base e reexporta toast, folha de informação, esboços, ícones, layout), partes das telas (`home-*`, `card-*`, `collection-*`, `add-*`), `binder-slot`, `card-grid`, `card-image`, `price-panel`, `line-chart` e os buscadores `myp-refresher` e `tcgplayer-refresher`. |
 | `src/theme.ts` | Tokens: cores com significado (`semantic`), tipografia (`type`), espaços, larguras e contraste. |
 | `src/data/` | `pokedex.json` (1.025 Pokémon em PT, EN e JP) e a busca de espécies (`pokedex.ts`). |
 | `supabase/` | `schema.sql` (o banco inteiro), `migrations/` (o que mudou em cada versão) e `functions/` (`catalog-sync`, `stamp-image`). |
 | `tests/` | Testes automatizados (Jest com `jest-expo`) da lógica pura; configuração em `jest.config.js`. |
-| `scripts/` | `make-icons.js` (ícones e imagem de abertura). |
+| `scripts/` | `make-icons.js` (ícones, imagem de abertura e os ícones da web instalável em `public/icons/`). |
+| `public/` | Copiado para a raiz do site no export web: `index.html` (modelo da página), `manifest.json` e `icons/` do app instalável. Não use `public/assets`, que é reservado. |
+| `eas.json` | Perfis de build do EAS (`preview` = APK interno, `production`) e o canal de atualização de cada um. Nunca guarda valores de variáveis. |
 
 ## Fluxo dos dados
 
@@ -59,7 +61,7 @@ Minha coleção  <----- lê ---------     price_history  <-- price-snapshot (23:
 
 ### Catálogo
 
-- **`catalog-sync`** (Edge Function em Deno, `supabase/functions/catalog-sync/`): o pg_cron a chama a cada 10 min (`2-59/10 * * * *`) com o cabeçalho `x-sync-key`, conferido pela `check_liga_sync_key` contra a chave `liga_sync_key` do Vault. A cada execução: relê a lista de coleções do TCGCSV só quando ela muda; baixa as coleções alteradas; lê as coleções da TCGdex (`tcgdex_sets`) para ligar as cartas; religa as coleções com regra antiga (`LINK_VERSION`, `relink_catalog`); copia os preços de cada coleção 1×/dia (`upsert_tcg_prices`) e a PTAX (`fx_rates`). A regra de ligação TCGCSV → TCGdex está em `link.ts`.
+- **`catalog-sync`** (Edge Function em Deno, `supabase/functions/catalog-sync/`): o pg_cron a chama a cada 10 min (`2-59/10 * * * *`) com o cabeçalho `x-sync-key`, conferido pela `check_liga_sync_key` contra a chave `liga_sync_key` do Vault. A cada execução: relê a lista de coleções do TCGCSV só quando ela muda; baixa as coleções alteradas; lê as cartas da TCGdex guardadas (`tcgdex_sets`, ~1,4 MB) para ligar as cartas, só quando há coleção em inglês para copiar ou religar (a execução sem nada para fazer lê poucos KB do banco, por causa da cota de egress do plano Free); religa as coleções com regra antiga (`LINK_VERSION`, `relink_catalog`); copia os preços de cada coleção 1×/dia (`upsert_tcg_prices`) e a PTAX (`fx_rates`). A regra de ligação TCGCSV → TCGdex está em `link.ts`.
 - **Registro**: cada execução vira uma linha em `catalog_sync_runs` (`ok`, `partial` ou `error`, com o relatório), guardada por 14 dias. `catalog_sync_status()` resume a última execução, as falhas de 24 h e a idade do catálogo, dos preços e do câmbio para a tela "Sobre e fontes".
 - **No app**: `tcgdex.ts` junta a TCGdex, o catálogo e o Zukan, com cache na memória e no aparelho (chaves `tcgdex:`, `ptcg:`, `scrydex:`, `zukan:`, com validade; a limpeza diária tira as vencidas). `catalog.ts` lê `tcg_catalog`; a busca usa `name_plain`, calculada no banco por `catalog_plain()`, igual ao `plainName()` do app. `variants.ts` monta as versões da carta; `ptcg.ts` acha a imagem reserva; a Edge Function `stamp-image` acha a foto da versão com selo.
 
@@ -96,6 +98,7 @@ Minha coleção  <----- lê ---------     price_history  <-- price-snapshot (23:
 | Páginas, regiões e posição física | `src/lib/binder.ts` |
 | "Tenho" por versão | `ownershipOf` (`src/components/owned-badge.tsx`) |
 | Sincronização e conflitos | `src/store/collection.tsx` (`mergeEntry`, `mergeSettings`) e, no banco, os gatilhos e `delete_entries` |
+| Cadastro fechado, nova senha e links dos e-mails do Auth | `src/lib/auth-links.ts` (leitura do link e textos), `src/app/account.tsx` e `src/app/nova-senha.tsx`; no painel do Supabase, as Redirect URLs ([Auth do Supabase](#auth-do-supabase-com-o-endereço-no-ar)) |
 | Cores, tipografia, espaços | `src/theme.ts` e [design.md](design.md) |
 
 ## Mudar o banco (migração)
@@ -118,8 +121,60 @@ npx supabase functions deploy stamp-image                    # chamada pelo app 
 ```
 
 - Aplique antes a migração de que a função depende.
-- As funções usam só `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY`, que o Supabase já fornece. Um segredo novo vai com `npx supabase secrets set NOME=valor`, nunca no código.
+- As funções usam só o que o Supabase já fornece: `SUPABASE_URL` e a chave secreta nova (a `default` de `SUPABASE_SECRET_KEYS`), com a legada `SUPABASE_SERVICE_ROLE_KEY` de reserva enquanto ela existir (a Supabase a aposenta até o fim de 2026). A `catalog-sync` anota no relatório de cada execução qual das duas usou (`report->>'apiKey'` em `catalog_sync_runs`); desative as chaves legadas só depois de ver `secret` ali. Um segredo novo vai com `npx supabase secrets set NOME=valor`, nunca no código.
 - Confira depois: `npx supabase functions list` (só `catalog-sync` e `stamp-image`) e, para o catálogo, `select started_at, status, error from public.catalog_sync_runs order by started_at desc limit 5;` ou a tela "Sobre e fontes" do app.
+
+## Publicar (web e APK Android)
+
+Tudo no plano grátis da Expo (EAS): a web no EAS Hosting (`https://<nome>.expo.app`) e o app Android como APK de distribuição interna, atualizado pelo EAS Update. Já está no repositório:
+
+- `public/index.html`, o modelo da página no `web.output: "single"` (criado com `npx expo customize public/index.html`; mantenha `%LANG_ISO_CODE%`, `%WEB_TITLE%` e o `<style id="expo-reset">`), com o link do manifesto e o `apple-touch-icon`. A cor do tema, a descrição e o favicon entram no export vindos de `web.*` do `app.json`. O `+html.tsx` só vale para `static`/`server` e não serve aqui.
+- `public/manifest.json` e `public/icons/` (192, 512, 512 "maskable" e 180 do iPhone), gerados por `node scripts/make-icons.js`. Sem service worker, de propósito: o cache dele impediria a versão nova de chegar.
+- `expo-updates` instalado (precisa estar no primeiro APK), `runtimeVersion: { "policy": "fingerprint" }` e `android.package` / `ios.bundleIdentifier` = `com.willkonrad.fichariopokedex`. O package é **permanente**: trocar cria outro app.
+- `eas.json`: `preview` (APK interno, ambiente e canal `preview`) e `production` (ambiente e canal `production`, número do build sobe sozinho), com `cli.appVersionSource: "remote"` (o EAS guarda o número do build).
+
+### Uma vez só
+
+Faça tudo isto **antes do primeiro APK**: `owner`, `projectId` e `updates.url` entram no fingerprint, e um APK feito antes deles não recebe os updates de depois. Aplique também as migrações da versão no banco (seção "Mudar o banco") antes do primeiro APK ou deploy; sem elas o app novo mostra "O banco da nuvem ainda não tem a atualização desta versão do app."
+
+1. **Dono**: conta grátis em expo.dev e, no terminal do projeto, `npx eas-cli@latest login` (a senha é digitada por ele) e `npx eas-cli@latest whoami`.
+2. `npx eas-cli@latest init`: cria o projeto e grava `owner` e `extra.eas.projectId` no `app.json` (vão para o repositório; não são segredo).
+3. `npx eas-cli@latest update:configure`: grava `updates.url` (`https://u.expo.dev/<projectId>`) e mantém o `runtimeVersion` e os canais do `eas.json`.
+4. `npx eas-cli@latest env:push --environment preview --environment production --path .env`: leva as duas `EXPO_PUBLIC_*` do `.env` para o EAS (como *plaintext*). O `.env` fica fora do git, então não chega ao servidor de build, e o `eas update` só usa as variáveis do EAS. Sem elas o app abre em "só local", sem erro: confira com `npx eas-cli@latest env:list --environment preview` antes de cada build. Visibilidade *plaintext* ou *sensitive*, nunca *secret*, e nunca valores no `eas.json`. O `env:push` leva **todas** as variáveis do arquivo (as que não são `EXPO_PUBLIC_*` vão como *sensitive*): o `.env` só pode ter as duas `EXPO_PUBLIC_*`. Senão, cadastre uma a uma com `npx eas-cli@latest env:create`.
+
+### APK Android
+
+```bash
+npx eas-cli@latest build -p android --profile preview
+npx eas-cli@latest update --channel preview --environment preview -p android --message "3.0.1: ..."
+```
+
+- No primeiro build, responda **Y** para o EAS gerar o keystore. Instale pelo link ou QR da página do build (permitindo "instalar apps desconhecidos"; se o Android barrar, `adb install <arquivo>.apk` pelo PC).
+- **Guarde o keystore**: `npx eas-cli@latest credentials -p android` → perfil `preview` → "Keystore: Manage everything needed to build your project" → "Download existing keystore", respondendo **sim** para mostrar as informações sensíveis. O arquivo `@<conta>__pokedex-binder.jks` cai na pasta do projeto (o `.gitignore` ignora `*.jks`): mova-o para fora e guarde junto as três informações que aparecem (*Keystore password*, *Key alias*, *Key password*), porque o arquivo sem elas não serve. Não use a opção "credentials.json", que grava as senhas em texto num arquivo da raiz do projeto. Sem o keystore, uma versão nova não instala por cima: seria preciso desinstalar, o que apaga os dados do aparelho.
+- O app procura a atualização ao abrir (`checkAutomatically: ON_LOAD`, o padrão) e a aplica na abertura seguinte. Para voltar atrás: `npx eas-cli@latest update:rollback`.
+- **Build novo** quando o fingerprint muda: biblioteca com código nativo (inclusive subir a versão de uma, como faz o `npx expo install --fix`), plugin, ícone, abertura, qualquer campo do `app.json` menos `version` (inclusive `web.*`), os `scripts` do `package.json`, o `.gitignore` ou o SDK. Confira antes com `npx expo-updates runtimeversion:resolve --platform android` e compare com o runtime do build no expo.dev; um update de outro runtime não chega ao build antigo.
+- Rode o `build` e o `update` no mesmo PC (o Windows do dono): o fingerprint lê o `.gitignore` byte a byte, e o git do Windows o grava com fim de linha CRLF. Um `eas update` feito num Linux (por exemplo no GitHub Actions) sai com outro runtime e não chega ao APK.
+
+### Web
+
+```bash
+npx expo export --platform web --clear
+npx eas-cli@latest deploy --dev-domain <nome>    # só na 1ª vez; depois, npx eas-cli@latest deploy
+npx eas-cli@latest deploy --prod
+```
+
+- O export lê o `.env` e embute as `EXPO_PUBLIC_*` no JS; refaça antes de cada deploy (os deploys são imutáveis). Confira em `dist/` o `index.html` com o link do manifesto, o `manifest.json` e `icons/`.
+- O `--dev-domain` escolhe o subdomínio `<nome>.expo.app`, reservado para sempre. Trocar de endereço depois perde o login e os dados guardados no navegador.
+- O deploy sem `--prod` é uma prévia (`https://<nome>--<id>.expo.app`): abra uma rota funda direto (`/card?dex=6&slot=0`) e recarregue; o EAS Hosting devolve o `index.html` em qualquer rota. Para promover a prévia testada, `npx eas-cli@latest deploy:alias --prod --id=<id>` (com um id antigo, volta atrás).
+- Os arquivos ficam até 1 h no cache do navegador depois de um deploy. Na web, os preços do MYP Cards não atualizam (CORS): a web lê o que o celular grava.
+
+### Auth do Supabase (com o endereço no ar)
+
+No painel do Supabase, feito pelo dono:
+
+- **Authentication → URL Configuration**: *Site URL* = `https://<nome>.expo.app` (nunca o `localhost:3000` padrão). *Redirect URLs*: `https://<nome>.expo.app/**` (web), `pokedexbinder://**` (APK) e `http://localhost:8081/**` (desenvolvimento); para testar a nova senha numa prévia, `https://<nome>--*.expo.app/**`; no Expo Go, `exp://**`. O app pede a volta em `nova-senha` (e `account` para a confirmação de cadastro) com `Linking.createURL`; um endereço fora da lista não é aceito, e o link do e-mail cai na *Site URL*.
+- **Authentication → Sign In / Providers**: desligue "Allow new users to sign up" (só as contas que já existem entram; conta nova, pelo painel em *Add user*) e, no provedor Email, senha mínima de 8 caracteres (o `MIN_PASSWORD` de `src/lib/auth-links.ts`).
+- O envio de e-mail padrão do Supabase só entrega para membros da organização no Supabase, no máximo 2 e-mails por hora: teste a nova senha sem pedir vários links seguidos.
 
 ## Testar
 

@@ -354,9 +354,19 @@ async function mapPool<T, R>(items: T[], size: number, fn: (item: T) => Promise<
   return out;
 }
 
-/** Sufixo de qualidade exigido pelas imagens da TCGdex. */
+/**
+ * Fotos em português da TCGdex tiradas de uma cópia com selo (ex.: o selo da Liga Pokémon no Machop 44/111 de Punhos
+ * Furiosos): a carta comum parecia ser a versão promocional. Nelas vale a foto em inglês, que é da carta comum. Caminho
+ * da imagem sem o idioma ("<série>/<coleção>/<número>").
+ */
+const STAMPED_PT_SCANS = new Set(['xy/xy3/44']);
+
+/** Sufixo de qualidade exigido pelas imagens da TCGdex (e a foto em inglês no lugar das fotos em português com selo). */
 export function cardImage(base: string | undefined, quality: 'low' | 'high' = 'low') {
-  return base ? `${base}/${quality}.webp` : undefined;
+  if (!base) return undefined;
+  const pt = /^(https:\/\/assets\.tcgdex\.net\/)pt\/(.+)$/.exec(base);
+  const url = pt && STAMPED_PT_SCANS.has(pt[2]) ? `${pt[1]}en/${pt[2]}` : base;
+  return `${url}/${quality}.webp`;
 }
 
 function setsFor(lang: CardLang) {

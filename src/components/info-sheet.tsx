@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { IconButton } from '@/components/icon-button';
 import { NATIVE_DRIVER, useReducedMotion } from '@/components/motion';
+import { useToastClearance } from '@/components/toast';
 import { breakpoints, colors, elevation, radius, space, TOUCH, typography } from '@/theme';
 
 const WEB = Platform.OS === 'web';
@@ -57,6 +58,15 @@ function SheetBody({ title, onClose, centered, footer, children }: { title: stri
     Animated.timing(enter, { toValue: 1, duration: reduceMotion ? 0 : 220, useNativeDriver: NATIVE_DRIVER }).start();
   }, [enter, reduceMotion]);
   const translateY = enter.interpolate({ inputRange: [0, 1], outputRange: [reduceMotion ? 0 : centered ? 12 : 48, 0] });
+  // Avisos (toast) acima das ações do rodapé da folha (ex.: "Colocar" ao adicionar várias cartas seguidas): a
+  // distância da borda de baixo da tela até o topo do rodapé.
+  const [sheetBox, setSheetBox] = useState<{ gap: number; left: number; right: number } | null>(null);
+  const [footerHeight, setFooterHeight] = useState(0);
+  const padBottom = centered ? space.lg : insets.bottom + space.lg;
+  useToastClearance(
+    footer && sheetBox ? Math.ceil(sheetBox.gap + padBottom + footerHeight) : 0,
+    sheetBox ? { left: sheetBox.left, right: sheetBox.right } : undefined,
+  );
 
   return (
     <View style={[styles.root, centered ? styles.rootCentered : styles.rootBottom]}>
@@ -70,6 +80,10 @@ function SheetBody({ title, onClose, centered, footer, children }: { title: stri
         aria-modal={WEB ? undefined : true}
         aria-label={WEB ? undefined : title}
         onAccessibilityEscape={onClose}
+        onLayout={(e) => {
+          const { x, y, width: w, height: h } = e.nativeEvent.layout;
+          setSheetBox({ gap: Math.max(0, height - (y + h)), left: Math.floor(x), right: Math.ceil(x + w) });
+        }}
         style={[
           styles.sheet,
           centered ? styles.sheetCentered : [styles.sheetBottom, { paddingBottom: insets.bottom + space.lg }],
@@ -85,7 +99,11 @@ function SheetBody({ title, onClose, centered, footer, children }: { title: stri
         <ScrollView style={styles.scroll} contentContainerStyle={styles.content} bounces={false}>
           {children}
         </ScrollView>
-        {footer ? <View style={styles.footer}>{footer}</View> : null}
+        {footer ? (
+          <View style={styles.footer} onLayout={(e) => setFooterHeight(e.nativeEvent.layout.height)}>
+            {footer}
+          </View>
+        ) : null}
       </Animated.View>
     </View>
   );

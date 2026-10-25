@@ -56,7 +56,7 @@ import { ligaQuery, ligaSearchUrl } from '@/lib/liga';
 import { entryPlace, placeText, versionText } from '@/lib/lists';
 import { mypApiDue, mypPtImage, prioritizeMypPrice } from '@/lib/myp-api';
 import { useStampImage } from '@/lib/stamp-image';
-import { cardDetail, type CardDetail } from '@/lib/tcgdex';
+import { cardDetail, cardImage as tcgdexPhotoUrl, type CardDetail } from '@/lib/tcgdex';
 import {
   CONDITIONS,
   LANG_LABEL,
@@ -726,7 +726,10 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
           ? undefined
           : lang === 'ja'
             ? 'ja'
-            : ((shownImage.match(/tcgdex\.net\/(pt|en|ja)\//)?.[1] ?? shownImage.match(/zukan\.com\.br\/cards\/[^/]+\/(pt|en)\//)?.[1] ?? 'en') as CardLang);
+            : // Pelo endereço que a imagem usa de fato (a foto em português com selo vira a em inglês, ver cardImage).
+              (((shownImage.includes('assets.tcgdex.net') ? tcgdexPhotoUrl(shownImage) : shownImage)?.match(/tcgdex\.net\/(pt|en|ja)\//)?.[1] ??
+                shownImage.match(/zukan\.com\.br\/cards\/[^/]+\/(pt|en)\//)?.[1] ??
+                'en') as CardLang);
 
   // `quality`: 'high' na carta grande; 'low' nas miniaturas do seletor de versões (sem baixar a foto de 1000 px de cada).
   const cardImage = (o: {
@@ -850,6 +853,15 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
       ) : null}
     </View>
   );
+
+  // Ações da carta salva à vista (também no ⋯ do topo): escondidas só no menu, ninguém as achava.
+  const cardActions = autoSave ? (
+    <View style={styles.actions}>
+      <Chip mode="button" icon="repeat" label="Trocar" accessibilityLabel="Trocar por outra carta" onPress={replaceCard} />
+      <Chip mode="button" icon="swap-horizontal" label="Mover" accessibilityLabel="Mover para outro bolso ou fichário" onPress={openMove} />
+      <Chip mode="button" icon="trash-outline" label="Remover" accessibilityLabel="Remover do fichário" onPress={removeCard} />
+    </View>
+  ) : null;
 
   const loadErrorText =
     loadError === 'offline'
@@ -1143,6 +1155,7 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
             keyboardShouldPersistTaps="handled">
             <View ref={contentRef} collapsable={false} style={styles.column}>
               {titleBlock}
+              {cardActions}
               {notices}
               {movePanel}
               {split ? (
@@ -1173,6 +1186,7 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
               {hero}
               <View style={styles.flex}>{titleBlock}</View>
             </View>
+            {cardActions}
             {notices}
             {movePanel}
             {first}
@@ -1290,6 +1304,7 @@ const styles = StyleSheet.create({
   setLine: { ...typography.label, color: colors.textMuted },
   title: { ...typography.title, color: colors.text },
   badges: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs },
   position: {
     flexDirection: 'row',
     alignItems: 'center',

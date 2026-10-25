@@ -20,6 +20,9 @@
 //
 // Cada execução fica registrada em catalog_sync_runs (o app mostra a última em "Sobre"). Uma etapa que falha (TCGdex
 // ou TCGCSV fora do ar, uma coleção com erro) é anotada e as outras continuam; a coleção que falhou fica para a próxima.
+//
+// Egress: a execução sem nada para fazer (a maioria, a cada 10 min) lê do banco só alguns KB. As cartas da TCGdex
+// guardadas (tcgdex_sets.cards, ~1,4 MB) só são lidas quando há coleção em inglês para copiar ou religar.
 
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
@@ -84,12 +87,32 @@ type Report = {
   relinkedCards: number;
   priceGroups: number;
   fx: string;
+  /** Chave de serviço usada: a secreta nova ou a legada (para conferir a troca antes de desativar a legada). */
+  apiKey?: 'secret' | 'legacy';
   /** Etapas que falharam nesta execução ("tcgdex: …", "grupo 2545: …"). */
   errors: string[];
 };
 
+/**
+ * Chave de serviço: a secreta nova (sb_secret_…, a "default" de SUPABASE_SECRET_KEYS, um JSON com as chaves por nome;
+ * SUPABASE_SECRET_KEY na CLI local) e, sem ela, a legada SUPABASE_SERVICE_ROLE_KEY, que a Supabase aposenta até o fim
+ * de 2026. Assim um deploy nunca fica sem chave. O valor nunca vai para o registro nem para o log.
+ */
+function serviceKey(): { key: string; kind: 'secret' | 'legacy' } {
+  try {
+    const keys = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') ?? '{}') as Record<string, unknown>;
+    if (typeof keys.default === 'string' && keys.default) return { key: keys.default, kind: 'secret' };
+  } catch {
+    // JSON inválido: segue para as outras.
+  }
+  const single = Deno.env.get('SUPABASE_SECRET_KEY');
+  if (single) return { key: single, kind: 'secret' };
+  return { key: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, kind: 'legacy' };
+}
+
 Deno.serve(async (req) => {
-  const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+  const service = serviceKey();
+  const admin = createClient(Deno.env.get('SUPABASE_URL')!, service.key);
   const key = req.headers.get('x-sync-key') ?? '';
   const { data: allowed } = await admin.rpc('check_liga_sync_key', { k: key });
   if (allowed !== true) return json({ error: 'forbidden' }, 403);
@@ -106,6 +129,7 @@ Deno.serve(async (req) => {
     relinkedCards: 0,
     priceGroups: 0,
     fx: '',
+    apiKey: service.kind,
     errors: [],
   };
   let fatal: string | null = null;
@@ -153,11 +177,15 @@ async function run(admin: SupabaseClient, report: Report) {
   // Número oficial de cartas de cada coleção (o "132" de "133/132"), para a ligação pelo número completo.
   const official = new Map((tcgdexList ?? []).filter((s) => s.cardCount?.official).map((s) => [s.id, s.cardCount!.official!]));
   if (tcgdexList) {
-    const { data: known, error: knownError } = await admin.from('tcgdex_sets').select('id, name, synced_at');
+    // Só os ids das coleções em dia (com nome e lidas há menos de 7 dias): ~3 KB em vez de ~18 KB.
+    const { data: known, error: knownError } = await admin
+      .from('tcgdex_sets')
+      .select('id')
+      .not('name', 'is', null)
+      .neq('name', '')
+      .gt('synced_at', new Date(Date.now() - 7 * 86_400_000).toISOString());
     if (knownError) throw knownError;
-    const fresh = new Set(
-      (known ?? []).filter((s) => s.name && Date.now() - new Date(s.synced_at).getTime() < 7 * 86_400_000).map((s) => s.id),
-    );
+    const fresh = new Set((known ?? []).map((s) => s.id));
     const stale = tcgdexList.filter((x) => !fresh.has(x.id));
     let setErrors = 0;
     for (const s of stale.slice(0, TCGDEX_SETS_PER_RUN)) {
@@ -213,22 +241,20 @@ async function run(admin: SupabaseClient, report: Report) {
   }
 
   if (tcgdexList) {
-    // Siglas e cartas da TCGdex guardadas (para ligar as cartas nas etapas 3 e 4).
-    const { data: setRows, error: setsError } = await admin.from('tcgdex_sets').select('id, abbr, name, cards');
-    if (setsError) throw setsError;
-    const tcgdexSets = (setRows ?? []) as TcgdexSet[];
+    // Siglas e cartas da TCGdex guardadas (para ligar as cartas nas etapas 3 e 4): lidas só quando uma das duas etapas
+    // tem coleção em inglês para ligar, e uma vez por execução. Uma falha nessa leitura para a execução, como antes.
+    let tcgdexSets: Promise<TcgdexSet[]> | null = null;
+    const loadTcgdexSets = () => (tcgdexSets ??= readTcgdexSets(admin));
 
     // 3) Coleções novas ou alteradas desde a última cópia (inglês primeiro).
-    const { data: groups, error: groupsError } = await admin
-      .from('tcg_groups')
-      .select('group_id, category, name, abbr, modified_on, synced_at')
-      .order('category');
-    if (groupsError) throw groupsError;
-    const due = (groups ?? []).filter((g) => !g.synced_at || (g.modified_on && new Date(g.modified_on) > new Date(g.synced_at)));
+    const due = await dueGroups(admin);
     report.pending = Math.max(0, due.length - GROUPS_PER_RUN);
-    for (const g of due.slice(0, GROUPS_PER_RUN)) {
+    const batch = due.slice(0, GROUPS_PER_RUN);
+    // As cartas da TCGdex só servem às coleções em inglês (os ids japoneses da TCGdex são outros).
+    const sets = batch.some((g) => g.category === 3) ? await loadTcgdexSets() : [];
+    for (const g of batch) {
       try {
-        await syncGroup(admin, g, tcgdexSets, official, report);
+        await syncGroup(admin, g, sets, official, report);
       } catch (e) {
         // A coleção continua pendente e é tentada de novo na próxima execução.
         fail(`grupo ${g.group_id}`, e);
@@ -236,8 +262,9 @@ async function run(admin: SupabaseClient, report: Report) {
     }
 
     // 4) Religação das coleções copiadas com uma regra de ligação antiga, a partir da cópia (sem baixar de novo).
+    let oldLinks: { group_id: number; name: string; abbr: string | null }[] = [];
     try {
-      const { data: oldLinks, error } = await admin
+      const { data, error } = await admin
         .from('tcg_groups')
         .select('group_id, name, abbr')
         .eq('category', 3)
@@ -245,15 +272,19 @@ async function run(admin: SupabaseClient, report: Report) {
         .lt('link_version', LINK_VERSION)
         .limit(GROUPS_RELINKED_PER_RUN);
       if (error) throw error;
-      for (const g of oldLinks ?? []) {
+      oldLinks = data ?? [];
+    } catch (e) {
+      fail('religação', e);
+    }
+    if (oldLinks.length) {
+      const relinkSets = await loadTcgdexSets();
+      for (const g of oldLinks) {
         try {
-          await relinkGroup(admin, g, tcgdexSets, official, report);
+          await relinkGroup(admin, g, relinkSets, official, report);
         } catch (e) {
           fail(`religação ${g.group_id}`, e);
         }
       }
-    } catch (e) {
-      fail('religação', e);
     }
   }
 
@@ -275,6 +306,39 @@ async function run(admin: SupabaseClient, report: Report) {
 }
 
 type GroupRow = { group_id: number; category: number; name: string; abbr: string | null };
+
+/** Siglas e cartas de todas as coleções da TCGdex guardadas (~220 coleções, ~1,4 MB). */
+async function readTcgdexSets(admin: SupabaseClient) {
+  const { data, error } = await admin.from('tcgdex_sets').select('id, abbr, name, cards');
+  if (error) throw error;
+  return (data ?? []) as TcgdexSet[];
+}
+
+/**
+ * Coleções para copiar, em inglês primeiro: nunca copiadas, ou alteradas na TCGplayer (modified_on) depois da cópia
+ * (synced_at). A API do banco não compara duas colunas, então ela devolve as nunca copiadas e as alteradas depois da
+ * cópia mais antiga (as pendentes e poucas outras, em vez das ~680 coleções) e o filtro exato fica aqui.
+ */
+async function dueGroups(admin: SupabaseClient) {
+  const { data: oldest, error: oldestError } = await admin
+    .from('tcg_groups')
+    .select('synced_at')
+    .not('synced_at', 'is', null)
+    .order('synced_at')
+    .limit(1)
+    .maybeSingle();
+  if (oldestError) throw oldestError;
+  // Sem nenhuma coleção copiada, todas têm synced_at nulo. A data em milissegundos (arredondada para baixo) só alarga
+  // o filtro.
+  const filter = oldest ? `synced_at.is.null,modified_on.gt."${new Date(oldest.synced_at).toISOString()}"` : 'synced_at.is.null';
+  const { data: groups, error } = await admin
+    .from('tcg_groups')
+    .select('group_id, category, name, abbr, modified_on, synced_at')
+    .or(filter)
+    .order('category');
+  if (error) throw error;
+  return (groups ?? []).filter((g) => !g.synced_at || (g.modified_on && new Date(g.modified_on) > new Date(g.synced_at)));
+}
 
 /** Baixa as cartas de uma coleção do TCGCSV, liga à TCGdex e grava (apaga as que saíram da coleção). */
 async function syncGroup(admin: SupabaseClient, g: GroupRow, tcgdexSets: TcgdexSet[], official: Map<string, number>, report: Report) {

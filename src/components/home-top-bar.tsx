@@ -20,6 +20,7 @@ export function HomeTopBar({
   progress,
   desktop,
   gutter,
+  contentWidth,
   search,
   searchOpen,
   onToggleSearch,
@@ -40,6 +41,8 @@ export function HomeTopBar({
   progress: number;
   desktop: boolean;
   gutter: number;
+  /** Computador: largura do fichário (páginas + painel), para a barra alinhar com ele. */
+  contentWidth?: number;
   /** O campo de busca (no computador fica sempre na barra; no celular, abre embaixo dela). */
   search: ReactNode;
   searchOpen: boolean;
@@ -88,7 +91,7 @@ export function HomeTopBar({
       style={[styles.bar, { backgroundColor: cover, paddingTop: insets.top }]}
       onLayout={(e: LayoutChangeEvent) => onHeight(e.nativeEvent.layout.height)}>
       {desktop ? (
-        <View style={[styles.row, styles.rowDesktop, { paddingHorizontal: gutter }]}>
+        <View style={[styles.row, styles.rowDesktop, { paddingHorizontal: gutter }, contentWidth ? { maxWidth: contentWidth + gutter * 2 } : null]}>
           <View style={styles.side}>
             <IconButton icon="menu" label="Minha coleção" tone="onBrand" color={ink} onPress={onMenu} />
             {titleButton}

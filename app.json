@@ -2,15 +2,23 @@
   "expo": {
     "name": "Fichário Pokédex",
     "slug": "pokedex-binder",
-    "version": "3.0.0",
+    "version": "3.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "pokedexbinder",
     "userInterfaceStyle": "light",
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
     "ios": {
-      "icon": "./assets/images/icon.png"
+      "icon": "./assets/images/icon.png",
+      "bundleIdentifier": "com.willkonrad.fichariopokedex",
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
+      "package": "com.willkonrad.fichariopokedex",
       "adaptiveIcon": {
         "backgroundColor": "#E3350D",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

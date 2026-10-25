@@ -17,6 +17,9 @@ expo-env.d.ts
 *.p12
 *.key
 *.mobileprovision
+# Credenciais baixadas do EAS (keystore do Android e senhas): nunca no repositório público
+credentials.json
+credentials/
 
 # Metro
 .metro-health-check*
