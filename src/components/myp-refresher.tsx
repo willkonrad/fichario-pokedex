@@ -1,48 +1,28 @@
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useEffect, useRef } from 'react';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 
-import {
-  fetchMypPrice,
-  MYP_API_INTERVAL_MS,
-  mypApiDue,
-  mypApiMatches,
-  mypApiNote,
-  mypPriority,
-  MypRateLimited,
-  onMypPriority,
-  searchMypByCode,
-  searchMypByName,
-} from '@/lib/myp-api';
-import type { MypProduct } from '@/lib/myp-match';
-import { tcgplayerFor } from '@/lib/tcgplayer';
-import type { Entry } from '@/lib/types';
+import { registerMypBackground } from '@/components/myp-background';
+import { MYP_API_INTERVAL_MS, mypPriority, onMypPriority } from '@/lib/myp-api';
+import { MypRunStopped, nextMypGroup, runMypGroup } from '@/lib/myp-queue';
 import { useCollection } from '@/store/collection';
 
 /** Sem nada para buscar, olha de novo a cada 5 min (ou antes, quando a coleção muda). */
 const IDLE_MS = 5 * 60_000;
-/** Carta que falhou: espera 1 h; depois de 3 falhas seguidas, só na próxima vez que o app abrir. */
-const RETRY_MS = 60 * 60_000;
-const MAX_FAILS = 3;
-/** Resultado de uma busca por nome reaproveitado pelas outras cartas com o mesmo nome. */
-const SEARCH_CACHE_MS = 30 * 60_000;
-/**
- * Renovação que não acha uma carta já encontrada (pode ser uma falha passageira do MYP): o preço achado fica, e a carta
- * tenta de novo mais tarde; só vira "não encontrada" quando esse preço passa de 30 dias.
- */
-const KEEP_FOUND_MS = 30 * 24 * 60 * 60_000;
-/** Soma na ordem da fila das cartas em inglês com preço da TCGplayer (passa de qualquer data em milissegundos). */
-const AFTER_MYP = 1e15;
-
-/** Carta, versão e selo: uma busca serve todos os bolsos com a mesma carta (a API não separa idioma). */
-const groupKey = (e: Entry) => `${e.cardId}|${e.variant}|${mypApiNote(e)}`;
+/** Etiqueta da tela acesa (expo-keep-awake): só esta busca liga e desliga. */
+const AWAKE_TAG = 'myp-precos';
 
 /**
- * Busca, em segundo plano, o mínimo/média/máximo das cartas da coleção na API pública do MYP Cards: cartas novas e
- * alteradas primeiro, depois as que passaram de 7 dias, no máximo uma consulta a cada 6,5 s (sem token, o limite é 10
- * por minuto). Cartas em inglês que já têm preço da TCGplayer (o MYP é só referência nelas) vão depois das que dependem
- * do MYP. Roda só no app do celular: sem token, a API não atende o servidor (403) nem o navegador (sem CORS).
- * Com conta, começa depois da primeira sincronização, e cada preço é gravado no banco mesclado sobre a carta atual
- * (applyMypPrice), onde também vale a regra do "Meu valor".
+ * Busca, com o app aberto, o mínimo/média/máximo das cartas da coleção na API pública do MYP Cards, pela fila de
+ * `src/lib/myp-queue.ts`: cartas novas e alteradas primeiro, depois as que passaram de 7 dias, no máximo uma consulta a
+ * cada 6,5 s (sem token, o limite é 10 por minuto). Roda só no app do celular: sem token, a API não atende o servidor
+ * (403) nem o navegador (sem CORS). Com conta, começa depois da primeira sincronização, e cada preço é gravado no banco
+ * mesclado sobre a carta atual (applyMypPrice), onde também vale a regra do "Meu valor".
+ *
+ * Enquanto há cartas na fila, a tela não apaga sozinha (o Android pausa o app com a tela apagada); sem internet, apaga,
+ * até uma consulta dar certo de novo. Com o app em segundo
+ * plano, esta busca espera, e quem continua é a tarefa de `myp-background` (só no APK; o Expo Go não roda tarefas em
+ * segundo plano no Android).
  */
 export function MypRefresher() {
   const { ready, session, lastSyncAt, entries, applyMypPrice } = useCollection();
@@ -60,11 +40,12 @@ export function MypRefresher() {
   }, [entries, applyMypPrice]);
 
   useEffect(() => {
+    if (Platform.OS !== 'web') void registerMypBackground();
+  }, []);
+
+  useEffect(() => {
     if (!canRun) return;
     let alive = true;
-    let lastCall = 0;
-    // Falhas por carta (só nesta sessão), para uma carta com problema não travar a fila.
-    const failures = new Map<string, { count: number; until: number }>();
     const timers = new Set<ReturnType<typeof setTimeout>>();
     const pause = (ms: number) =>
       new Promise<void>((resolve) => {
@@ -90,96 +71,73 @@ export function MypRefresher() {
           resolve();
         };
       });
-    // Uma consulta por vez, com o intervalo mínimo entre elas (vale também para a segunda tentativa pelo nome em PT).
-    // A busca por nome traz todas as cartas com aquele nome: fica guardada por 30 min e serve as outras (ex.: vários
-    // Gengar da coleção com uma consulta só).
-    const recent = new Map<string, { at: number; products: MypProduct[] }>();
-    const limited = async (key: string, load: () => Promise<MypProduct[]>) => {
-      const hit = recent.get(key);
-      if (hit && Date.now() - hit.at < SEARCH_CACHE_MS) return hit.products;
-      const wait = lastCall + MYP_API_INTERVAL_MS - Date.now();
-      if (wait > 0) await pause(wait);
-      lastCall = Date.now();
-      const products = await load();
-      recent.set(key, { at: Date.now(), products });
-      return products;
+    // Com o app em segundo plano, nenhuma consulta daqui: espera o app voltar (a tarefa em segundo plano, quando existe,
+    // segue a fila nesse meio-tempo). Termina com MypRunStopped se a busca for desligada.
+    let stopWaiting: (() => void) | null = null;
+    const foreground = () =>
+      AppState.currentState !== 'background'
+        ? undefined
+        : new Promise<void>((resolve, reject) => {
+            const sub = AppState.addEventListener('change', (st) => {
+              if (st === 'background') return;
+              sub.remove();
+              stopWaiting = null;
+              resolve();
+            });
+            stopWaiting = () => {
+              sub.remove();
+              reject(new MypRunStopped());
+            };
+          });
+    // Tela acesa enquanto há fila. Pedido feito com o app em segundo plano pode falhar: tenta de novo na próxima carta.
+    let awake = false;
+    const keepAwake = (on: boolean) => {
+      if (on === awake) return;
+      awake = on;
+      if (on) activateKeepAwakeAsync(AWAKE_TAG).catch(() => (awake = false));
+      else void deactivateKeepAwake(AWAKE_TAG).catch(() => {});
     };
-    const consult = (name: string) => limited(`nome:${name}`, () => searchMypByName(name));
-    // Pelo código do produto, quando o nome não acha (o MYP cadastra algumas cartas com o número no nome).
-    const consultCode = (code: string) => limited(`codigo:${code}`, () => searchMypByCode(code));
 
     // A tela de uma carta sem preço pede a vez dela: acorda a busca, se estiver ociosa.
     onMypPriority(() => wakeRef.current());
 
     (async () => {
+      // Sem internet, a fila não anda: a tela volta a apagar sozinha até uma consulta dar certo de novo.
+      let offline = false;
       while (alive) {
-        const now = Date.now();
         const urgent = mypPriority();
-        const due = Object.values(entriesRef.current).filter((e) => {
-          if (!mypApiDue(e, now)) return false;
-          const f = failures.get(groupKey(e));
-          // Carta aberta na tela tenta de novo sem esperar a pausa de uma falha.
-          return !f || (f.count < MAX_FAILS && (f.until <= now || urgent.has(e.id)));
-        });
-        if (!due.length) {
+        const group = nextMypGroup(entriesRef.current, Date.now(), urgent);
+        if (!group) {
           urgent.clear();
+          keepAwake(false);
           await idle(IDLE_MS);
           continue;
         }
-        // Carta aberta na tela primeiro; depois as nunca buscadas (ou de outra carta/versão/selo); depois a busca
-        // mais antiga. Carta em inglês com preço da TCGplayer vai depois de todas as que dependem do MYP.
-        const order = (e: Entry) => {
-          if (urgent.has(e.id)) return -1;
-          const last = e.mypApi && mypApiMatches(e, e.mypApi) ? new Date(e.mypApi.checkedAt).getTime() : 0;
-          // Entre elas, a mesma ordem (nunca buscada, depois a busca mais antiga).
-          return e.lang === 'en' && tcgplayerFor(e)?.avg != null ? AFTER_MYP + last : last;
-        };
-        due.sort((a, b) => order(a) - order(b));
-        const key = groupKey(due[0]);
-        const group = due.filter((e) => groupKey(e) === key);
+        if (!offline) keepAwake(true);
         for (const e of group) urgent.delete(e.id);
-        // A busca serve o grupo todo; pela cópia em português, que também traz a foto em português do MYP.
-        const target = group.find((e) => e.lang === 'pt') ?? group[0];
-        try {
-          const price = await fetchMypPrice(target, consult, consultCode);
-          if (!alive) break;
-          // Renovação que não achou uma carta já encontrada: fica o preço achado (ver KEEP_FOUND_MS).
-          const priced = (e: Entry) => !!e.mypApi && mypApiMatches(e, e.mypApi) && e.mypApi.avg != null;
-          const found = group.find(priced)?.mypApi;
-          if (price.notFound && found && Date.now() - new Date(found.checkedAt).getTime() < KEEP_FOUND_MS) {
-            // As cópias do grupo ainda sem preço ficam com o achado (a busca serve o grupo todo), em vez de esperar.
-            for (const e of group) if (!priced(e)) await applyRef.current(e.id, found);
-            const f = failures.get(key);
-            failures.set(key, { count: (f?.count ?? 0) + 1, until: Date.now() + RETRY_MS });
-            continue;
-          }
-          for (const e of group) await applyRef.current(e.id, price);
-          // Preço que não ficou gravado (ex.: carta que ainda não chegou ao banco): espera como uma falha, para a
-          // busca guardada por nome não virar um laço sem pausa.
-          const after = entriesRef.current[group[0].id];
-          if (after && mypApiDue(after, Date.now())) {
-            const f = failures.get(key);
-            failures.set(key, { count: (f?.count ?? 0) + 1, until: Date.now() + RETRY_MS });
-          } else failures.delete(key);
-        } catch (err) {
-          if (err instanceof MypRateLimited) {
-            // Limite do MYP: espera mais de um minuto antes de qualquer consulta.
-            await pause(65_000);
-          } else {
-            // Sem internet, erro do MYP/TCGdex ou do banco: esta carta espera; as outras seguem.
-            const f = failures.get(key);
-            failures.set(key, { count: (f?.count ?? 0) + 1, until: Date.now() + RETRY_MS });
-            await pause(MYP_API_INTERVAL_MS);
-          }
-        }
+        const step = await runMypGroup(group, {
+          pause,
+          beforeCall: foreground,
+          apply: (id, price) => applyRef.current(id, price),
+          current: (id) => entriesRef.current[id],
+        });
+        if (!alive || step === 'stopped') break;
+        if (step === 'offline') {
+          offline = true;
+          keepAwake(false);
+        } else if (step === 'done') offline = false;
+        // Falha sem consulta (ex.: sem internet): uma pausa, para a fila não passar por todas as cartas de uma vez.
+        if (step === 'failed' || step === 'offline') await pause(MYP_API_INTERVAL_MS);
       }
     })();
 
     return () => {
       alive = false;
       for (const t of timers) clearTimeout(t);
+      stopWaiting?.();
       wakeRef.current = () => {};
       onMypPriority(() => {});
+      keepAwake(false);
     };
   }, [canRun]);
 

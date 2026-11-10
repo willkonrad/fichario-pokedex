@@ -2,8 +2,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
-import { plainName } from '@/lib/catalog';
 import type { CardLang, Entry, Variant } from '@/lib/types';
+import { sameStamp, stampKey } from '@/lib/variants';
 import { useEntries } from '@/store/collection';
 import { radius, semantic } from '@/theme';
 
@@ -30,24 +30,19 @@ const VARIANT_SHORT: Record<Variant, string> = {
   other: 'outra',
 };
 
-/**
- * Selo comparável: sem acento, caixa nem pontuação ("Pokémon Day" digitado = "Pokemon Day" da lista). Selo sem letras
- * latinas (japonês): o texto como está, em minúsculas.
- */
-const stampKey = (s?: string) => {
-  const t = (s ?? '').trim();
-  return t ? plainName(t) || t.toLocaleLowerCase('pt-BR') : '';
-};
+/** Cópia da coleção, para a posse por versão (as chaves do selo são opcionais). */
+type OwnedCopy = Pick<Entry, 'variant' | 'variantNote'> & Partial<Pick<Entry, 'stampKeys'>>;
 
 /**
  * Selo da cópia, para comparar com o da lista: o de promo/staff e o das versões do catálogo escolhidas em outras
  * variações ("Poke Ball Pattern", "Cosmos Holo"…; os chips de variação limpam o selo). Em "Outra", a descrição é texto
- * livre (ex.: "assinada") e não é selo.
+ * livre (ex.: "assinada") e não é selo. A comparação (sameStamp) aceita os nomes que versões anteriores do app deram ao
+ * mesmo selo ("Pre Release", "Logo da coleção (Booster Box)"…).
  */
-const stampOf = (e: Pick<Entry, 'variant' | 'variantNote'>) => (e.variant === 'other' ? '' : stampKey(e.variantNote));
+const stampOf = (e: OwnedCopy) => ({ stamp: e.variant === 'other' ? '' : e.variantNote, keys: e.stampKeys });
 
 /** Uma carta da lista (ou da tela da carta) que pode já estar na coleção. */
-export type OwnableCard = { id: string; lang: CardLang; stamp?: { label: string } | null };
+export type OwnableCard = { id: string; lang: CardLang; stamp?: { label: string; keys?: string[] } | null };
 
 /** O que o usuário tem desta carta: `exact` = esta versão; senão, outra versão da mesma carta. */
 export type Ownership = { exact: boolean; label: string; count: number };
@@ -57,12 +52,12 @@ export type Ownership = { exact: boolean; label: string; count: number };
  * cópia tiver esse selo; a carta sem selo fica "tenho" (ou "tenho · reverse", quando todas as cópias sem selo são de
  * uma variação especial) com alguma cópia sem selo. Com só outras versões, "outra versão". Sem cópias, null.
  */
-export function ownershipOf(copies: Pick<Entry, 'variant' | 'variantNote'>[] | undefined, card: Pick<OwnableCard, 'stamp'>): Ownership | null {
+export function ownershipOf(copies: OwnedCopy[] | undefined, card: Pick<OwnableCard, 'stamp'>): Ownership | null {
   if (!copies?.length) return null;
-  const stamp = stampKey(card.stamp?.label);
-  const same = copies.filter((e) => stampOf(e) === stamp);
+  const listed = { stamp: card.stamp?.label, keys: card.stamp?.keys };
+  const same = copies.filter((e) => sameStamp(stampOf(e), listed));
   if (!same.length) return { exact: false, label: 'outra versão', count: copies.length };
-  if (stamp) return { exact: true, label: 'tenho', count: same.length };
+  if (stampKey(card.stamp?.label)) return { exact: true, label: 'tenho', count: same.length };
   const variants = [...new Set(same.map((e) => e.variant))];
   const label = variants.includes('normal') ? 'tenho' : variants.length === 1 ? `tenho · ${VARIANT_SHORT[variants[0]]}` : `tenho · ${variants.length} versões`;
   return { exact: true, label, count: same.length };
@@ -72,7 +67,7 @@ export function ownershipOf(copies: Pick<Entry, 'variant' | 'variantNote'>[] | u
 export function useOwnership() {
   const entries = useEntries();
   const byCard = useMemo(() => {
-    const map = new Map<string, Pick<Entry, 'variant' | 'variantNote'>[]>();
+    const map = new Map<string, OwnedCopy[]>();
     for (const e of Object.values(entries)) {
       const key = `${e.cardId}|${e.lang}`;
       const list = map.get(key);

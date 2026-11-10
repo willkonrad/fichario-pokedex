@@ -1,9 +1,11 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
-import { Alert, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useRef, useState } from 'react';
+import { Alert, Platform, ScrollView, StyleSheet, Text, View, type ScrollViewInstance } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { digitsInSystemFont } from '@/components/digits';
+import { useKeyboardAvoid } from '@/components/keyboard-avoid';
 import {
   BOTTOM_BAR_SPACE,
   BottomBar,
@@ -15,17 +17,19 @@ import {
   Input,
   Loading,
   Notice,
-  onCover,
+  coverFill, onCover,
   Row,
   Section,
   showToast,
   Stepper,
   Toggle,
+  useLayout,
 } from '@/components/ui';
 import { customPhysicalMoves, customSheets, customTotalSlots, isPlacedCustom, newBinderId, pageSize } from '@/lib/binder';
+import { formatInt } from '@/lib/format';
 import { BINDER_PURPOSES, DEFAULT_CUSTOM_BINDER, LANG_LABEL, type BinderPurpose, type CardLang, type CustomBinder } from '@/lib/types';
 import { entriesOf, useCollection } from '@/store/collection';
-import { colors, radius, shadow, space, typography, widths } from '@/theme';
+import { colors, radius, space, typography, widths } from '@/theme';
 
 const GRID_PRESETS = [
   { rows: 2, cols: 2, label: '4 (2×2)' },
@@ -42,12 +46,12 @@ const PAGE_PRESETS = [10, 20, 40, 60, 100];
  */
 function changesText(moved: number, outside: number) {
   const parts: string[] = [];
-  if (moved) parts.push(`${moved} ${moved === 1 ? 'carta muda' : 'cartas mudam'} de lugar no fichário físico.`);
+  if (moved) parts.push(`${formatInt(moved)} ${moved === 1 ? 'carta muda' : 'cartas mudam'} de lugar no fichário físico.`);
   if (outside) {
     parts.push(
       outside === 1
         ? '1 carta fica fora do fichário com esse tamanho. Continua salva e volta se você aumentar o fichário.'
-        : `${outside} cartas ficam fora do fichário com esse tamanho. Continuam salvas e voltam se você aumentar o fichário.`,
+        : `${formatInt(outside)} cartas ficam fora do fichário com esse tamanho. Continuam salvas e voltam se você aumentar o fichário.`,
     );
   }
   return parts.join(' ');
@@ -87,6 +91,10 @@ function BinderForm() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const { binders, entries, saveBinder, deleteBinder, setActiveBinder } = useCollection();
   const insets = useSafeAreaInsets();
+  const { gutter } = useLayout();
+  // Teclado aberto no Android: o fim da rolagem ganha o espaço dele e o campo em foco sai de baixo.
+  const scrollRef = useRef<ScrollViewInstance>(null);
+  const keyboard = useKeyboardAvoid(scrollRef);
   const existing = binders.find((b) => b.id === id);
   const [b, setB] = useState<CustomBinder>(existing ?? { ...DEFAULT_CUSTOM_BINDER, id: newBinderId(), createdAt: new Date().toISOString() });
   const [saving, setSaving] = useState(false);
@@ -101,7 +109,6 @@ function BinderForm() {
   const name = b.name.trim();
   const purpose = BINDER_PURPOSES.find((p) => p.id === b.purpose) ?? BINDER_PURPOSES[0];
   const ink = onCover(b.color);
-  const gridChanged = !!existing && cards.length > 0 && (existing.rows !== b.rows || existing.cols !== b.cols);
 
   function choosePurpose(next: BinderPurpose) {
     const label = BINDER_PURPOSES.find((p) => p.id === next)?.label ?? '';
@@ -134,7 +141,7 @@ function BinderForm() {
 
   function confirmDelete() {
     const msg = cards.length
-      ? `Apagar "${b.name}" e as ${cards.length} cartas registradas nele? As cartas do fichário Pokédex não são afetadas.`
+      ? `Apagar "${b.name}" e as ${formatInt(cards.length)} cartas registradas nele? As cartas do fichário Pokédex não são afetadas.`
       : `Apagar "${b.name}"?`;
     const run = async () => {
       try {
@@ -159,17 +166,21 @@ function BinderForm() {
   return (
     <View style={styles.screen}>
       <Stack.Screen options={{ title: existing ? `Personalizar ${existing.name}` : 'Novo fichário' }} />
-      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: BOTTOM_BAR_SPACE + insets.bottom }]} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={[styles.content, { paddingHorizontal: gutter, paddingBottom: keyboard.bottomPad(BOTTOM_BAR_SPACE + insets.bottom) }]}
+        keyboardShouldPersistTaps="handled"
+        {...keyboard.scrollProps}>
         {/* Prévia da capa */}
-        <View style={[styles.preview, { backgroundColor: b.color }]} accessible accessibilityLabel={`Prévia da capa: ${name || purpose.label}`}>
+        <View style={[styles.preview, { backgroundColor: coverFill(b.color) }]} accessible accessibilityLabel={`Prévia da capa: ${name || purpose.label}`}>
           <View style={[styles.previewRing, { borderColor: ink }]}>
             <Ionicons name={purpose.icon as never} size={26} color={ink} />
           </View>
           <Text style={[styles.previewName, { color: ink }]} numberOfLines={2}>
-            {name || purpose.label}
+            {digitsInSystemFont(name || purpose.label)}
           </Text>
           <Text style={[styles.previewSub, { color: ink }]}>
-            {pageSize(b)} bolsos por página · {b.pages} páginas · {total} bolsos
+            {formatInt(pageSize(b))} bolsos por página · {formatInt(b.pages)} páginas · {formatInt(total)} bolsos
           </Text>
         </View>
 
@@ -182,8 +193,8 @@ function BinderForm() {
             </ChipGroup>
           </Section>
           <Section title="Nome">
-            <Input value={b.name} onChangeText={(t) => update({ name: t })} placeholder={`${purpose.label} (ou digite: Coleção 151, Favoritas…)`} maxLength={40} accessibilityLabel="Nome do fichário" />
-            <Input value={b.description ?? ''} onChangeText={(t) => update({ description: t })} placeholder="Descrição (opcional)" maxLength={120} accessibilityLabel="Descrição" />
+            <Input value={b.name} onChangeText={(t) => update({ name: t })} placeholder={`${purpose.label} (ou digite: Coleção 151, Favoritas…)`} maxLength={40} accessibilityLabel="Nome do fichário" onFocus={keyboard.onFocus} />
+            <Input value={b.description ?? ''} onChangeText={(t) => update({ description: t })} placeholder="Descrição (opcional)" maxLength={120} accessibilityLabel="Descrição" onFocus={keyboard.onFocus} />
           </Section>
           <Section title="Cor da capa">
             <ColorPicker value={b.color} onChange={(color) => update({ color })} />
@@ -191,7 +202,8 @@ function BinderForm() {
         </Card>
 
         <Card style={styles.card}>
-          <Section title="Bolsos por página" hint={gridChanged ? 'As cartas mantêm a ordem dos bolsos, mas mudam de página e de posição.' : undefined}>
+          {/* Sem legenda: quando a grade muda alguma carta de lugar, o aviso perto do Salvar diz quantas. */}
+          <Section title="Bolsos por página">
             <ChipGroup label="Bolsos por página">
               {GRID_PRESETS.map((p) => (
                 <Chip key={p.label} label={p.label} selected={b.rows === p.rows && b.cols === p.cols} onPress={() => update({ rows: p.rows, cols: p.cols })} />
@@ -204,7 +216,7 @@ function BinderForm() {
               <Stepper value={b.cols} onChange={(cols) => update({ cols })} max={6} label="colunas" />
             </Row>
           </Section>
-          <Section title="Páginas" hint={`${customSheets(b)} folhas ${b.doubleSided ? '(frente e verso)' : '(só frente)'} · ${total} bolsos no total`}>
+          <Section title="Páginas" hint={`${formatInt(customSheets(b))} folhas ${b.doubleSided ? '(frente e verso)' : '(só frente)'} · ${formatInt(total)} bolsos`}>
             <ChipGroup label="Páginas">
               {PAGE_PRESETS.map((n) => (
                 <Chip key={n} label={String(n)} accessibilityLabel={`${n} páginas`} selected={b.pages === n} onPress={() => update({ pages: n })} />
@@ -238,7 +250,7 @@ function BinderForm() {
 
         {existing ? <Button title="Apagar fichário" variant="danger" icon="trash-outline" onPress={confirmDelete} /> : null}
       </ScrollView>
-      <BottomBar bottomInset={insets.bottom}>
+      <BottomBar bottomInset={insets.bottom} width="form">
         <Button
           title={existing ? 'Salvar' : 'Criar fichário'}
           icon="checkmark-circle-outline"
@@ -252,8 +264,10 @@ function BinderForm() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
-  content: { padding: space.lg, gap: space.md, maxWidth: widths.form, width: '100%', alignSelf: 'center' },
-  preview: { borderRadius: radius.lg, padding: space.xl, gap: space.xs, minHeight: 140, justifyContent: 'flex-end', ...shadow },
+  // A margem lateral vem do useLayout().gutter.
+  content: { paddingTop: space.lg, gap: space.md, maxWidth: widths.form, width: '100%', alignSelf: 'center' },
+  // A borda mantém a capa preta visível sobre o fundo preto.
+  preview: { borderRadius: radius.lg, padding: space.xl, gap: space.xs, minHeight: 140, justifyContent: 'flex-end', borderWidth: 1, borderColor: colors.border },
   previewRing: {
     width: 48,
     height: 48,

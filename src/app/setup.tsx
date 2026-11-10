@@ -1,8 +1,9 @@
 import { router, Stack, useIsFocused } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, ScrollView, StyleSheet, Text, View, type ScrollViewInstance } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useKeyboardAvoid } from '@/components/keyboard-avoid';
 import {
   BOTTOM_BAR_SPACE,
   BottomBar,
@@ -11,6 +12,7 @@ import {
   Chip,
   ChipGroup,
   ColorPicker,
+  COVER_COLORS,
   Input,
   Loading,
   Notice,
@@ -19,9 +21,11 @@ import {
   Section,
   showToast,
   Stepper,
+  useLayout,
 } from '@/components/ui';
 import { TOTAL_SPECIES } from '@/data/pokedex';
 import { capacity, dexRange, extraSlots, isPlaced, pageSize, physicalMoves, REGIONS, totalPages, totalSlots, volumesText } from '@/lib/binder';
+import { formatInt } from '@/lib/format';
 import { supabase } from '@/lib/supabase';
 import { DEFAULT_SETTINGS, LANG_LABEL, POKEDEX_BINDER, type BinderSettings, type CardLang } from '@/lib/types';
 import { entriesOf, useCollection } from '@/store/collection';
@@ -45,20 +49,20 @@ const REGION_CHIPS = [{ id: 'all', label: 'Todas', from: 1, to: TOTAL_SPECIES },
  */
 function changesText({ moved, hidden, shown }: { moved: number; hidden: number; shown: number }, stillOut: number) {
   const parts: string[] = [];
-  if (moved) parts.push(`${moved} ${moved === 1 ? 'carta muda' : 'cartas mudam'} de lugar no fichário físico.`);
+  if (moved) parts.push(`${formatInt(moved)} ${moved === 1 ? 'carta muda' : 'cartas mudam'} de lugar no fichário físico.`);
   if (hidden) {
     parts.push(
       hidden === 1
         ? '1 carta fica fora do fichário com essa mudança. Continua salva e volta se você desfizer.'
-        : `${hidden} cartas ficam fora do fichário com essa mudança. Continuam salvas e voltam se você desfizer.`,
+        : `${formatInt(hidden)} cartas ficam fora do fichário com essa mudança. Continuam salvas e voltam se você desfizer.`,
     );
   }
-  if (shown) parts.push(shown === 1 ? '1 carta que estava fora volta para o fichário.' : `${shown} cartas que estavam fora voltam para o fichário.`);
+  if (shown) parts.push(shown === 1 ? '1 carta que estava fora volta para o fichário.' : `${formatInt(shown)} cartas que estavam fora voltam para o fichário.`);
   if (stillOut) {
     parts.push(
       stillOut === 1
         ? '1 carta já está fora do fichário nesta configuração (continua salva).'
-        : `${stillOut} cartas já estão fora do fichário nesta configuração (continuam salvas).`,
+        : `${formatInt(stillOut)} cartas já estão fora do fichário nesta configuração (continuam salvas).`,
     );
   }
   return parts.join(' ');
@@ -92,6 +96,10 @@ function SetupForm() {
   // Primeira abertura: decidido ao montar (a configuração pode chegar da nuvem enquanto a tela está aberta).
   const [firstTime] = useState(!settings);
   const insets = useSafeAreaInsets();
+  const { gutter } = useLayout();
+  // Teclado aberto no Android: o fim da rolagem ganha o espaço dele e o campo em foco sai de baixo.
+  const scrollRef = useRef<ScrollViewInstance>(null);
+  const keyboard = useKeyboardAvoid(scrollRef);
   const [s, setS] = useState<BinderSettings>(settings ?? DEFAULT_SETTINGS);
   const [sheetsText, setSheetsText] = useState(s.sheets ? String(s.sheets) : '');
   const [saving, setSaving] = useState(false);
@@ -140,7 +148,7 @@ function SetupForm() {
   const changed = changes.moved || changes.hidden || changes.shown || stillOut;
   const volumes = volumesText(draft);
   const needed = totalSlots(draft);
-  const rangeLabel = range.count === TOTAL_SPECIES ? `${TOTAL_SPECIES} Pokémon` : `${range.count} Pokémon (#${range.from}–#${range.to})`;
+  const rangeLabel = range.count === TOTAL_SPECIES ? `${formatInt(TOTAL_SPECIES)} Pokémon` : `${formatInt(range.count)} Pokémon (#${range.from}–#${range.to})`;
 
   function toggleLang(l: CardLang) {
     const has = s.languages.includes(l);
@@ -179,16 +187,20 @@ function SetupForm() {
           ...(firstTime ? { headerLeft: () => null, headerBackVisible: false, gestureEnabled: false } : null),
         }}
       />
-      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: BOTTOM_BAR_SPACE + insets.bottom }]} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={[styles.content, { paddingHorizontal: gutter, paddingBottom: keyboard.bottomPad(BOTTOM_BAR_SPACE + insets.bottom) }]}
+        keyboardShouldPersistTaps="handled"
+        {...keyboard.scrollProps}>
         {firstTime ? (
           <View style={styles.welcome}>
-            <PokeballIcon size={44} color={colors.primary} />
-            <Text style={styles.welcomeTitle} role="heading">
+            <PokeballIcon size={112} color={colors.heading} />
+            <Text style={styles.welcomeTitle} role="heading" maxFontSizeMultiplier={1.3}>
               Monte seu fichário Pokédex
             </Text>
             <Text style={styles.lead}>Igual ao seu fichário de verdade: cada carta fica no mesmo bolso. Dá para mudar depois.</Text>
             {supabase ? (
-              // Sem ícone: com ele, o texto não cabe numa linha num celular de 360 a 375 px.
+              // Sem ícone e com pouco recuo lateral: só assim o texto cabe numa linha já em 360 px.
               <Button
                 title="Já uso em outro aparelho · Entrar"
                 variant="secondary"
@@ -201,8 +213,9 @@ function SetupForm() {
 
         <Card style={styles.card}>
           <Section title="Nome e capa">
-            <Input value={s.name ?? ''} onChangeText={(name) => update({ name: name || undefined })} placeholder="Fichário Pokédex" maxLength={40} accessibilityLabel="Nome do fichário" />
-            <ColorPicker value={s.color ?? colors.primary} onChange={(color) => update({ color })} />
+            <Input value={s.name ?? ''} onChangeText={(name) => update({ name: name || undefined })} placeholder="Fichário Pokédex" maxLength={40} accessibilityLabel="Nome do fichário" onFocus={keyboard.onFocus} />
+            {/* Sem capa escolhida, marca o vermelho da paleta (o vermelho da ação principal não é uma das opções). */}
+            <ColorPicker value={s.color ?? COVER_COLORS[0].color} onChange={(color) => update({ color })} />
           </Section>
         </Card>
 
@@ -219,6 +232,7 @@ function SetupForm() {
                 value={fromText}
                 onChangeText={(t) => setFromText(t.replace(/\D/g, ''))}
                 onBlur={() => setRange(range.from, range.to)}
+                onFocus={keyboard.onFocus}
                 keyboardType="number-pad"
                 style={styles.rangeInput}
                 accessibilityLabel="Do número da Pokédex"
@@ -228,6 +242,7 @@ function SetupForm() {
                 value={toText}
                 onChangeText={(t) => setToText(t.replace(/\D/g, ''))}
                 onBlur={() => setRange(range.from, range.to)}
+                onFocus={keyboard.onFocus}
                 keyboardType="number-pad"
                 style={styles.rangeInput}
                 accessibilityLabel="Até o número da Pokédex"
@@ -261,6 +276,7 @@ function SetupForm() {
               keyboardType="number-pad"
               placeholder="Ex.: 40"
               accessibilityLabel="Número de folhas"
+              onFocus={keyboard.onFocus}
             />
             {/* A Pokédex inteira pode não caber num fichário só (F8): a posição da carta passa a dizer qual. */}
             {volumes ? <Text style={styles.fieldHint}>{volumes}</Text> : null}
@@ -272,7 +288,7 @@ function SetupForm() {
         </Card>
 
         <Card style={styles.card}>
-          <Section title="Espaços por Pokémon" hint="1 = uma carta por Pokémon; mais, para versões lado a lado">
+          <Section title="Espaços por Pokémon" hint="Mais de 1 para versões lado a lado">
             <Row label="Espaços">
               <Stepper value={s.slotsPerPokemon} onChange={(slotsPerPokemon) => update({ slotsPerPokemon })} max={6} label="espaços por Pokémon" />
             </Row>
@@ -298,17 +314,18 @@ function SetupForm() {
 
         <View style={styles.summary}>
           <Text style={styles.summaryText}>
-            {rangeLabel} × {draft.slotsPerPokemon} = {needed} espaços · {pageSize(draft)} por página · {totalPages(draft)} páginas
-            {free ? ` · ${free} ${free === 1 ? 'bolso extra' : 'bolsos extras'} na última página, para cartas especiais` : ''}
+            {rangeLabel} × {formatInt(draft.slotsPerPokemon)} = {formatInt(needed)} espaços · {formatInt(pageSize(draft))} por página ·{' '}
+            {formatInt(totalPages(draft))} páginas
+            {free ? ` · ${formatInt(free)} ${free === 1 ? 'bolso livre' : 'bolsos livres'} na última página, para cartas especiais` : ''}
           </Text>
           {cap != null ? (
             <Text style={[styles.summaryText, styles.summaryFit, { color: cap >= needed ? semantic.success.fg : semantic.danger.fg }]}>
-              {cap >= needed ? `Cabe tudo: o fichário tem ${cap} bolsos.` : `Faltam ${needed - cap} bolsos: o fichário tem ${cap}.`}
+              {cap >= needed ? `Cabe tudo: o fichário tem ${formatInt(cap)} bolsos.` : `Faltam ${formatInt(needed - cap)} bolsos: o fichário tem ${formatInt(cap)}.`}
             </Text>
           ) : null}
         </View>
       </ScrollView>
-      <BottomBar bottomInset={insets.bottom}>
+      <BottomBar bottomInset={insets.bottom} width="form">
         <Button title={firstTime ? 'Começar' : 'Salvar fichário'} icon="checkmark-circle-outline" onPress={save} busy={saving} />
       </BottomBar>
     </View>
@@ -317,14 +334,16 @@ function SetupForm() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
-  content: { padding: space.lg, maxWidth: widths.form, width: '100%', alignSelf: 'center', gap: space.md },
-  welcome: { alignItems: 'center', gap: space.sm, paddingVertical: space.md },
-  welcomeTitle: { ...typography.title, color: colors.text, textAlign: 'center' },
-  lead: { ...typography.body, color: colors.textMuted, textAlign: 'center' },
-  signIn: { alignSelf: 'stretch', marginTop: space.sm, paddingHorizontal: space.lg },
+  // A margem lateral vem do useLayout().gutter.
+  content: { paddingTop: space.lg, maxWidth: widths.form, width: '100%', alignSelf: 'center', gap: space.md },
+  welcome: { alignItems: 'center', gap: space.md, paddingTop: space.xl, paddingBottom: space.lg },
+  welcomeTitle: { ...typography.title, fontSize: 40, lineHeight: 50, color: colors.text, textAlign: 'center' },
+  lead: { ...typography.body, color: colors.textMuted, textAlign: 'center', maxWidth: 420 },
+  signIn: { alignSelf: 'stretch', marginTop: space.sm, paddingHorizontal: space.xs },
   card: { paddingBottom: 0 },
   rangeRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  rangeInput: { flex: 1, textAlign: 'center' },
+  // Na web, o campo tem largura própria (min-width auto) e sairia da linha: com 0, os dois dividem o espaço.
+  rangeInput: { flex: 1, minWidth: 0, textAlign: 'center' },
   until: { ...typography.bodyStrong, color: colors.textMuted },
   fieldHint: { ...typography.caption, ...typography.tabular, color: colors.textMuted },
   summary: { backgroundColor: colors.surfaceAlt, borderRadius: radius.md, padding: space.lg, gap: space.xs },

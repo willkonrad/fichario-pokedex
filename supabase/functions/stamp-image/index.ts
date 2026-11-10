@@ -32,13 +32,17 @@ function serviceKey(): string {
 
 const admin = createClient(Deno.env.get('SUPABASE_URL')!, serviceKey());
 
-/** Palavras sem acento, com "Pokémon Day" e "Pokeday" (TCGdex) escritos do mesmo jeito. */
+/**
+ * Palavras sem acento, com "Pokémon Day" e "Pokeday" (TCGdex) escritos do mesmo jeito e "Pre-Release" igual a
+ * "Prerelease" (como plainWords em src/lib/catalog.ts: as cartas salvas antes mandam "pre-release" nos selos).
+ */
 const words = (s: string) =>
   s
     .toLowerCase()
     .normalize('NFD')
     .replace(/\p{M}/gu, '')
     .replace(/pokemon\s*day/g, 'pokeday')
+    .replace(/pre[\s-]?release/g, 'prerelease')
     .split(/[^a-z0-9]+/)
     .filter(Boolean);
 /** Palavras que identificam o selo (sem números e ordinais como "30th", que a TCGplayer escreve de outro jeito). */

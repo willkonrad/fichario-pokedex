@@ -3,7 +3,7 @@ This is an Expo/React Native mobile application (Fichário Pokédex: Pokémon TC
 Leia antes de mexer:
 
 - [docs/arquitetura.md](docs/arquitetura.md) — mapa do projeto: pastas, fluxo dos dados (aparelho ↔ Supabase, preços, catálogo, histórico, cópia diária), onde mora cada regra, como aplicar uma migração, publicar uma função e testar.
-- [docs/design.md](docs/design.md) — sistema visual: cores com significado, tipografia, espaços, componentes, acessibilidade e web.
+- [DESIGN.md](DESIGN.md) — sistema visual: cores com significado, tipografia, espaços, componentes, acessibilidade e web.
 - [README.md](README.md) — o que o app faz, fontes de dados e a regra do valor; [CHANGELOG.md](CHANGELOG.md) — o que mudou em cada versão.
 
 ## Regras do projeto (fixas)
@@ -20,9 +20,9 @@ Valem para qualquer mudança, feita por pessoa ou por agente. Na dúvida, pare e
 
 ### Valor das cartas
 
-- **O app nunca estima preço**: nada de desconto pelo estado da carta, média inventada ou preço de outra carta. O que existe é preço real marcado "≈ Aproximado": o da carta base quando a versão (selo, Poké Ball…) não é vendida à parte, e o do MYP Cards numa carta em inglês sem preço na TCGplayer. Sem fonte, a carta fica sem valor até o usuário preencher "Meu valor".
-- **Ordem da regra**: "Meu valor" → TCGplayer (EUA, só cartas em inglês, em reais pela PTAX) → MYP Cards. Em cada carta o usuário escolhe mínimo, média ou máximo ("Usar na soma", campo `valueBasis`; a média por padrão). "Meu valor" vale até a média da fonte passar dele.
-- A regra existe em quatro lugares que andam juntos: `src/lib/valuation.ts` (valor atual), `src/lib/history.ts` (`snapshotValue`), e as funções SQL `history_value` e `snapshot_prices` (`supabase/schema.sql`). Mudou um, mude os outros e os testes.
+- **O app nunca estima preço**: nada de desconto pelo estado da carta, média inventada ou preço de outra carta. O que existe é preço real marcado "≈ Aproximado": o da carta base quando a versão (selo, Poké Ball…) não é vendida à parte, o do produto da carta no MYP Cards numa Reverse Foil em português (o MYP não tem produto próprio da reverse; o número é o mesmo, muda só a marca), e o do MYP Cards numa carta em inglês sem preço na TCGplayer. Sem fonte, a carta fica sem valor até o usuário preencher "Meu valor".
+- **Ordem da regra**: "Meu valor" → TCGplayer (EUA, cartas em inglês e em japonês, em reais pela PTAX) → MYP Cards (cartas em português e inglês; não tem japonesas). Carta japonesa só usa produto da TCGplayer japonesa (categoria 85) e carta em inglês só da categoria 3: nunca o preço da carta de outro idioma no valor. A Consulta de cartas mostra o de outro idioma só como referência rotulada, e ele não entra em nenhuma soma. Na dúvida entre dois produtos, a carta fica sem preço. Em cada carta o usuário escolhe mínimo, média ou máximo ("Usar na soma", campo `valueBasis`; a média por padrão). "Meu valor" vale até a média da fonte passar dele.
+- A regra existe em quatro lugares que andam juntos: `src/lib/valuation.ts` (valor atual), `src/lib/history.ts` (`snapshotValue`), e as funções SQL `collection_history` e `snapshot_prices` (`supabase/schema.sql`). Mudou um, mude os outros e os testes.
 - Nomes e textos do valor só em `src/lib/copy.ts` ("Valor da carta", "Valor deste fichário", "Valor da coleção", rótulos de cada fonte); dinheiro, números e datas só por `src/lib/format.ts`.
 
 ### Segredos e repositório
@@ -42,7 +42,7 @@ Valem para qualquer mudança, feita por pessoa ou por agente. Na dúvida, pare e
 ### Código
 
 - Comentários em português, curtos; nomes em inglês; interface em português do Brasil.
-- Cores, tamanhos e espaços pelos tokens de `src/theme.ts` (sem `#hex` ou `rgba(` soltos nas telas) e componentes de `src/components/ui.tsx`, como em `docs/design.md`.
+- Cores, tamanhos e espaços pelos tokens de `src/theme.ts` (sem `#hex` ou `rgba(` soltos nas telas) e componentes de `src/components/ui.tsx`, como em `DESIGN.md`.
 - Antes de dar uma tarefa por pronta: `npm test`, `npm run typecheck` e `npm run lint`.
 
 ## Expo has changed — do not trust your training data

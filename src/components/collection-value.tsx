@@ -2,29 +2,30 @@ import { router } from 'expo-router';
 import { Fragment } from 'react';
 import { Platform, StyleSheet, Text, View, type StyleProp, type TextStyle } from 'react-native';
 
+import { HEADING_3 } from '@/components/collection-chart';
 import { Button, ExternalLink, InfoButton, InfoParagraph, InfoSheet, InfoTopic, PokeballIcon } from '@/components/ui';
-import { collectionValueLabel, freshnessText, HOW_WE_CALCULATE, maxSumText, MYP_ON_PHONE, pickSummary, sourceCredits, totalsRangeText } from '@/lib/copy';
+import { freshnessText, HOW_WE_CALCULATE, maxSumText, MYP_ON_PHONE, pickSummary, sourceCredits, totalsRangeText, VALUE_SCOPE } from '@/lib/copy';
 import { formatBRLTight, formatDate } from '@/lib/format';
 import type { collectionTotals } from '@/lib/quotes';
 import type { SourceId } from '@/lib/valuation';
-import { binderColors, colors, radius, semantic, shadow, space, typography } from '@/theme';
+import { colors, radius, semantic, space, typography } from '@/theme';
 
 export type CollectionTotals = ReturnType<typeof collectionTotals>;
 
 /**
- * Linha de créditos das fontes do valor: "Preços: MYP Cards ↗ (41) · TCGplayer ↗ (5) · Meu valor (2)". O MYP Cards
+ * Linha de créditos das fontes do valor: "Preços: MYP Cards (41) · TCGplayer (5) · Meu valor (2)". O MYP Cards
  * aparece sempre, com link (atribuição obrigatória onde há preço dele).
  */
-export function SourceCreditsLine({ byBasis, onDark, style }: { byBasis: Record<SourceId, number>; onDark?: boolean; style?: StyleProp<TextStyle> }) {
+export function SourceCreditsLine({ byBasis, style }: { byBasis: Record<SourceId, number>; style?: StyleProp<TextStyle> }) {
   const credits = sourceCredits(byBasis);
   return (
-    <Text style={[styles.credits, onDark && styles.creditsOnDark, style]}>
+    <Text style={[styles.credits, style]}>
       Preços:{' '}
       {credits.map((c, i) => (
         <Fragment key={c.id}>
           {i > 0 ? ' · ' : null}
           {c.url ? (
-            <ExternalLink href={c.url} variant="inline" tone={onDark ? 'onBrand' : 'default'} arrow>
+            <ExternalLink href={c.url} variant="inline" arrow>
               {c.label}
             </ExternalLink>
           ) : (
@@ -84,9 +85,10 @@ export function HowWeCalculateSheet({ visible, onClose, totals }: { visible: boo
 }
 
 /**
- * Cartão do valor da coleção (V1/V2/V3/V6): grafite, para não empilhar vermelho sobre a barra vermelha (AR3). O valor
- * em destaque; embaixo, uma linha para cada coisa: como a soma foi feita (só quando há escolhas diferentes da média),
- * as somas pelo menor anúncio e pela média, a cobertura e a idade dos preços e as fontes.
+ * Cartão do valor da coleção (V1/V2/V3/V6): um degrau acima dos outros cartões, porque é o número mais importante da
+ * tela. O valor em branco e grande; embaixo, uma linha para cada coisa: como a soma foi feita (só quando há escolhas
+ * diferentes da média), as somas pelo menor anúncio e pela média, os fichários, a cobertura e a idade dos preços e as
+ * fontes.
  */
 export function ValueHero({
   totals,
@@ -107,22 +109,24 @@ export function ValueHero({
   // A legenda só aparece quando alguma carta usa outra coisa que não a média (senão ela não diz nada).
   const mixed = totals.byPick.min + totals.byPick.max + totals.byPick.manual > 0;
   const coverage = valued < cards ? `${valued} de ${cards} cartas com preço` : null;
-  const status = [coverage, freshnessText(freshness) || null].filter(Boolean).join(' · ');
+  const status = [binderCount > 1 ? `${binderCount} fichários` : null, coverage, freshnessText(freshness) || null].filter(Boolean).join(' · ');
   const showRange = valued > 0 && totals.min !== totals.avg;
   // Na web o MYP não é consultado (só o app no celular): os preços dessas cartas não chegam aqui sozinhos.
   const waiting = Platform.OS === 'web' && totals.mypPending > 0 ? MYP_ON_PHONE : 'Os preços chegam em alguns minutos.';
   return (
     <View style={styles.hero}>
       <View style={styles.heroTop}>
-        <PokeballIcon size={18} color={binderColors.textMuted} />
-        <Text style={styles.heroLabel}>{collectionValueLabel(binderCount)}</Text>
+        <PokeballIcon size={18} color={colors.textMuted} />
+        <Text style={styles.heroTitle} {...HEADING_3}>
+          {VALUE_SCOPE.collection}
+        </Text>
       </View>
-      {/* O ⓘ fica ao lado do número (na linha do rótulo, ele cortaria "· 2 fichários" no celular). */}
+      {/* O ⓘ fica ao lado do número, que é o que ele explica. */}
       <View style={styles.valueRow}>
-        <Text style={styles.heroValue} numberOfLines={1}>
+        <Text style={[styles.heroValue, !valued && styles.heroNoValue]} numberOfLines={1}>
           {valued ? formatBRLTight(totals.value) : 'sem preço ainda'}
         </Text>
-        <InfoButton label="Como calculamos o valor" onPress={onInfo} color={binderColors.textMuted} />
+        <InfoButton label="Como calculamos o valor" onPress={onInfo} />
       </View>
       {valued > 0 && mixed ? <Text style={styles.heroCaption}>{pickSummary(totals.byPick)}</Text> : null}
       {!valued ? (
@@ -134,7 +138,7 @@ export function ValueHero({
         <View style={styles.heroFoot}>
           {showRange ? <Text style={styles.heroNote}>{totalsRangeText(totals)}</Text> : null}
           {status ? <Text style={styles.heroNote}>{status}</Text> : null}
-          {valued ? <SourceCreditsLine byBasis={totals.byBasis} onDark /> : null}
+          {valued ? <SourceCreditsLine byBasis={totals.byBasis} /> : null}
         </View>
       ) : null}
     </View>
@@ -143,19 +147,21 @@ export function ValueHero({
 
 const styles = StyleSheet.create({
   credits: { ...typography.caption, color: colors.textMuted },
-  creditsOnDark: { color: binderColors.textMuted },
-  hero: { backgroundColor: colors.graphite, borderRadius: radius.lg, padding: space.lg, gap: space.xs, ...shadow },
+  hero: { backgroundColor: colors.graphite, borderRadius: radius.lg, padding: space.lg, gap: space.xs },
   heroTop: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  heroLabel: { ...typography.label, color: binderColors.textMuted, flex: 1 },
+  heroTitle: { ...typography.heading, color: colors.heading, flex: 1 },
   valueRow: { flexDirection: 'row', alignItems: 'center', gap: space.xxs },
-  heroValue: { ...typography.display, ...typography.tabular, color: semantic.money.onSheet, flexShrink: 1 },
-  heroCaption: { ...typography.caption, color: binderColors.text },
+  heroValue: { ...typography.display, ...typography.tabular, color: semantic.money.fg, flexShrink: 1 },
+  // A frase no tamanho do número grande seria cortada em celular de 360 dp.
+  heroNoValue: typography.figure,
+  heroCaption: { ...typography.caption, color: colors.text },
   heroFoot: {
     gap: space.xs,
     marginTop: space.sm,
     paddingTop: space.md,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: binderColors.pocketBorder,
+    // Sobre o grafite, a `border` comum some.
+    borderTopColor: colors.borderStrong,
   },
-  heroNote: { ...typography.caption, ...typography.tabular, color: binderColors.textMuted },
+  heroNote: { ...typography.caption, ...typography.tabular, color: colors.textMuted },
 });

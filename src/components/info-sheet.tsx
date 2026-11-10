@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Animated, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { digitsInSystemFont } from '@/components/digits';
 import { IconButton } from '@/components/icon-button';
 import { NATIVE_DRIVER, useReducedMotion } from '@/components/motion';
 import { useToastClearance } from '@/components/toast';
@@ -92,7 +93,7 @@ function SheetBody({ title, onClose, centered, footer, children }: { title: stri
         {centered ? null : <View style={styles.grabber} aria-hidden />}
         <View style={styles.head}>
           <Text style={styles.title} role="heading" {...HEADING_LEVEL_2}>
-            {title}
+            {digitsInSystemFont(title)}
           </Text>
           <IconButton icon="close" label="Fechar" onPress={onClose} color={colors.textMuted} />
         </View>
@@ -127,7 +128,7 @@ export function InfoTopic({ title, children }: { title: string; children: ReactN
   );
 }
 
-/** O ⓘ ao lado de um rótulo ("Valor ⓘ") que abre a folha; alvo de 44 px com ícone de 18. */
+/** O ⓘ ao lado de um rótulo ("Valor ⓘ") que abre a folha; alvo de 48 px com ícone de 18. */
 export function InfoButton({ label, onPress, color = colors.textMuted }: { label: string; onPress: () => void; color?: string }) {
   return (
     <Pressable
@@ -145,7 +146,8 @@ const styles = StyleSheet.create({
   rootBottom: { justifyContent: 'flex-end' },
   rootCentered: { justifyContent: 'center', alignItems: 'center', padding: space.xl },
   backdrop: { ...StyleSheet.absoluteFill, backgroundColor: colors.backdrop },
-  sheet: { backgroundColor: colors.surface, ...elevation[2] },
+  // A sombra some no escuro: a borda é o que recorta a folha do fundo.
+  sheet: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, ...elevation[2] },
   sheetBottom: {
     width: '100%',
     maxWidth: 640,
@@ -155,9 +157,9 @@ const styles = StyleSheet.create({
     paddingTop: space.sm,
   },
   sheetCentered: { width: '100%', maxWidth: 520, borderRadius: radius.lg, paddingTop: space.md, paddingBottom: space.lg },
-  grabber: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: colors.border, marginBottom: space.xs },
+  grabber: { alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: colors.borderStrong, marginBottom: space.xs },
   head: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingLeft: space.xl, paddingRight: space.sm },
-  title: { ...typography.heading, color: colors.text, flex: 1 },
+  title: { ...typography.heading, color: colors.heading, flex: 1 },
   scroll: { flexGrow: 0, flexShrink: 1 },
   content: { paddingHorizontal: space.xl, paddingTop: space.xs, paddingBottom: space.sm, gap: space.md },
   footer: { paddingHorizontal: space.xl, paddingTop: space.md, gap: space.sm },

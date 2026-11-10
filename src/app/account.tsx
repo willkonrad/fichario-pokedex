@@ -1,16 +1,19 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Linking from 'expo-linking';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Platform, ScrollView, StyleSheet, Text, View, type ScrollViewInstance } from 'react-native';
 
 import { BackupCard } from '@/components/collection-backup';
 import { SyncNotice, syncSummary } from '@/components/collection-notices';
-import { Button, Card, Input, Notice, Section, showToast } from '@/components/ui';
+import { useKeyboardAvoid } from '@/components/keyboard-avoid';
+import { Button, Card, Input, Notice, Section, showToast, useLayout } from '@/components/ui';
+import { clearActivityCache } from '@/lib/activity';
 import { authErrorText, isSignupDisabled, MIN_PASSWORD, RESET_PATH, SIGNUP_CONFIRM_PATH } from '@/lib/auth-links';
 import { formatWhen } from '@/lib/format';
 import { clearHistoryCache } from '@/lib/history';
 import { supabase } from '@/lib/supabase';
+import { TAP } from '@/lib/tap-word';
 import { useCollection } from '@/store/collection';
 import { colors, radius, space, typography, widths } from '@/theme';
 
@@ -24,10 +27,11 @@ export default function AccountScreen() {
   const params = useLocalSearchParams<{ primeira?: string; secao?: string }>();
   const backupFirst = params.secao === 'copia';
   const title = backupFirst ? 'Cópia da coleção' : 'Conta';
+  const { gutter } = useLayout();
 
   if (!supabase) {
     return (
-      <ScrollView contentContainerStyle={styles.screen}>
+      <ScrollView contentContainerStyle={[styles.screen, { paddingHorizontal: gutter }]}>
         <Stack.Screen options={{ title }} />
         <Notice tone="info">A nuvem não está configurada neste app: a coleção fica salva só neste aparelho. Exporte uma cópia de vez em quando.</Notice>
         <BackupCard />
@@ -38,12 +42,16 @@ export default function AccountScreen() {
 }
 
 function AccountContent({ firstRun, backupFirst, title }: { firstRun: boolean; backupFirst: boolean; title: string }) {
-  const { ready, session, settings, syncNow, syncStatus, lastSyncAt } = useCollection();
+  const { ready, session, settings, syncNow, syncStatus, lastSyncAt, prepareSignOut } = useCollection();
+  const { gutter } = useLayout();
   const sb = supabase!;
+  // Teclado aberto no Android: o fim da rolagem ganha o espaço dele e o campo em foco sai de baixo.
+  const scrollRef = useRef<ScrollViewInstance>(null);
+  const keyboard = useKeyboardAvoid(scrollRef);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState<'in' | 'up' | 'reset' | 'sync' | 'out' | null>(null);
-  const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
+  const [message, setMessage] = useState<{ text: string; error?: boolean; warning?: boolean } | null>(null);
   // Qual botão foi tocado por último (para marcar só os campos que ele precisa).
   const [checked, setChecked] = useState<'in' | 'up' | 'reset' | null>(null);
   // O servidor disse que o cadastro está fechado: "Criar conta" sai da tela (o aviso explica).
@@ -106,7 +114,7 @@ function AccountContent({ firstRun, backupFirst, title }: { firstRun: boolean; b
       // na web. O endereço precisa estar nas Redirect URLs do Supabase (senão o link cai na Site URL).
       const { error } = await sb.auth.resetPasswordForEmail(email.trim(), { redirectTo: Linking.createURL(RESET_PATH) });
       const where =
-        Platform.OS === 'web' ? 'Toque no link do e-mail para criar uma nova senha.' : 'Abra o e-mail neste celular: o link volta para o app, onde você cria a nova senha.';
+        Platform.OS === 'web' ? `${TAP} no link do e-mail para criar uma nova senha.` : 'Abra o e-mail neste celular: o link volta para o app, onde você cria a nova senha.';
       setMessage(
         error
           ? { text: authErrorText(error), error: true }
@@ -135,11 +143,15 @@ function AccountContent({ firstRun, backupFirst, title }: { firstRun: boolean; b
     setBusy('out');
     setMessage(null);
     try {
+      // Com a conta ainda aberta, a fila vai antes (depois de sair, só quando esta conta entrar de novo).
+      const unsent = await prepareSignOut();
       // Só este aparelho: o padrão do supabase-js ('global') tiraria a conta também do celular ou da web.
       const { error } = await sb.auth.signOut({ scope: 'local' });
       // O histórico guardado na memória é desta conta.
       clearHistoryCache();
+      clearActivityCache();
       if (error) setMessage({ text: authErrorText(error), error: true });
+      else if (unsent) setMessage({ text: unsent, warning: true });
     } catch (e) {
       setMessage({ text: authErrorText(e), error: true });
     }
@@ -150,8 +162,10 @@ function AccountContent({ firstRun, backupFirst, title }: { firstRun: boolean; b
 
   if (session) {
     const sum = syncSummary(syncStatus, session.user.email);
+    // Só depois de uma sincronização completa nesta abertura (logo após entrar, o estado ainda é "ok" por um instante).
+    const noBinderYet = firstRun && !settings && syncStatus.state === 'ok' && !!lastSyncAt;
     return (
-      <ScrollView contentContainerStyle={styles.screen}>
+      <ScrollView contentContainerStyle={[styles.screen, { paddingHorizontal: gutter }]}>
         <Stack.Screen options={{ title }} />
         {backupFirst ? backup : null}
         <Card style={styles.profile}>
@@ -170,8 +184,7 @@ function AccountContent({ firstRun, backupFirst, title }: { firstRun: boolean; b
         </Card>
         <SyncNotice status={syncStatus} />
         {firstRun && !settings ? (
-          // Só depois de uma sincronização completa nesta abertura (logo após entrar, o estado ainda é "ok" por um instante).
-          syncStatus.state === 'ok' && lastSyncAt ? (
+          noBinderYet ? (
             <>
               <Notice tone="info">Esta conta ainda não tem fichário salvo. Volte e monte o seu.</Notice>
               <Button title="Montar meu fichário" icon="arrow-back" onPress={() => router.back()} />
@@ -180,12 +193,19 @@ function AccountContent({ firstRun, backupFirst, title }: { firstRun: boolean; b
             <Notice tone="info">Buscando sua coleção na nuvem…</Notice>
           )
         ) : null}
-        {message ? <Notice tone={message.error ? 'danger' : 'success'}>{message.text}</Notice> : null}
+        {message ? <Notice tone={message.error ? 'danger' : message.warning ? 'warning' : 'success'}>{message.text}</Notice> : null}
         <Text style={styles.text}>
           As alterações vão para a nuvem na hora e chegam aos outros aparelhos ao abrir o app.
           {syncStatus.lastSyncAt && syncStatus.state !== 'ok' ? ` Última sincronização: ${formatWhen(syncStatus.lastSyncAt)}.` : ''}
         </Text>
-        <Button title={busy === 'sync' ? 'Sincronizando…' : 'Sincronizar agora'} icon="sync" onPress={sync} busy={busy === 'sync'} />
+        {/* Um vermelho por tela: quando "Montar meu fichário" aparece, a sincronização fica em contorno. */}
+        <Button
+          title={busy === 'sync' ? 'Sincronizando…' : 'Sincronizar agora'}
+          variant={noBinderYet ? 'secondary' : 'primary'}
+          icon="sync"
+          onPress={sync}
+          busy={busy === 'sync'}
+        />
         <Button title="Sair da conta" variant="secondary" icon="log-out-outline" busy={busy === 'out'} onPress={signOut} />
         {backupFirst ? null : backup}
       </ScrollView>
@@ -193,7 +213,11 @@ function AccountContent({ firstRun, backupFirst, title }: { firstRun: boolean; b
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.screen} keyboardShouldPersistTaps="handled">
+    <ScrollView
+      ref={scrollRef}
+      contentContainerStyle={[styles.screen, { paddingHorizontal: gutter, paddingBottom: keyboard.bottomPad(space.xxxl) }]}
+      keyboardShouldPersistTaps="handled"
+      {...keyboard.scrollProps}>
       <Stack.Screen options={{ title }} />
       {backupFirst ? backup : null}
       <View style={styles.intro}>
@@ -218,6 +242,7 @@ function AccountContent({ firstRun, backupFirst, title }: { firstRun: boolean; b
             textContentType="emailAddress"
             accessibilityLabel="E-mail"
             invalid={!!checked && !validEmail}
+            onFocus={keyboard.onFocus}
           />
           <Input
             value={password}
@@ -229,12 +254,13 @@ function AccountContent({ firstRun, backupFirst, title }: { firstRun: boolean; b
             returnKeyType="go"
             accessibilityLabel="Senha"
             invalid={passwordMissing}
+            onFocus={keyboard.onFocus}
             onSubmitEditing={() => run('in')}
           />
         </Section>
         {message ? (
           <View style={styles.message}>
-            <Notice tone={message.error ? 'danger' : 'success'}>{message.text}</Notice>
+            <Notice tone={message.error ? 'danger' : message.warning ? 'warning' : 'success'}>{message.text}</Notice>
           </View>
         ) : null}
         <View style={styles.buttons}>
@@ -251,7 +277,8 @@ function AccountContent({ firstRun, backupFirst, title }: { firstRun: boolean; b
 }
 
 const styles = StyleSheet.create({
-  screen: { flexGrow: 1, padding: space.lg, gap: space.md, maxWidth: widths.form, width: '100%', alignSelf: 'center', paddingBottom: space.xxxl },
+  // A margem lateral vem do useLayout().gutter.
+  screen: { flexGrow: 1, paddingTop: space.lg, gap: space.md, maxWidth: widths.form, width: '100%', alignSelf: 'center', paddingBottom: space.xxxl },
   text: { ...typography.caption, color: colors.textMuted },
   center: { textAlign: 'center' },
   profile: { flexDirection: 'row', alignItems: 'center', gap: space.md },

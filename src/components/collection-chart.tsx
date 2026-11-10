@@ -246,7 +246,7 @@ const styles = StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'flex-start', gap: space.sm, flexWrap: 'wrap' },
   headText: { flex: 1, minWidth: 160, gap: space.xxs },
   stack: { gap: space.xxs },
-  title: { ...typography.heading, color: colors.text },
+  title: { ...typography.heading, color: colors.heading },
   change: { ...typography.bodyStrong, ...typography.tabular },
   note: { ...typography.caption, color: colors.textMuted },
   ranges: { gap: space.xs },

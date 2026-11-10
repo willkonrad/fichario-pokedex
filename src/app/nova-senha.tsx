@@ -2,14 +2,16 @@ import { isAuthRetryableFetchError, type SupabaseClient } from '@supabase/supaba
 import * as Linking from 'expo-linking';
 import { router, Stack, useIsFocused, useLocalSearchParams } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, View, type TextInputInstance } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, View, type ScrollViewInstance, type TextInputInstance } from 'react-native';
 
-import { Button, Card, Input, Loading, Notice, Section, showToast } from '@/components/ui';
+import { useKeyboardAvoid } from '@/components/keyboard-avoid';
+import { Button, Card, Input, Loading, Notice, Section, showToast, useLayout } from '@/components/ui';
 import {
   authErrorText,
   hasAuthFragment,
   isResetLink,
   LINK_EXPIRED_TEXT,
+  linkErrorText,
   linkSessionCheck,
   MIN_PASSWORD,
   newPasswordProblem,
@@ -17,16 +19,17 @@ import {
   type AuthLink,
 } from '@/lib/auth-links';
 import { initialWebAuthLink, isNetworkError, stripAuthFromAddressBar, supabase } from '@/lib/supabase';
+import { TAP_LOWER } from '@/lib/tap-word';
 import { colors, space, typography, widths } from '@/theme';
 
 const TITLE = 'Nova senha';
 
-const NO_LINK_TEXT = 'Abra esta tela pelo link do e-mail de nova senha. Para receber um, toque em "Esqueci minha senha" na tela da conta.';
+const NO_LINK_TEXT = `Abra esta tela pelo link do e-mail de nova senha. Para receber um, ${TAP_LOWER} em "Esqueci minha senha" na tela da conta.`;
 const LINK_FAILED_SIGNED_IN =
   'O link do e-mail não vale mais (venceu ou já foi usado), mas você já está na conta neste aparelho: crie a senha nova aqui mesmo.';
 const LINK_OTHER_ACCOUNT =
   'O link do e-mail é de outra conta e não foi usado. Aqui você troca a senha da conta deste aparelho; para a outra, saia desta e peça um novo link.';
-const OFFLINE_TEXT = 'Sem conexão com a internet. Quando ela voltar, toque em "Tentar de novo": o link do e-mail ainda vale.';
+const OFFLINE_TEXT = `Sem conexão com a internet. Quando ela voltar, ${TAP_LOWER} em "Tentar de novo": o link do e-mail ainda vale.`;
 
 /** Resultado de um link: o erro em português (null quando deu certo), e se vale tentar de novo (falta de internet). */
 type LinkResult = { error: string | null; retry?: boolean; note?: string };
@@ -52,7 +55,8 @@ function openLink(sb: SupabaseClient, url: string | null): Promise<LinkResult> {
 const offline = (e: unknown) => isAuthRetryableFetchError(e) || isNetworkError(e);
 
 async function applyLink(sb: SupabaseClient, link: AuthLink): Promise<LinkResult> {
-  if (link.kind === 'error') return { error: authErrorText({ code: link.code, message: link.message }) };
+  // Erro que veio no endereço: só o texto do código conhecido (nada do endereço vai para o aviso).
+  if (link.kind === 'error') return { error: linkErrorText(link.code) };
   try {
     if (link.kind === 'session') {
       // Com a conta já aberta, um link velho ou repetido não é lido (ver linkSessionCheck): o setSession com um token
@@ -92,9 +96,10 @@ type Phase =
  * conta já entrada neste aparelho, também troca a senha.
  */
 export default function NewPasswordScreen() {
+  const { gutter } = useLayout();
   if (!supabase) {
     return (
-      <ScrollView contentContainerStyle={styles.screen}>
+      <ScrollView contentContainerStyle={[styles.screen, { paddingHorizontal: gutter }]}>
         <Stack.Screen options={{ title: TITLE }} />
         <Notice tone="info">A nuvem não está configurada neste app: não há conta nem senha para trocar.</Notice>
         <Button title="Voltar ao fichário" icon="arrow-back" onPress={goHome} />
@@ -120,7 +125,11 @@ function NewPasswordContent({ sb }: { sb: SupabaseClient }) {
   // endereço (https://docs.expo.dev/router/reference/url-parameters/#hash-support). Os tokens saem dos dois: o link já
   // foi guardado quando a página carregou. (router.setParams vale para a tela em foco: só com esta em foco.)
   const focused = useIsFocused();
+  const { gutter } = useLayout();
   const routeHash = useLocalSearchParams<{ '#'?: string }>()['#'];
+  // Teclado aberto no Android: o fim da rolagem ganha o espaço dele e o campo em foco sai de baixo.
+  const scrollRef = useRef<ScrollViewInstance>(null);
+  const keyboard = useKeyboardAvoid(scrollRef);
   useEffect(() => {
     if (Platform.OS !== 'web' || !focused || !routeHash || !hasAuthFragment(`#${routeHash}`)) return;
     router.setParams({ '#': undefined });
@@ -163,7 +172,11 @@ function NewPasswordContent({ sb }: { sb: SupabaseClient }) {
   }, [sb, url, attempt]);
 
   return (
-    <ScrollView contentContainerStyle={styles.screen} keyboardShouldPersistTaps="handled">
+    <ScrollView
+      ref={scrollRef}
+      contentContainerStyle={[styles.screen, { paddingHorizontal: gutter, paddingBottom: keyboard.bottomPad(space.xxxl) }]}
+      keyboardShouldPersistTaps="handled"
+      {...keyboard.scrollProps}>
       <Stack.Screen options={{ title: TITLE }} />
       {!phase ? (
         <Loading label={url ? 'Abrindo o link do e-mail…' : 'Carregando…'} />
@@ -178,13 +191,24 @@ function NewPasswordContent({ sb }: { sb: SupabaseClient }) {
           <Button title="Voltar ao fichário" variant="ghost" onPress={goHome} />
         </>
       ) : (
-        <PasswordForm sb={sb} email={phase.email} warning={phase.warning} />
+        <PasswordForm sb={sb} email={phase.email} warning={phase.warning} onFocus={keyboard.onFocus} />
       )}
     </ScrollView>
   );
 }
 
-function PasswordForm({ sb, email, warning }: { sb: SupabaseClient; email: string | null; warning: string | null }) {
+function PasswordForm({
+  sb,
+  email,
+  warning,
+  onFocus,
+}: {
+  sb: SupabaseClient;
+  email: string | null;
+  warning: string | null;
+  /** Campo em foco: a rolagem o tira de baixo do teclado (useKeyboardAvoid). */
+  onFocus: () => void;
+}) {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [checked, setChecked] = useState(false);
@@ -217,10 +241,7 @@ function PasswordForm({ sb, email, warning }: { sb: SupabaseClient; email: strin
     <>
       {warning ? <Notice tone="warning">{warning}</Notice> : null}
       <Card>
-        {/* Ao trocar a senha, o Supabase tira a conta dos outros aparelhos (só esta sessão continua). */}
-        <Section
-          title="Crie uma senha nova"
-          hint={`Pelo menos ${MIN_PASSWORD} caracteres. Vale no celular e na web; os outros aparelhos saem da conta e pedem a senha nova.`}>
+        <Section title="Crie uma senha nova" hint={`Pelo menos ${MIN_PASSWORD} caracteres`}>
           {email ? <Text style={styles.text}>Conta: {email}</Text> : null}
           <Input
             value={password}
@@ -233,6 +254,7 @@ function PasswordForm({ sb, email, warning }: { sb: SupabaseClient; email: strin
             accessibilityLabel="Senha nova"
             accessibilityHint={`Pelo menos ${MIN_PASSWORD} caracteres`}
             invalid={checked && password.length < MIN_PASSWORD}
+            onFocus={onFocus}
             onSubmitEditing={() => confirmRef.current?.focus()}
           />
           <Input
@@ -246,8 +268,11 @@ function PasswordForm({ sb, email, warning }: { sb: SupabaseClient; email: strin
             returnKeyType="go"
             accessibilityLabel="Repita a senha nova"
             invalid={checked && confirm !== password}
+            onFocus={onFocus}
             onSubmitEditing={save}
           />
+          {/* Ao trocar a senha, o Supabase tira a conta dos outros aparelhos (só esta sessão continua): dito antes do Salvar. */}
+          <Notice tone="info">Vale no celular e na web. Os outros aparelhos saem da conta.</Notice>
         </Section>
         {error ? (
           <View style={styles.message}>
@@ -261,7 +286,8 @@ function PasswordForm({ sb, email, warning }: { sb: SupabaseClient; email: strin
 }
 
 const styles = StyleSheet.create({
-  screen: { flexGrow: 1, padding: space.lg, gap: space.md, maxWidth: widths.form, width: '100%', alignSelf: 'center', paddingBottom: space.xxxl },
+  // A margem lateral vem do useLayout().gutter.
+  screen: { flexGrow: 1, paddingTop: space.lg, gap: space.md, maxWidth: widths.form, width: '100%', alignSelf: 'center', paddingBottom: space.xxxl },
   text: { ...typography.caption, color: colors.textMuted },
   message: { marginBottom: space.md },
 });

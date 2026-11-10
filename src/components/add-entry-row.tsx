@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { CardImage } from '@/components/card-image';
 import type { PressState } from '@/components/icon-button';
+import { entryImageUrl } from '@/lib/catalog';
 import { entrySummary } from '@/lib/lists';
 import { mypPtImage } from '@/lib/myp-api';
 import type { Entry } from '@/lib/types';
@@ -46,7 +47,7 @@ export function EntryRow({
       <View style={styles.thumb}>
         <CardImage
           image={entry.image}
-          imageUrl={entry.imageUrl}
+          imageUrl={entryImageUrl(entry)}
           cardId={entry.lang === 'ja' ? undefined : entry.cardId}
           localId={entry.localId}
           dex={entry.dex || undefined}

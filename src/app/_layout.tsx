@@ -1,21 +1,29 @@
-import { DefaultTheme, router, Stack, ThemeProvider, useIsFocused } from 'expo-router';
+import { Kanit_700Bold_Italic } from '@expo-google-fonts/kanit/700Bold_Italic';
+import { useFonts } from 'expo-font';
+import { DarkTheme, router, Stack, ThemeProvider, useIsFocused } from 'expo-router';
 import { HeaderBackButton } from 'expo-router/react-navigation';
 import { StatusBar } from 'expo-status-bar';
+import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, type ReactElement } from 'react';
-import { Platform, type ColorValue } from 'react-native';
+import { Platform, StyleSheet, View, type ColorValue } from 'react-native';
 
 import { RootErrorBoundary, ScreenErrorBoundary } from '@/components/error-boundary';
+import { HEADER_TITLE_STYLE, renderHeaderTitle } from '@/components/header-title';
 import { MypRefresher } from '@/components/myp-refresher';
 import { TcgplayerRefresher } from '@/components/tcgplayer-refresher';
+import { LookupWarmup } from '@/components/lookup-warmup';
 import { ToastHost } from '@/components/toast';
 import { CollectionProvider } from '@/store/collection';
-import { colors } from '@/theme';
+import { colors, font, semantic } from '@/theme';
 
 const APP_NAME = 'Fichário Pokédex';
 
+// A abertura fica até a fonte dos títulos chegar (um instante: o arquivo vem junto com o app).
+SplashScreen.preventAutoHideAsync().catch(() => {});
+
 const theme = {
-  ...DefaultTheme,
-  colors: { ...DefaultTheme.colors, background: colors.background, card: colors.primary, primary: colors.primary, text: colors.text, border: colors.border },
+  ...DarkTheme,
+  colors: { ...DarkTheme.colors, background: colors.background, card: semantic.shell.bg, primary: colors.primary, text: colors.text, border: colors.border },
 };
 
 export const unstable_settings = {
@@ -79,32 +87,44 @@ function DocumentTitle({ title }: { title?: string }) {
   return null;
 }
 
-const screenLayout =
-  Platform.OS === 'web'
-    ? ({ children, options }: { children: ReactElement; options: { title?: string } }) => (
-        <>
-          <DocumentTitle title={typeof options.title === 'string' ? options.title : undefined} />
-          {children}
-        </>
-      )
-    : undefined;
+/** Toda tela com barra do topo ganha o fio vermelho embaixo dela; na web, o título da aba acompanha a tela. */
+function screenLayout({ children, options }: { children: ReactElement; options: { title?: string; headerShown?: boolean } }) {
+  return (
+    <View style={styles.screen}>
+      {Platform.OS === 'web' ? <DocumentTitle title={typeof options.title === 'string' ? options.title : undefined} /> : null}
+      {options.headerShown === false ? null : <View style={styles.rule} aria-hidden />}
+      {children}
+    </View>
+  );
+}
 
 export default function RootLayout() {
+  // Sem a fonte (erro ao carregar), os títulos ficam na fonte do sistema.
+  const [fontLoaded, fontError] = useFonts({ [font.display]: Kanit_700Bold_Italic });
+  const ready = fontLoaded || !!fontError;
+  useEffect(() => {
+    if (ready) SplashScreen.hideAsync().catch(() => {});
+  }, [ready]);
+  if (!ready) return null;
+
   return (
     <ThemeProvider value={theme}>
       <CollectionProvider>
         {/* Preços do MYP Cards das cartas, buscados aos poucos pelo app no celular. */}
         <MypRefresher />
         <TcgplayerRefresher />
-        {/* Texto claro na barra de status: as barras do topo são vermelhas. */}
+        {/* Índice da Consulta atualizado em segundo plano e volta à Consulta na abertura (só no celular). */}
+        <LookupWarmup />
+        {/* Texto claro na barra de status: as barras do topo são pretas. */}
         <StatusBar style="light" />
         <Stack
           screenLayout={screenLayout}
           screenOptions={{
-            headerStyle: { backgroundColor: colors.primary },
-            headerTintColor: colors.onPrimary,
-            // Branco sobre o vermelho da marca dá 4,4:1: com 19 px em negrito, o título é texto grande (pede 3:1).
-            headerTitleStyle: { fontWeight: '800', fontSize: 19 },
+            headerStyle: { backgroundColor: semantic.shell.bg },
+            headerTintColor: semantic.shell.fg,
+            headerTitleStyle: HEADER_TITLE_STYLE,
+            // Número não vai em Kanit: "Bolso 5 · Trocas", "Personalizar Coleção 151".
+            headerTitle: renderHeaderTitle,
             headerShadowVisible: false,
             headerBackButtonDisplayMode: 'minimal',
             contentStyle: { backgroundColor: colors.background },
@@ -124,6 +144,12 @@ export default function RootLayout() {
           <Stack.Screen name="find" options={{ title: 'Buscar na coleção' }} />
           <Stack.Screen name="lists" options={{ title: 'Listas' }} />
           <Stack.Screen name="about" options={{ title: 'Sobre e fontes' }} />
+          <Stack.Screen name="reports" options={{ title: 'Relatórios' }} />
+          {/* Consulta para leilão: no computador, a própria tela liga a barra normal. */}
+          <Stack.Screen name="consulta" options={{ title: 'Consulta de cartas', headerShown: false }} />
+          <Stack.Screen name="scan" options={{ title: 'Adicionar pela câmera' }} />
+          <Stack.Screen name="scan-review" options={{ title: 'Conferir cartas' }} />
+          <Stack.Screen name="ocr-probe" options={{ title: 'Medida da leitura' }} />
         </Stack>
         {/* Avisos rápidos com "Desfazer" (U3), por cima das telas. */}
         <ToastHost />
@@ -131,3 +157,8 @@ export default function RootLayout() {
     </ThemeProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  screen: { flex: 1 },
+  rule: { height: semantic.shell.ruleWidth, backgroundColor: semantic.shell.rule },
+});

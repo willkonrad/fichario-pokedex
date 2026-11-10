@@ -3,22 +3,25 @@ import { router } from 'expo-router';
 import { useMemo, useState, type ReactNode } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { moverItems, MoversCard, useValueHistory, ValueChartCard, type RangeId } from '@/components/collection-chart';
+import { HEADING_3, moverItems, MoversCard, useValueHistory, ValueChartCard, type RangeId } from '@/components/collection-chart';
 import { MyValueNotice, SyncNotice, syncSummary } from '@/components/collection-notices';
 import { PurchasesCard } from '@/components/collection-purchases';
 import { TopCards, topCards } from '@/components/collection-top';
 import { HowWeCalculateSheet, ValueHero } from '@/components/collection-value';
-import { Card, GroupLabel, gridColumns, ListRow, Loading, showToast, useLayout, type IconName } from '@/components/ui';
+import { Card, gridColumns, ListRow, Loading, showToast, useLayout, type IconName } from '@/components/ui';
 import { TOTAL_SPECIES } from '@/data/pokedex';
 import { dexRange, isPlaced } from '@/lib/binder';
-import { formatPct } from '@/lib/format';
+import { formatInt, formatPct } from '@/lib/format';
 import { entryParams } from '@/lib/lists';
+import { clearLookup } from '@/lib/lookup-index';
 import { collectionTotals, priceFreshness, purchaseSummary } from '@/lib/quotes';
 import { supabase } from '@/lib/supabase';
 import { clearCatalogCache } from '@/lib/tcgdex';
 import { POKEDEX_BINDER, type Entry } from '@/lib/types';
 import { entriesOf, useBinders, useCollectionReady, useEntries, useSession, useSettings, useSyncStatus, type SyncStatus } from '@/store/collection';
-import { colors, radius, semantic, shadow, space, typography, widths } from '@/theme';
+import { colors, radius, semantic, space, typography, widths } from '@/theme';
+
+import { isOcrAvailable } from '../../modules/card-ocr';
 
 /** Minha coleção: o valor, a evolução, as cartas que mais pesam, as compras e os ajustes. */
 export default function MenuScreen() {
@@ -28,7 +31,7 @@ export default function MenuScreen() {
   const binders = useBinders();
   const session = useSession();
   const syncStatus = useSyncStatus();
-  const { isDesktop, width } = useLayout();
+  const { isDesktop, width, gutter } = useLayout();
   const [rangeId, setRangeId] = useState<RangeId>('1M');
   const [info, setInfo] = useState(false);
   const signedIn = !!session;
@@ -57,17 +60,20 @@ export default function MenuScreen() {
     router.push({ pathname: '/card', params: { ...entryParams(e), origem: 'colecao' } });
   }
 
+  const cardWord = list.length === 1 ? 'carta' : 'cartas';
   const stats: StatItem[] = [
-    { icon: 'grid-outline', label: 'Pokédex', value: String(species), sub: `de ${range.count} · ${formatPct((species / Math.max(1, range.count)) * 100)}`, progress: species / Math.max(1, range.count) },
-    { icon: 'albums-outline', label: 'Cartas', value: String(list.length), sub: binders.length ? `em ${binderCount} fichários` : 'no fichário' },
+    {
+      value: formatInt(species),
+      caption: `de ${formatInt(range.count)} na Pokédex · ${formatPct((species / Math.max(1, range.count)) * 100)}`,
+      progress: species / Math.max(1, range.count),
+    },
+    { value: formatInt(list.length), caption: `${cardWord} ${binders.length ? `em ${binderCount} fichários` : 'no fichário'}` },
     ...(isDesktop
       ? [
-          { icon: 'pricetag-outline' as IconName, label: 'Com preço', value: String(totals.valued), sub: `de ${list.length} ${list.length === 1 ? 'carta' : 'cartas'}` },
+          { value: formatInt(totals.valued), caption: `com preço, de ${formatInt(list.length)} ${cardWord}` },
           {
-            icon: 'library-outline' as IconName,
-            label: 'Fichários',
-            value: String(binderCount),
-            sub: binders.length ? `Pokédex + ${binders.length} ${binders.length === 1 ? 'livre' : 'livres'}` : 'Pokédex',
+            value: formatInt(binderCount),
+            caption: binders.length ? `fichários: Pokédex + ${binders.length} ${binders.length === 1 ? 'livre' : 'livres'}` : 'fichário: Pokédex',
           },
         ]
       : []),
@@ -91,35 +97,38 @@ export default function MenuScreen() {
   const purchasesCard = <PurchasesCard summary={purchases} />;
   // Buscar na coleção (E2) e as listas para trocar (E1).
   const findGroup = (
-    <View>
-      <GroupLabel>Buscar e trocar</GroupLabel>
-      <LinkRows
-        items={[
-          { icon: 'search-outline', title: 'Buscar na coleção', subtitle: 'Tenho essa carta? Onde ela está?', onPress: () => router.push('/find') },
-          { icon: 'list-outline', title: 'Preciso', subtitle: 'Pokémon que faltam no fichário', onPress: () => router.push('/lists') },
-          {
-            icon: 'copy-outline',
-            title: 'Tenho repetida',
-            subtitle: 'Cartas repetidas e de trocas',
-            onPress: () => router.push({ pathname: '/lists', params: { tab: 'have' } }),
-          },
-        ]}
-      />
-    </View>
+    <LinkRows
+      title="Buscar e trocar"
+      items={[
+        { icon: 'pricetags-outline', title: 'Consulta de cartas', subtitle: 'Todas as cartas de um Pokémon, preço e links', onPress: () => router.push('/consulta') },
+        {
+          icon: 'camera-outline',
+          title: 'Adicionar pela câmera',
+          subtitle: isOcrAvailable ? 'Fotografe as cartas e coloque de uma vez' : 'Só no app instalado (APK)',
+          onPress: () => (isOcrAvailable ? router.push('/scan') : showToast({ message: 'A câmera só funciona no app instalado (APK).' })),
+        },
+        { icon: 'search-outline', title: 'Buscar na coleção', subtitle: 'Tenho essa carta? Onde ela está?', onPress: () => router.push('/find') },
+        { icon: 'list-outline', title: 'Preciso', subtitle: 'Pokémon que faltam no fichário', onPress: () => router.push('/lists') },
+        {
+          icon: 'copy-outline',
+          title: 'Tenho repetida',
+          subtitle: 'Cartas repetidas e de trocas',
+          onPress: () => router.push({ pathname: '/lists', params: { tab: 'have' } }),
+        },
+        { icon: 'stats-chart-outline', title: 'Relatórios', subtitle: 'Últimas cartas, trocas e destaques', onPress: () => router.push('/reports') },
+      ]}
+    />
   );
   const settingsGroup = (
-    <View>
-      <GroupLabel>Ajustes</GroupLabel>
-      <SettingsGroup
-        email={session?.user.email}
-        syncStatus={syncStatus}
-        bindersSubtitle={
-          binders.length
-            ? `Pokédex + ${binders.length} ${binders.length > 1 ? 'fichários livres' : 'fichário livre'}`
-            : 'Crie fichários para trocas, deck, favoritas…'
-        }
-      />
-    </View>
+    <SettingsGroup
+      email={session?.user.email}
+      syncStatus={syncStatus}
+      bindersSubtitle={
+        binders.length
+          ? `Pokédex + ${binders.length} ${binders.length > 1 ? 'fichários livres' : 'fichário livre'}`
+          : 'Crie fichários para trocas, deck, favoritas…'
+      }
+    />
   );
   // Vitrine do computador: cartas de ~140 px que cabem na largura útil (a tela tem no máximo `widths.wide`, com 32 px
   // de margem, e o cartão tem 16 px de cada lado).
@@ -131,7 +140,7 @@ export default function MenuScreen() {
   const hasLower = moves.up.length + moves.down.length > 0 || purchases.bought > 0 || canSignIn;
 
   return (
-    <ScrollView contentContainerStyle={[styles.screen, { maxWidth: isDesktop ? widths.wide : widths.reading }, isDesktop && styles.screenDesktop]}>
+    <ScrollView contentContainerStyle={[styles.screen, { maxWidth: isDesktop ? widths.wide : widths.reading }, isDesktop && styles.screenDesktop, { paddingHorizontal: gutter }]}>
       <SyncNotice status={syncStatus} />
       <MyValueNotice entries={entries} />
 
@@ -183,9 +192,9 @@ export default function MenuScreen() {
   );
 }
 
-type StatItem = { icon: IconName; label: string; value: string; sub: string; progress?: number };
+type StatItem = { value: string; caption: string; progress?: number };
 
-/** Indicadores (Pokédex, cartas…): 2 por linha no celular, 4 no computador. */
+/** Indicadores (Pokédex, cartas…): o número e, embaixo, o nome numa frase. 2 por linha no celular, 4 no computador. */
 function Stats({ items, columns }: { items: StatItem[]; columns: number }) {
   const rows: StatItem[][] = [];
   for (let i = 0; i < items.length; i += columns) rows.push(items.slice(i, i + columns));
@@ -193,19 +202,15 @@ function Stats({ items, columns }: { items: StatItem[]; columns: number }) {
     <View style={styles.statsGrid}>
       {rows.map((row, i) => (
         <View key={i} style={styles.statsRow}>
-          {row.map((s) => (
-            <View key={s.label} style={styles.stat} accessible accessibilityLabel={`${s.label}: ${s.value}, ${s.sub}`}>
-              <View style={styles.statHead}>
-                <Ionicons name={s.icon} size={14} color={colors.textMuted} />
-                <Text style={styles.statLabel}>{s.label}</Text>
-              </View>
+          {row.map((s, j) => (
+            <View key={j} style={styles.stat} accessible accessibilityLabel={`${s.value}, ${s.caption}`}>
               <Text style={styles.statValue}>{s.value}</Text>
               {s.progress != null ? (
                 <View style={styles.track}>
                   <View style={[styles.fill, { width: `${Math.min(100, Math.max(s.progress > 0 ? 2 : 0, s.progress * 100))}%` }]} />
                 </View>
               ) : null}
-              <Text style={styles.statSub}>{s.sub}</Text>
+              <Text style={styles.statCaption}>{s.caption}</Text>
             </View>
           ))}
         </View>
@@ -233,7 +238,8 @@ function SettingsGroup({ email, syncStatus, bindersSubtitle }: { email?: string 
   async function clearCache() {
     if (clearing) return;
     setClearing(true);
-    const n = await clearCatalogCache();
+    // O índice da Consulta vem junto: a tela baixa de novo na próxima vez que abrir.
+    const [n] = await Promise.all([clearCatalogCache(), clearLookup()]);
     setClearing(false);
     showToast({ message: n ? `Catálogo recarregado: ${n} ${n === 1 ? 'item apagado' : 'itens apagados'} do cache` : 'O cache já estava vazio' });
   }
@@ -250,15 +256,18 @@ function SettingsGroup({ email, syncStatus, bindersSubtitle }: { email?: string 
     { icon: 'refresh-outline', title: 'Recarregar catálogo e imagens', subtitle: clearing ? 'Apagando o cache…' : 'Suas cartas continuam salvas', onPress: clearCache },
     { icon: 'information-circle-outline', title: 'Sobre e fontes', subtitle: 'Como calculamos, créditos e versão', onPress: () => router.push('/about') },
   ];
-  return <LinkRows items={items} />;
+  return <LinkRows title="Ajustes" items={items} />;
 }
 
 type LinkItem = { icon: IconName; iconColor?: string; title: string; subtitle: string; onPress: () => void };
 
-/** Cartão com linhas que levam a outra tela (ícone, título, linha de apoio e a seta). */
-function LinkRows({ items }: { items: LinkItem[] }) {
+/** Cartão com título, como os outros da tela, e linhas que levam a outra tela (ícone, título, apoio e a seta). */
+function LinkRows({ title, items }: { title: string; items: LinkItem[] }) {
   return (
     <Card style={styles.rowCard}>
+      <Text style={styles.groupTitle} {...HEADING_3}>
+        {title}
+      </Text>
       {items.map((it, i) => (
         <Divided key={it.title} first={i === 0}>
           <ListRow
@@ -293,14 +302,14 @@ const styles = StyleSheet.create({
   colFull: { flex: 1, minWidth: 0, maxWidth: widths.reading, gap: space.lg },
   statsGrid: { gap: space.md },
   statsRow: { flexDirection: 'row', gap: space.md },
-  stat: { flex: 1, minWidth: 0, backgroundColor: colors.surface, borderRadius: radius.lg, padding: space.lg, gap: space.xxs, ...shadow },
-  statHead: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
-  statLabel: { ...typography.label, color: colors.textMuted },
-  statValue: { ...typography.title, ...typography.tabular, color: colors.text },
-  statSub: { ...typography.caption, ...typography.tabular, color: colors.textMuted },
-  track: { height: 4, borderRadius: 2, backgroundColor: colors.surfaceAlt, overflow: 'hidden', marginVertical: space.xxs },
-  fill: { height: 4, borderRadius: 2, backgroundColor: semantic.special.fill },
+  stat: { flex: 1, minWidth: 0, backgroundColor: colors.surface, borderRadius: radius.lg, padding: space.lg, gap: space.xxs },
+  statValue: { ...typography.figure, color: colors.text },
+  statCaption: { ...typography.caption, ...typography.tabular, color: colors.textMuted },
+  track: { height: 4, borderRadius: 2, backgroundColor: semantic.progress.track, overflow: 'hidden', marginVertical: space.xxs },
+  fill: { height: 4, borderRadius: 2, backgroundColor: semantic.progress.fill },
   rowCard: { paddingVertical: space.xs },
+  groupTitle: { ...typography.heading, color: colors.heading, paddingTop: space.md, paddingBottom: space.xs },
   rowIcon: { width: 36, height: 36, borderRadius: radius.pill, backgroundColor: colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' },
-  divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginLeft: 48 },
+  // 1 px inteiro: o fio fino some sobre o grafite.
+  divider: { height: 1, backgroundColor: colors.border, marginLeft: 48 },
 });

@@ -12,29 +12,31 @@ App pessoal e gratuito para colecionadores de Pokémon TCG: organize suas cartas
 - **Folheie como um fichário de verdade**: a página acompanha o dedo; cada fichário lembra a página em que você parou; "Ir para a página", **"Próxima falta"** e a régua de regiões ("Kanto 31/151") levam direto ao que falta. No computador, fichários frente e verso abrem duas páginas lado a lado.
 - **Posição física**: cada carta mostra onde está no fichário de verdade ("Fichário 2 · folha 5 (frente) · bolso 8"), e o app avisa antes de uma mudança de configuração mexer nas cartas.
 - **"+ Carta"**: busque (sem se preocupar com acento ou apóstrofo, por nome e número ou por código, como "MEG 133"), escolha versão, estado e onde colocar, e siga para a próxima. Toda ação tem **"Desfazer"**.
+- **Consulta de cartas**, para leilões: digite o nome e veja todas as cartas do Pokémon em português, inglês, japonês, coreano e chinês, por ano, com filtro de HP, preço e links para Liga, MYP Cards, TCGplayer e outros portais. Coreanas e chinesas são só para consultar.
+- **Adicionar pela câmera** (no APK): o aparelho lê a carta, sem nuvem, inclusive em lote.
 - **Catálogo completo** em português, inglês e japonês: o catálogo da TCGplayer (via TCGCSV), com as versões com selo e a foto oficial de cada uma, ligado à [TCGdex](https://tcgdex.dev) (nome e imagem em português, ficha, variações). Estado (M, NM, SP, MP, HP, D) e variação (holo, reverse, 1ª edição, Poké Ball, promos com selo…).
-- **Valor de cada carta em reais**: menor anúncio, média dos anúncios e maior anúncio no **[MYP Cards](https://mypcards.com)**, sempre com link para o MYP; **cartas em inglês** pelo preço da **TCGplayer** (EUA), em reais pela PTAX do Banco Central. Você escolhe qual dos três "Usar na soma", ou fixa o **"Meu valor"**.
+- **Valor de cada carta em reais**: menor anúncio, média dos anúncios e maior anúncio no **[MYP Cards](https://mypcards.com)**, sempre com link para o MYP; **cartas em inglês e em japonês** pelo preço da **TCGplayer** (EUA), em reais pela PTAX do Banco Central. Você escolhe qual dos três "Usar na soma", ou fixa o **"Meu valor"**.
 - **Minha coleção**: "Valor da coleção", evolução do valor (1M, 3M, 6M, 1A) com a variação só das mesmas cartas, mais valiosas, maiores altas e quedas, e **Compras** (quanto você pagou × quanto valem hoje).
 - **Buscar na coleção** (em todos os fichários, sem internet) e listas **"Preciso"** e **"Tenho repetida"**, prontas para mandar no WhatsApp.
 - **Origem da carta** (troca, booster ou compra), observações e **salvamento automático**.
 - **Coleção no aparelho e na nuvem** (Supabase, com login próprio): sincronização incremental entre aparelhos, remoções que chegam a todos eles, cópia da coleção em JSON ou planilha e **cópia diária automática** no servidor.
-- Visual inspirado na Pokédex e no Nintendo Switch, com contraste AA, leitor de tela e teclado no computador. O sistema visual está em [docs/design.md](docs/design.md).
+- Visual em moldura preta, com a arte das cartas em primeiro plano, contraste AA, leitor de tela e teclado no computador. O sistema visual está em [DESIGN.md](DESIGN.md).
 
 As novidades de cada versão estão em [CHANGELOG.md](CHANGELOG.md).
 
 ## Fontes de dados e atribuição
 
-Os preços vêm do **MYP Cards** e, nas cartas em inglês, da **TCGplayer** (via TCGCSV), ou do "Meu valor" digitado pelo colecionador. Cada valor exibido no app cita a fonte, com link. A tela **"Sobre e fontes"** do app mostra os créditos, como o valor é calculado e quando o catálogo foi atualizado pela última vez.
+Os preços vêm do **MYP Cards** e, nas cartas em inglês e em japonês, da **TCGplayer** (via TCGCSV), ou do "Meu valor" digitado pelo colecionador. Cada valor exibido no app cita a fonte, com link. A tela **"Sobre e fontes"** do app mostra os créditos, como o valor é calculado e quando o catálogo foi atualizado pela última vez.
 
 | Fonte | O que fornece | Como é acessada |
 |---|---|---|
 | [MYP Cards](https://mypcards.com) | Menor anúncio, média dos anúncios e maior anúncio de cada carta, em reais | [API pública do MYP Cards](https://mypcards.com/acesso-api) ([documentação](https://mypcards.github.io/mypcards-api)). Sem token: 10 consultas/min e só aparelhos (o servidor recebe 403 e o navegador não tem CORS), então **o app no celular** busca aos poucos e grava no banco. Atribuição "MYP Cards" com link em todo valor |
-| [TCGCSV](https://tcgcsv.com) | **Base principal do catálogo**: cartas de todas as coleções (inclusive as lançadas ontem) e versões com selo vendidas à parte, com a foto de cada uma — inclusive as que a TCGplayer guarda em coleções de diversos (Booster Box, Prize Pack, Liga, Build-A-Bear…), ligadas à carta de origem pelo número completo. **Preços da TCGplayer** (menor anúncio, mediana e valor de mercado, em dólar, por impressão) das cartas em inglês | Espelho gratuito do catálogo e dos preços da TCGplayer (obrigado, TCGCSV!), copiado 1×/dia por coleção para o Supabase pela Edge Function `catalog-sync`, seguindo as [regras de uso](https://tcgcsv.com/docs#usage-guidelines). Cada execução fica registrada (`catalog_sync_runs`). **O app nunca chama o TCGCSV**: só lê a cópia |
+| [TCGCSV](https://tcgcsv.com) | **Base principal do catálogo**: cartas de todas as coleções (inclusive as lançadas ontem) e versões com selo vendidas à parte, com a foto de cada uma — inclusive as que a TCGplayer guarda em coleções de diversos (Booster Box, Prize Pack, Liga, Build-A-Bear…), ligadas à carta de origem pelo número completo. **Preços da TCGplayer** (menor anúncio, mediana e valor de mercado, em dólar, por impressão) das cartas em inglês e das japonesas (a TCGplayer vende as japonesas numa seção própria, com foto, inclusive as antigas "Pocket Monsters" sem número) | Espelho gratuito do catálogo e dos preços da TCGplayer (obrigado, TCGCSV!), copiado 1×/dia por coleção para o Supabase pela Edge Function `catalog-sync`, seguindo as [regras de uso](https://tcgcsv.com/docs#usage-guidelines). Cada execução fica registrada (`catalog_sync_runs`). **O app nunca chama o TCGCSV**: só lê a cópia |
 | [Banco Central do Brasil](https://www.bcb.gov.br) | Dólar PTAX (venda) de cada dia útil, para converter os preços da TCGplayer | API pública de séries do BCB (SGS, série 1), lida pela `catalog-sync` 1×/dia depois do fechamento |
 | [TCGdex](https://tcgdex.dev) | Catálogo secundário: nome e imagem em português, ficha (ataques, HP…), variações e número da Pokédex | API pública |
 | [Zukan](https://www.zukan.com.br) | Cartas novas que a TCGdex ainda não tem (ex.: promos MEP recentes) e imagem reserva | Servidor MCP público |
 | [pokemontcg.io](https://pokemontcg.io) / Scrydex | Imagem reserva de cartas sem imagem na TCGdex | Arquivos públicos no GitHub e CDN de imagens |
-| [PokeAPI](https://pokeapi.co) | Nomes dos 1.025 Pokémon (PT, EN, JP) e as ilustrações dos bolsos vazios | Arquivo gerado uma vez (`src/data/pokedex.json`) e imagens públicas no GitHub |
+| [PokeAPI](https://pokeapi.co) | Nomes dos 1.025 Pokémon (PT, EN, JP, coreano e chinês) e as ilustrações dos bolsos vazios | Arquivo gerado uma vez (`src/data/pokedex.json`) e imagens públicas no GitHub |
 
 ### Uso responsável
 
@@ -47,21 +49,21 @@ Os preços vêm do **MYP Cards** e, nas cartas em inglês, da **TCGplayer** (via
 
 O **valor da carta** vem da primeira fonte que existir, nesta ordem:
 
-1. **"Meu valor"**, digitado por você: o único valor fixo. Ele vale até o preço de mercado passar dele (a média do MYP Cards; o mercado da TCGplayer nas cartas em inglês); aí o app volta a usar o mercado e avisa você;
-2. **cartas em inglês**: a **TCGplayer (EUA)**, convertida em reais pela **PTAX** do dia — *Menor anúncio*, *Mercado* (vendas recentes) e *Mediana* dos anúncios, da impressão certa (normal, holo, reverse, 1ª edição…) e do produto próprio da versão com selo;
+1. **"Meu valor"**, digitado por você: o único valor fixo. Ele vale até o preço de mercado passar dele (a média do MYP Cards; o mercado da TCGplayer nas cartas em inglês e japonês); aí o app volta a usar o mercado e avisa você;
+2. **cartas em inglês e em japonês**: a **TCGplayer (EUA)** (na japonesa, o produto japonês, nunca o da carta em inglês), convertida em reais pela **PTAX** do dia — *Menor anúncio*, *Mercado* (vendas recentes) e *Mediana* dos anúncios, da impressão certa (normal, holo, reverse, 1ª edição…) e do produto próprio da versão com selo;
 3. o **MYP Cards** — *Menor anúncio*, *Média dos anúncios* e *Maior anúncio*, que juntam todos os estados e idiomas, do produto próprio da versão quando o MYP vende a versão à parte.
 
-Em cada carta, **"Usar na soma"** escolhe qual dos três preços é o valor dela (a média, se você não escolher; o menor anúncio costuma ser o valor real de cartas novas). **"≈ Aproximado"** marca o preço que não é exatamente o desta carta: a versão (selo, Poké Ball…) não é vendida à parte e vale o preço da carta base, ou a carta em inglês não tem preço na TCGplayer e usa os anúncios do MYP Cards. Sem nenhuma fonte, a carta fica **sem valor** até você preencher "Meu valor": **o app não estima preço** nem dá desconto pelo estado da carta.
+Em cada carta, **"Usar na soma"** escolhe qual dos três preços é o valor dela (a média, se você não escolher; o menor anúncio costuma ser o valor real de cartas novas). **"≈ Aproximado"** marca o preço que não é exatamente o desta carta: a versão (selo, Poké Ball…) não é vendida à parte e vale o preço da carta base, a Reverse Foil em português avaliada pelo MYP Cards usa o produto da carta (o MYP não tem produto próprio da reverse), ou a carta em inglês não tem preço na TCGplayer e usa os anúncios do MYP Cards. Sem nenhuma fonte, a carta fica **sem valor** até você preencher "Meu valor": **o app não estima preço** nem dá desconto pelo estado da carta.
 
 O **"Valor deste fichário"** e o **"Valor da coleção"** são a soma do valor de cada carta, que também aparece nos bolsos, ordena as mais valiosas e é a linha do gráfico. Com menos destaque, a coleção mostra quanto daria "se cada carta saísse pelo menor anúncio · pela média"; a soma dos maiores anúncios fica só em "Como calculamos", porque não é preço de venda.
 
-A regra mora em `src/lib/valuation.ts` (valor atual), `src/lib/history.ts` (fotos diárias) e nas funções `history_value` e `snapshot_prices` do banco, sempre iguais; os nomes e textos do valor ficam em `src/lib/copy.ts`.
+A regra mora em `src/lib/valuation.ts` (valor atual), `src/lib/history.ts` (fotos diárias) e nas funções `collection_history` e `snapshot_prices` do banco, sempre iguais; os nomes e textos do valor ficam em `src/lib/copy.ts`.
 
 ### Preços, histórico e cópias no servidor
 
 - O `catalog-sync` (cron a cada 10 min) copia os preços do TCGCSV para `tcg_prices` 1×/dia por coleção e a PTAX para `fx_rates`; o app (no celular e na web) lê essas tabelas e grava o preço na carta (`patch_entry_tcgplayer`).
 - O preço do MYP é buscado pelo app no celular e gravado na carta (`patch_entry_myp`). Gravar um preço não conta como edição da carta.
-- Todo dia às 23:50 de Brasília, `snapshot_prices` guarda em `price_history` o "Meu valor", o preço da TCGplayer do dia (cartas em inglês) e o do MYP de cada carta com preço; o gráfico pede ao servidor o total de cada dia (`collection_history`).
+- Todo dia às 23:50 de Brasília, `snapshot_prices` guarda em `price_history` o "Meu valor", o preço da TCGplayer do dia (cartas em inglês e japonês) e o do MYP de cada carta com preço; o gráfico pede ao servidor o total de cada dia (`collection_history`).
 - Todo dia às 00:20, `backup.snapshot_collection` copia as cartas e a configuração para o schema `backup` (14 dias, fora da API).
 
 ## Rodar o app
@@ -149,12 +151,12 @@ npx eas-cli@latest deploy --prod                 # produção em https://<nome>.
 - `src/lib/supabase.ts` — cliente do Supabase (sem `.env`, o app fica só local); `auth-links.ts` — cadastro fechado, links dos e-mails (nova senha) e erros da conta em português.
 - `src/components/` — componentes visuais (`ui.tsx` reexporta toast, folha de informação, esboços e ícones), partes das telas (`home-*`, `collection-*`, `add-*`, `card-*`) e os buscadores de preço em segundo plano (`myp-refresher.tsx`, `tcgplayer-refresher.tsx`).
 - `src/theme.ts` — cores com significado, tipografia, espaços e larguras.
-- `src/data/pokedex.json` — os 1.025 Pokémon (nomes em PT, EN e JP), gerado a partir da PokéAPI.
+- `src/data/pokedex.json` — os 1.025 Pokémon (nomes em PT, EN, JP, coreano e chinês), gerado a partir da PokéAPI.
 - `supabase/schema.sql` — o banco inteiro; `supabase/migrations/` — as mudanças aplicadas em cada versão; `supabase/functions/` — Edge Functions `catalog-sync` e `stamp-image`.
 - `tests/` — testes automatizados (Jest) da lógica pura.
 - `scripts/make-icons.js` — gera o ícone, o ícone adaptativo do Android, o favicon, a imagem de abertura e os ícones da web instalável.
 - `public/` — página da web (`index.html`), manifesto (`manifest.json`) e ícones (`icons/`) do app instalável; `eas.json` — perfis de build e canais do EAS.
-- `docs/` — [arquitetura](docs/arquitetura.md) (mapa para quem chega), [design](docs/design.md) (sistema visual) e o registro das revisões da 2.0.0.
+- `docs/` — [arquitetura](docs/arquitetura.md) (mapa para quem chega) e o registro das revisões da 2.0.0. O sistema visual está em [DESIGN.md](DESIGN.md).
 
 ## Licença
 

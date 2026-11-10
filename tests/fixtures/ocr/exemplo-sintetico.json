@@ -1,0 +1,19 @@
+{
+  "script": "latin",
+  "captureMs": 0,
+  "result": {
+    "width": 1290,
+    "height": 1800,
+    "ms": 0,
+    "lines": [
+      { "text": "BASIC", "box": { "x": 39, "y": 54, "w": 72, "h": 26 }, "angle": 0 },
+      { "text": "Toedscool", "box": { "x": 258, "y": 72, "w": 297, "h": 60 }, "angle": 0 },
+      { "text": "HP", "box": { "x": 980, "y": 90, "w": 22, "h": 20 }, "angle": 0 },
+      { "text": "60", "box": { "x": 1057, "y": 81, "w": 73, "h": 66 }, "angle": 0 },
+      { "text": "weakness x2", "box": { "x": 64, "y": 1566, "w": 121, "h": 20 }, "angle": 0 },
+      { "text": "G SVIEN 025/198", "box": { "x": 39, "y": 1701, "w": 181, "h": 22 }, "angle": 0 },
+      { "text": "©2023 Pokémon / Nintendo / Creatures / GAME FREAK", "box": { "x": 387, "y": 1755, "w": 431, "h": 16 }, "angle": 0 }
+    ]
+  },
+  "expect": { "name": "Toedscool", "speciesId": 948, "hp": 60, "hpWord": "HP", "num": "025/198", "setCode": "SVI", "langTag": "EN", "regulation": "G", "year": 2023, "langWords": "en", "script": "latin" }
+}

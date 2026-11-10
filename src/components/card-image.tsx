@@ -8,8 +8,11 @@ import { ptcgImage, scrydexImage } from '@/lib/ptcg';
 import { spriteUrl } from '@/data/pokedex';
 import { catalogImage } from '@/lib/catalog';
 import { useStampImage } from '@/lib/stamp-image';
-import { cardImage, catalogPhoto, zukanImage } from '@/lib/tcgdex';
+import { cardImage, catalogPhoto, zukanCatalogImage, zukanImage } from '@/lib/tcgdex';
 import { binderColors, colors } from '@/theme';
+
+/** O texto do bolso cresce com a fonte do sistema até 1,3× (acima disso, o preço e o nome seriam cortados). */
+export const POCKET_FONT_SCALE = 1.3;
 
 type Quality = 'low' | 'high';
 
@@ -18,16 +21,19 @@ type Quality = 'low' | 'high';
  *   1. foto da TCGplayer da versão comum, pelo catálogo do TCGCSV (oficial, já em tamanho pequeno para o fichário);
  *   2. Scrydex pelo id da carta (não depende da API da pokemontcg.io, que cai com frequência);
  *   3. pokemontcg.io por nome em inglês + coleção (para coleções com id diferente);
- *   4. Zukan (cartas novas que nenhuma das outras tem ainda, ex.: coleção me06).
+ *   4. Zukan (cartas novas que nenhuma das outras tem ainda, ex.: coleção me06), também para a carta só do catálogo
+ *      ("tcgp-") de coleção nova, enquanto a TCGplayer não publica a foto dela.
  */
 async function fallbackImages(cardId?: string, nameEn?: string, setNameEn?: string, localId?: string) {
-  const id = cardId && !cardId.startsWith('tcgp-') ? cardId : undefined;
+  const catalogOnly = cardId?.startsWith('tcgp-') ? cardId : undefined;
+  const id = catalogOnly ? undefined : cardId;
   const fromCatalog = id ? await catalogPhoto(id).catch(() => null) : null;
   if (fromCatalog) return { small: catalogImage(fromCatalog, 'low'), large: fromCatalog };
   const fromScrydex = id ? await scrydexImage(id, localId, nameEn).catch(() => null) : null;
   if (fromScrydex) return fromScrydex;
   const fromPtcg = nameEn && setNameEn ? await ptcgImage(nameEn, setNameEn, localId).catch(() => undefined) : undefined;
   if (fromPtcg) return fromPtcg;
+  if (catalogOnly) return zukanCatalogImage(catalogOnly).catch(() => null);
   return id ? await zukanImage(id).catch(() => null) : null;
 }
 
@@ -78,6 +84,7 @@ export function CardImage({
   contentFit = 'cover',
   compact = false,
   label,
+  labelMaxScale,
   dex,
   dark = false,
   stampKeys,
@@ -101,6 +108,8 @@ export function CardImage({
   compact?: boolean;
   /** Texto mostrado quando não há imagem ou enquanto ela carrega (ex.: nome da carta no fichário). */
   label?: string;
+  /** Até quanto o `label` cresce com a fonte do sistema (ex.: o texto dentro do bolso). */
+  labelMaxScale?: number;
   /** Pokémon da carta: sem imagem (ou enquanto carrega), mostra a arte dele esmaecida no lugar. */
   dex?: number;
   /** Sobre fundo escuro (página do fichário). */
@@ -119,7 +128,7 @@ export function CardImage({
   priority?: 'low' | 'normal' | 'high';
   /**
    * Esqueleto pulsando enquanto a imagem carrega ou a reserva é procurada (H1), no lugar do "Buscando imagem…": para
-   * grades e listas sobre fundo branco. Sem imagem nenhuma, fica o "Sem imagem" de sempre.
+   * grades e listas. Sem imagem nenhuma, fica o "Sem imagem" de sempre.
    */
   skeleton?: boolean;
   /** Imagem na tela (ex.: o bolso só mostra a borda especial e o preço depois disso). */
@@ -175,7 +184,7 @@ export function CardImage({
           <Ionicons name={searching ? 'hourglass-outline' : 'image-outline'} size={compact ? 16 : 22} color={dark ? faint : colors.iconFaint} />
         )}
         {!waiting && (label || !compact) ? (
-          <Text style={[styles.noImg, { color: faint }]} numberOfLines={3}>
+          <Text style={[styles.noImg, { color: faint }]} numberOfLines={3} maxFontSizeMultiplier={labelMaxScale}>
             {label ?? (searching ? 'Buscando imagem…' : 'Sem imagem')}
           </Text>
         ) : null}
@@ -191,7 +200,7 @@ export function CardImage({
           {skeleton ? <Skeleton radius={0} tone={dark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} /> : null}
           {dex ? <Image source={spriteUrl(dex)} style={styles.sprite} contentFit="contain" cachePolicy="memory-disk" /> : null}
           {label ? (
-            <Text style={[styles.noImg, { color: faint }]} numberOfLines={3}>
+            <Text style={[styles.noImg, { color: faint }]} numberOfLines={3} maxFontSizeMultiplier={labelMaxScale}>
               {label}
             </Text>
           ) : null}

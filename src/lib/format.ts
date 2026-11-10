@@ -162,6 +162,32 @@ export function formatWhen(iso: string) {
   return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
+const MIN_MS = 60_000;
+const HOUR_MS = 3_600_000;
+
+/**
+ * Há quanto tempo, no fuso do aparelho: "agora mesmo" (< 1 min), "há 5 min", "há 2 h" (< 6 h), "hoje, 14:05",
+ * "ontem, 14:05", senão "20/10, 06:05". Data inválida: "".
+ */
+export function formatAgo(iso: string, now = Date.now()) {
+  const d = new Date(iso);
+  const ms = d.getTime();
+  if (!Number.isFinite(ms)) return '';
+  const diff = now - ms;
+  // Relógio do aparelho um pouco atrás do servidor: ainda é "agora".
+  if (diff < MIN_MS && diff > -5 * MIN_MS) return 'agora mesmo';
+  if (diff >= 0 && diff < HOUR_MS) return `há ${Math.floor(diff / MIN_MS)} min`;
+  if (diff >= 0 && diff < 6 * HOUR_MS) return `há ${Math.floor(diff / HOUR_MS)} h`;
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const time = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  if (diff >= 0 && ms >= today.getTime()) return `hoje, ${time}`;
+  if (ms >= yesterday.getTime() && ms < today.getTime()) return `ontem, ${time}`;
+  return formatWhen(iso);
+}
+
 /** Dia e mês: "20/10" (aceita "2026-10-20", ISO ou milissegundos). */
 export function formatDay(day: string | number | Date) {
   return toDate(day).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });

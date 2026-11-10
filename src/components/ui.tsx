@@ -1,7 +1,9 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as WebBrowser from 'expo-web-browser';
-import { useState, type ReactNode, type Ref } from 'react';
+import { Children, createContext, isValidElement, useContext, useEffect, useState, type ReactNode, type Ref } from 'react';
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   Linking,
   Platform,
@@ -11,6 +13,7 @@ import {
   Text,
   TextInput,
   View,
+  type KeyboardTypeOptions,
   type StyleProp,
   type TextInputInstance,
   type TextInputProps,
@@ -19,14 +22,17 @@ import {
   type ViewStyle,
 } from 'react-native';
 
+import { digitsInSystemFont } from '@/components/digits';
 import { IconButton, type IconName, type PressState } from '@/components/icon-button';
-import { PokeballIcon } from '@/components/icons';
+import { PokeballIcon, withMarkIcons } from '@/components/icons';
+import { heading } from '@/components/layer-a11y';
+import { useLayout } from '@/components/layout';
 import { useToastClearance } from '@/components/toast';
-import { colors, contrastRatio, radius, semantic, shadow, space, TOUCH, typography } from '@/theme';
+import { brandGradient, colors, contrastRatio, font, radius, semantic, space, TOUCH, typography, widths } from '@/theme';
 
 // Componentes que moram em arquivos próprios, reexportados para as telas importarem tudo de um lugar só.
 export { IconButton, type IconName } from '@/components/icon-button';
-export { PokeballIcon } from '@/components/icons';
+export { PokeballIcon, withMarkIcons } from '@/components/icons';
 export { InfoButton, InfoParagraph, InfoSheet, InfoTopic } from '@/components/info-sheet';
 export { gridColumns, layoutSize, useKeyboardHeight, useLayout, type LayoutSize } from '@/components/layout';
 export { useReducedMotion } from '@/components/motion';
@@ -35,16 +41,11 @@ export { hideToast, showToast, ToastHost, useToast, useToastClearance, type Toas
 
 const WEB = Platform.OS === 'web';
 
-/** Papel de título; na web vira <h2>, <h3>… (o React Native não tem aria-level nos tipos). */
-function heading(level: number) {
-  return { role: 'heading' as const, ...((WEB ? { 'aria-level': level } : {}) as object) };
-}
-
 /**
  * Na web, o react-native-web só aciona com a barra de espaço o que tem papel de botão: opção (radio) e caixa
  * de seleção (checkbox) também precisam responder a ela, como no navegador.
  */
-function spaceToPress(onPress: () => void, disabled?: boolean) {
+export function spaceToPress(onPress: () => void, disabled?: boolean) {
   if (!WEB) return null;
   return {
     onKeyDown: (e: { key: string; preventDefault: () => void }) => {
@@ -55,7 +56,75 @@ function spaceToPress(onPress: () => void, disabled?: boolean) {
   } as object;
 }
 
-/** Botão em pílula: vermelho cheio (principal, um por tela), branco com borda (secundário), só texto ou perigo. */
+const ARROW_STEP: Record<string, number> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
+
+type RadioKeyEvent = {
+  key: string;
+  target: unknown;
+  currentTarget: unknown;
+  altKey?: boolean;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  shiftKey?: boolean;
+  preventDefault: () => void;
+  stopPropagation: () => void;
+};
+
+/**
+ * Setas num grupo de opções (como os radios do navegador): vão para a próxima ou a anterior, dando a volta nas pontas, e
+ * a marcam. Com `selectOnMove` false, só movem o foco, para quando marcar já faz algo maior (ex.: fechar a janela).
+ */
+export function moveRadioFocus(e: RadioKeyEvent, selectOnMove = true) {
+  const step = ARROW_STEP[e.key];
+  if (!step || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  const radios = Array.from((e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[role="radio"]:not([aria-disabled="true"])'));
+  const at = radios.indexOf(e.target as HTMLElement);
+  if (at < 0) return;
+  e.preventDefault();
+  // As setas da tela (folhear, andar na grade) ficam de fora.
+  e.stopPropagation();
+  const next = radios[(at + step + radios.length) % radios.length];
+  next.focus();
+  if (selectOnMove) next.click();
+}
+
+/** Props do grupo de opções na web: as setas andam entre elas. */
+export function radioGroupKeys(selectOnMove = true) {
+  if (!WEB) return null;
+  return { onKeyDown: (e: RadioKeyEvent) => moveRadioFocus(e, selectOnMove) } as object;
+}
+
+/** Na web, só a opção marcada entra no Tab (sem nenhuma marcada, todas); as outras se alcançam pelas setas. */
+export function radioTabIndex(checked: boolean, anyChecked: boolean) {
+  return WEB && anyChecked && !checked ? ({ tabIndex: -1 } as object) : null;
+}
+
+/**
+ * Foco do teclado numa opção selecionada: o contorno do navegador some sobre o branco, e a folga põe o anel no fundo
+ * escuro. Sem `outlineStyle` de propósito: assim o anel só aparece quando o navegador liga o contorno (:focus-visible).
+ */
+export const SELECTED_FOCUS = (WEB ? { outlineColor: semantic.focus.ring, outlineWidth: semantic.focus.width, outlineOffset: semantic.focus.offset } : {}) as ViewStyle;
+
+/**
+ * No celular, lê um erro assim que ele aparece ou muda. O papel 'alert' só vale na web: no Android é só a descrição do
+ * papel, o TalkBack não lê a região que já entra preenchida, e o VoiceOver não lê regiões "ao vivo".
+ */
+export function useAlertAnnouncement(text: string | null | undefined) {
+  useEffect(() => {
+    if (!WEB && text) AccessibilityInfo.announceForAccessibility(text);
+  }, [text]);
+}
+
+/** O texto de um conteúdo (string, número, listas e elementos com filhos), para anunciar. */
+export function plainText(node: ReactNode): string {
+  if (node == null || typeof node === 'boolean') return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(plainText).join('');
+  if (isValidElement<{ children?: ReactNode }>(node)) return plainText(node.props.children);
+  return '';
+}
+
+/** Botão em pílula: vermelho em gradiente (principal, um por tela), contorno (secundário), só texto ou perigo. */
 export function Button({
   title,
   onPress,
@@ -92,28 +161,36 @@ export function Button({
         return [
           styles.button,
           { backgroundColor: v.bg, borderColor: v.border },
-          variant === 'primary' && styles.buttonShadow,
           hovered && !off && { backgroundColor: v.hover, borderColor: variant === 'primary' ? v.hover : v.border },
           off && { opacity: 0.45 },
           pressed && { transform: [{ scale: 0.98 }], opacity: 0.9 },
           style,
         ];
       }}>
-      {busy ? <ActivityIndicator color={v.fg} size="small" /> : icon ? <Ionicons name={icon} size={18} color={v.fg} /> : null}
-      <Text style={[styles.buttonText, { color: v.fg }]}>{title}</Text>
+      {(state) => (
+        <>
+          {/* Com o mouse por cima, o gradiente sai e fica o vermelho mais escuro do fundo. */}
+          {variant === 'primary' && !off && !(state as PressState).hovered ? (
+            <LinearGradient colors={brandGradient} style={[StyleSheet.absoluteFill, styles.buttonFill]} pointerEvents="none" />
+          ) : null}
+          {busy ? <ActivityIndicator color={v.fg} size="small" /> : icon ? <Ionicons name={icon} size={18} color={v.fg} /> : null}
+          <Text style={[styles.buttonText, { color: v.fg }]}>{digitsInSystemFont(title)}</Text>
+        </>
+      )}
     </Pressable>
   );
 }
 
 const BUTTON = {
   primary: { bg: colors.primaryAction, fg: colors.onPrimary, border: colors.primaryAction, hover: colors.primaryDark },
-  secondary: { bg: colors.surface, fg: colors.text, border: colors.border, hover: colors.surfaceAlt },
-  ghost: { bg: 'transparent', fg: colors.primaryText, border: 'transparent', hover: colors.primarySoft },
-  danger: { bg: colors.surface, fg: semantic.danger.fg, border: semantic.danger.border, hover: semantic.danger.bg },
+  secondary: { bg: 'transparent', fg: colors.text, border: colors.borderStrong, hover: colors.surfaceAlt },
+  // Só texto, em branco: o vermelho fica para a ação principal.
+  ghost: { bg: 'transparent', fg: colors.text, border: 'transparent', hover: semantic.hover.onLight },
+  danger: { bg: 'transparent', fg: semantic.danger.fg, border: semantic.danger.border, hover: semantic.danger.bg },
 };
 
 /**
- * Opção selecionável (estado, variação, idioma…): selecionada fica grafite.
+ * Opção selecionável (estado, variação, idioma…): selecionada fica branca, com texto preto.
  * `mode`: 'radio' (padrão, escolha de uma entre várias), 'checkbox' (várias ao mesmo tempo) ou 'button' (ação).
  * No 'button', `selected` só para o que liga e desliga; ação de um toque ("Ver versões", "Concluir") não passa
  * `selected` e é anunciada como botão simples.
@@ -142,6 +219,7 @@ export function Chip({
   accessibilityLabel?: string;
 }) {
   const on = !!selected;
+  const groupChecked = useContext(ChipGroupChecked);
   // Botão que liga e desliga: na web, aria-pressed (aria-selected não vale em botão); no celular, "selecionado".
   // Ação de um toque (sem `selected`): botão simples, sem estado.
   const state =
@@ -161,11 +239,13 @@ export function Chip({
       aria-disabled={!!disabled}
       {...state}
       {...(mode !== 'button' ? spaceToPress(onPress, disabled) : null)}
+      {...(mode === 'radio' ? radioTabIndex(on, groupChecked) : null)}
       style={(s) => {
         const { pressed, hovered } = s as PressState;
         return [
           styles.chip,
           on && styles.chipSelected,
+          on && SELECTED_FOCUS,
           hint && !on && styles.chipHint,
           hovered && !on && !disabled && styles.chipHover,
           disabled && { opacity: 0.45 },
@@ -177,6 +257,14 @@ export function Chip({
       <Text style={[styles.chipText, on && styles.chipTextSelected]}>{label}</Text>
     </Pressable>
   );
+}
+
+const ChipGroupChecked = createContext(false);
+
+/** Conta aos chips de um grupo de opções se há um marcado: só então os outros saem do Tab (ver radioTabIndex). */
+export function ChipRadioScope({ children }: { children: ReactNode }) {
+  const anyChecked = Children.toArray(children).some((c) => isValidElement<{ selected?: boolean; disabled?: boolean }>(c) && !!c.props.selected && !c.props.disabled);
+  return <ChipGroupChecked value={anyChecked}>{children}</ChipGroupChecked>;
 }
 
 /** Grupo de chips em linhas que quebram, com nome para o leitor de tela ("Idioma", "Grade"). */
@@ -192,9 +280,10 @@ export function ChipGroup({
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
 }) {
+  const radio = mode === 'radio';
   return (
-    <View style={[styles.wrap, style]} role={mode === 'radio' ? 'radiogroup' : 'group'} aria-label={label}>
-      {children}
+    <View style={[styles.wrap, style]} role={radio ? 'radiogroup' : 'group'} aria-label={label} {...(radio ? radioGroupKeys() : null)}>
+      {radio ? <ChipRadioScope>{children}</ChipRadioScope> : children}
     </View>
   );
 }
@@ -213,8 +302,10 @@ export function Segmented<T extends string>({
   /** Nome do grupo para o leitor de tela. */
   label: string;
 }) {
+  const anyChecked = options.some((o) => o.id === value);
   return (
-    <View style={styles.segmented} role="radiogroup" aria-label={label}>
+    // Seis opções num cartão de 360 dp: sem as folgas, cada uma fica com os 48 de alvo.
+    <View style={[styles.segmented, options.length >= 6 && styles.segmentedTight]} role="radiogroup" aria-label={label} {...radioGroupKeys()}>
       {options.map((o) => {
         const selected = o.id === value;
         return (
@@ -225,9 +316,10 @@ export function Segmented<T extends string>({
             accessibilityLabel={o.hint ? `${o.label}, ${o.hint}` : o.label}
             aria-checked={selected}
             {...spaceToPress(() => onChange(o.id))}
+            {...radioTabIndex(selected, anyChecked)}
             style={(s) => {
               const { pressed, hovered } = s as PressState;
-              return [styles.segment, selected && styles.segmentOn, hovered && !selected && styles.segmentHover, pressed && !selected && { opacity: 0.7 }];
+              return [styles.segment, selected && styles.segmentOn, selected && SELECTED_FOCUS, hovered && !selected && styles.segmentHover, pressed && !selected && { opacity: 0.7 }];
             }}>
             <Text style={[styles.segmentText, selected && styles.segmentTextOn]}>{o.label}</Text>
           </Pressable>
@@ -243,7 +335,8 @@ export function Section({ title, hint, children, right }: { title: string; hint?
     <View style={styles.section}>
       <View style={styles.sectionHead}>
         <Text style={styles.sectionTitle} {...heading(3)}>
-          {title}
+          {/* Título dinâmico ("Mover Porygon2 para…"): número fora da Kanit. */}
+          {digitsInSystemFont(title)}
         </Text>
         {right}
       </View>
@@ -253,7 +346,7 @@ export function Section({ title, hint, children, right }: { title: string; hint?
   );
 }
 
-/** Cartão branco com sombra leve. */
+/** Cartão grafite: um degrau sobre o preto, sem sombra. */
 export function Card({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
   return <View style={[styles.card, style]}>{children}</View>;
 }
@@ -284,7 +377,7 @@ export function Input({
       ref={ref}
       placeholderTextColor={colors.textFaint}
       {...props}
-      {...(WEB && invalid ? ({ 'aria-invalid': true } as object) : null)}
+      {...(invalid ? invalidProps(props.accessibilityLabel ?? props.placeholder) : null)}
       onFocus={(e) => {
         setFocused(true);
         props.onFocus?.(e);
@@ -298,10 +391,18 @@ export function Input({
   );
 }
 
+/**
+ * Campo inválido para o leitor de tela: na web, aria-invalid; no celular (sem equivalente), "inválido" no nome do campo.
+ */
+export function invalidProps(label: string | undefined) {
+  if (WEB) return { 'aria-invalid': true } as object;
+  return { accessibilityLabel: label ? `${label}, inválido` : 'Inválido' };
+}
+
 /** Sem o contorno de foco do navegador (o foco é mostrado pela borda). */
 const NO_OUTLINE = WEB ? ({ outlineWidth: 0, outlineStyle: 'none' } as unknown as ViewStyle) : null;
 
-/** Campo de busca em cápsula, com lupa (toque = buscar) e botão de limpar, ambos com alvo de 44 px. */
+/** Campo de busca em cápsula, com lupa (toque = buscar) e botão de limpar, ambos com alvo de 48 px. */
 export function SearchField({
   value,
   onChangeText,
@@ -311,6 +412,11 @@ export function SearchField({
   icon = 'search',
   autoFocus,
   style,
+  inputRef,
+  selectTextOnFocus,
+  keyboardType,
+  onClear,
+  onFocusChange,
 }: {
   value: string;
   onChangeText: (t: string) => void;
@@ -320,9 +426,21 @@ export function SearchField({
   icon?: 'search' | 'filter';
   autoFocus?: boolean;
   style?: StyleProp<ViewStyle>;
+  /** O campo de verdade, para focar de fora. */
+  inputRef?: Ref<TextInputInstance>;
+  /** Ao focar, seleciona o texto: o que for digitado substitui o anterior. */
+  selectTextOnFocus?: boolean;
+  keyboardType?: KeyboardTypeOptions;
+  /** Limpar: no lugar do `onChangeText('')` (ex.: limpar e manter o foco). */
+  onClear?: () => void;
+  onFocusChange?: (focused: boolean) => void;
 }) {
   const [focused, setFocused] = useState(false);
   const iconColor = focused ? semantic.focus.ring : colors.textMuted;
+  const changeFocus = (on: boolean) => {
+    setFocused(on);
+    onFocusChange?.(on);
+  };
   return (
     <View style={[styles.searchField, focused && { borderColor: semantic.focus.ring }, style]}>
       {onSubmit ? (
@@ -333,21 +451,26 @@ export function SearchField({
         </View>
       )}
       <TextInput
+        ref={inputRef}
         value={value}
         onChangeText={onChangeText}
         onSubmitEditing={onSubmit}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
+        onFocus={() => changeFocus(true)}
+        onBlur={() => changeFocus(false)}
         placeholder={placeholder}
         placeholderTextColor={colors.textFaint}
         style={[styles.searchInput, !value && styles.searchInputEnd, NO_OUTLINE]}
         returnKeyType="search"
         autoCorrect={false}
         autoCapitalize="none"
+        autoComplete="off"
+        spellCheck={false}
         autoFocus={autoFocus}
+        selectTextOnFocus={selectTextOnFocus}
+        keyboardType={keyboardType}
         accessibilityLabel={label}
       />
-      {value ? <IconButton icon="close-circle" label="Limpar a busca" onPress={() => onChangeText('')} size={18} color={colors.iconFaint} /> : null}
+      {value ? <IconButton icon="close-circle" label="Limpar a busca" onPress={onClear ?? (() => onChangeText(''))} size={18} color={colors.textMuted} /> : null}
     </View>
   );
 }
@@ -439,9 +562,11 @@ export function Toggle({ label, hint, value, onChange }: { label: string; hint?:
       <Switch
         value={value}
         onValueChange={onChange}
+        // Ligado = selecionado: trilho branco e bolinha preta (na web, a bolinha ligada tem uma prop própria).
         trackColor={{ true: semantic.selected.bg, false: colors.borderStrong }}
         ios_backgroundColor={colors.borderStrong}
-        thumbColor={colors.surface}
+        thumbColor={value ? semantic.selected.fg : semantic.selected.bg}
+        {...(WEB ? ({ activeThumbColor: semantic.selected.fg } as object) : null)}
         accessibilityLabel={label}
         accessibilityHint={hint}
       />
@@ -464,30 +589,45 @@ export const COVER_COLORS: { color: string; name: string }[] = [
 ];
 
 /**
- * Cor do texto sobre uma capa: branco ou tinta escura, o que der mais contraste (WCAG). Laranja, amarelo,
- * verde, turquesa, rosa e cinza ficam com texto escuro; vermelho, azul, roxo e preto, com branco.
+ * Cor com que a capa aparece na tela. A capa vermelha gravada (#E3350D) é desenhada no vermelho da marca, em que o
+ * branco passa AA; o valor gravado no fichário não muda.
  */
-export function onCover(color: string) {
+export function coverFill(color: string) {
+  return color.toUpperCase() === COVER_COLORS[0].color ? colors.primary : color;
+}
+
+/**
+ * Cor do texto sobre uma capa: branco ou tinta escura, o que der mais contraste (WCAG); se nenhum dos dois chegar a
+ * 4,5:1, preto. Laranja, amarelo, verde, turquesa e cinza ficam com tinta escura; vermelho, azul, roxo e preto, com
+ * branco; rosa, com preto.
+ */
+export function onCover(cover: string) {
+  const color = coverFill(cover);
   const white = contrastRatio(color, '#FFFFFF');
-  const ink = contrastRatio(color, colors.text);
+  const ink = contrastRatio(color, colors.ink);
   if (white == null || ink == null) return '#FFFFFF';
-  return ink > white ? colors.text : '#FFFFFF';
+  if (Math.max(white, ink) < 4.5) return semantic.selected.fg;
+  return ink > white ? colors.ink : '#FFFFFF';
 }
 
 export function ColorPicker({ value, onChange, label = 'Cor da capa' }: { value?: string; onChange: (c: string) => void; label?: string }) {
   return (
-    <View style={styles.wrap} role="radiogroup" aria-label={label}>
+    <View style={styles.wrap} role="radiogroup" aria-label={label} {...radioGroupKeys()}>
       {COVER_COLORS.map(({ color, name }) => {
         const active = value === color;
+        // A capa preta sumiria no fundo escuro: ganha um contorno.
+        const blends = (contrastRatio(color, colors.surface) ?? 21) < 1.5;
         return (
           <Pressable
             key={color}
             onPress={() => onChange(color)}
-            style={[styles.swatch, { backgroundColor: color }, active && styles.swatchActive]}
+            // Escolhida: borda branca e o visto; o contorno fica livre para o foco do teclado.
+            style={[styles.swatch, { backgroundColor: coverFill(color) }, blends && styles.swatchBlends, active && styles.swatchActive, active && SELECTED_FOCUS]}
             role="radio"
             accessibilityLabel={name}
             aria-checked={active}
-            {...spaceToPress(() => onChange(color))}>
+            {...spaceToPress(() => onChange(color))}
+            {...radioTabIndex(active, COVER_COLORS.some((c) => c.color === value))}>
             {active ? <Ionicons name="checkmark" size={18} color={onCover(color)} /> : null}
           </Pressable>
         );
@@ -496,17 +636,23 @@ export function ColorPicker({ value, onChange, label = 'Cor da capa' }: { value?
   );
 }
 
-/** Barra fixa no rodapé com a ação principal da tela (respeita a área segura do aparelho). */
-export function BottomBar({ children, bottomInset }: { children: ReactNode; bottomInset: number }) {
+/**
+ * Barra fixa no rodapé com a ação principal da tela (respeita a área segura do aparelho). Margem lateral e largura
+ * máxima iguais às da coluna da tela (`width`: o tipo de conteúdo, como em `widths`, com a margem dentro dele).
+ */
+export function BottomBar({ children, bottomInset, width = 'reading' }: { children: ReactNode; bottomInset: number; width?: keyof typeof widths }) {
   // Os avisos (toast) ficam acima da barra quando passariam por cima do botão principal ("Colocar"); no computador, o
   // aviso no canto direito fica embaixo se o botão estiver no meio.
   const [height, setHeight] = useState(0);
   const [span, setSpan] = useState<{ left: number; right: number } | undefined>();
+  const { gutter } = useLayout();
   useToastClearance(height, span);
   return (
-    <View style={[styles.bottomBar, { paddingBottom: 12 + bottomInset }]} onLayout={(e) => setHeight(Math.ceil(e.nativeEvent.layout.height))}>
+    <View
+      style={[styles.bottomBar, { paddingHorizontal: gutter, paddingBottom: 12 + bottomInset }]}
+      onLayout={(e) => setHeight(Math.ceil(e.nativeEvent.layout.height))}>
       <View
-        style={styles.bottomInner}
+        style={[styles.bottomInner, { maxWidth: widths[width] - gutter * 2 }]}
         onLayout={(e) => {
           const { x, width } = e.nativeEvent.layout;
           setSpan({ left: Math.floor(x), right: Math.ceil(x + width) });
@@ -524,8 +670,8 @@ export const BOTTOM_BAR_SPACE = 100;
 export function Loading({ label }: { label?: string }) {
   return (
     <View style={styles.loading} accessible role="progressbar" aria-busy aria-label={label ?? 'Carregando'}>
-      <PokeballIcon size={30} color={colors.primary} />
-      <ActivityIndicator color={colors.primary} />
+      <PokeballIcon size={30} color={colors.textMuted} />
+      <ActivityIndicator color={colors.text} />
       {label ? <Text style={styles.hint}>{label}</Text> : null}
     </View>
   );
@@ -537,7 +683,7 @@ export function EmptyState({ title, text, action }: { title: string; text?: stri
     <View style={styles.empty}>
       <PokeballIcon size={40} color={colors.iconFaint} />
       <Text style={styles.emptyTitle} {...heading(2)}>
-        {title}
+        {digitsInSystemFont(title)}
       </Text>
       {text ? <Text style={styles.emptyText}>{text}</Text> : null}
       {action}
@@ -545,26 +691,29 @@ export function EmptyState({ title, text, action }: { title: string; text?: stri
   );
 }
 
+/** Na web, o sublinhado do link passa para os filhos em linha: em inline-block, o ícone fica sem ele. */
+const LINK_ICON_BOX = WEB ? ({ display: 'inline-block' } as unknown as TextStyle) : null;
+
 /**
  * Abre um endereço fora do app: no celular, no navegador do sistema por cima do app; na web, numa aba nova
  * (nunca em pop-up). Para links visíveis, prefira `ExternalLink`, que na web é um <a> de verdade.
  */
-export function openExternal(url: string) {
+export function openExternal(url: string, browserOptions?: WebBrowser.WebBrowserOpenOptions) {
   if (WEB) {
     const tab = window.open(url, '_blank');
     if (tab) tab.opener = null;
     return;
   }
-  WebBrowser.openBrowserAsync(url).catch(() => Linking.openURL(url).catch(() => {}));
+  WebBrowser.openBrowserAsync(url, browserOptions).catch(() => Linking.openURL(url).catch(() => {}));
 }
 
 /**
  * Link para fora do app (A1). Na web é um <a href target="_blank" rel="noopener noreferrer">: abre com o
  * teclado (Enter), aceita Ctrl+clique e "copiar link". No celular, abre no navegador do sistema.
  * - variant 'inline': dentro de um <Text> ("Preços do <ExternalLink>MYP Cards</ExternalLink> · 22/10").
- * - variant 'text' (padrão): link solto, com alvo de 44 px de altura.
- * - variant 'button': cápsula azul clara, como os botões "MYP Cards ↗" do quadro de preço.
- * `tone="onBrand"`: branco sublinhado, sobre a barra vermelha (A6).
+ * - variant 'text' (padrão): link solto, com alvo de 48 px de altura.
+ * - variant 'button': cápsula azul clara, como os botões "MYP Cards" do quadro de preço.
+ * `tone="onBrand"`: branco sublinhado, sobre a barra preta do topo (A6).
  */
 export function ExternalLink({
   href,
@@ -576,12 +725,13 @@ export function ExternalLink({
   numberOfLines,
   style,
   containerStyle,
+  browserOptions,
 }: {
   href: string;
   children: ReactNode;
   variant?: 'inline' | 'text' | 'button';
   tone?: 'default' | 'onBrand' | 'muted';
-  /** Acrescenta " ↗" (escondido do leitor de tela). */
+  /** Acrescenta o ícone de "abre fora do app" (escondido do leitor de tela). */
   arrow?: boolean;
   accessibilityLabel?: string;
   numberOfLines?: number;
@@ -589,6 +739,8 @@ export function ExternalLink({
   style?: StyleProp<TextStyle>;
   /** Posição e tamanho do link solto ou do botão (flex, margens); não vale no 'inline'. */
   containerStyle?: StyleProp<ViewStyle>;
+  /** Como o navegador do sistema abre no celular (ex.: voltar direto para a tela que abriu o link). */
+  browserOptions?: WebBrowser.WebBrowserOpenOptions;
 }) {
   const label = accessibilityLabel ?? (typeof children === 'string' ? children : undefined);
   const textStyle = [
@@ -601,8 +753,10 @@ export function ExternalLink({
     <>
       {children}
       {arrow ? (
-        <Text aria-hidden style={styles.linkArrow}>
-          {' ↗'}
+        <Text aria-hidden style={[styles.linkArrow, LINK_ICON_BOX]}>
+          {/* Sem `color`: o ícone herda a cor do link, em qualquer tom. */}
+          {'\u00A0'}
+          <Ionicons name="open-outline" size={typography.caption.fontSize} allowFontScaling />
         </Text>
       ) : null}
     </>
@@ -624,7 +778,7 @@ export function ExternalLink({
 
   if (variant === 'inline') {
     return (
-      <Text role="link" accessibilityLabel={label} onPress={() => openExternal(href)} style={[textStyle, style]}>
+      <Text role="link" accessibilityLabel={label} onPress={() => openExternal(href, browserOptions)} style={[textStyle, style]}>
         {content}
       </Text>
     );
@@ -632,7 +786,7 @@ export function ExternalLink({
 
   return (
     <Pressable
-      onPress={() => openExternal(href)}
+      onPress={() => openExternal(href, browserOptions)}
       role="link"
       accessibilityLabel={label}
       style={({ pressed }) => [variant === 'button' ? styles.linkButton : styles.linkBlock, containerStyle, pressed && { opacity: 0.6 }]}>
@@ -706,7 +860,7 @@ export function ListRow({
         </Text>
         {subtitle ? (
           <Text style={styles.listSubtitle} numberOfLines={1}>
-            {subtitle}
+            {withMarkIcons(subtitle, { size: typography.caption.fontSize, color: colors.textMuted })}
           </Text>
         ) : null}
       </View>
@@ -734,12 +888,17 @@ export function ListRow({
  */
 export function Notice({ tone = 'info', children, icon }: { tone?: 'info' | 'success' | 'warning' | 'danger'; children: ReactNode; icon?: IconName }) {
   const t = NOTICE[tone];
+  const danger = tone === 'danger';
+  // No celular, o erro é lido pelo anúncio (a região já entra preenchida e o TalkBack não a lê); sem a região "ao vivo"
+  // junto, ele não é lido duas vezes quando muda.
+  useAlertAnnouncement(danger ? plainText(children) : null);
+  const live = danger ? (WEB ? 'assertive' : 'none') : 'polite';
   return (
     <View
       style={[styles.notice, { backgroundColor: t.bg }]}
-      role={tone === 'danger' ? 'alert' : 'status'}
-      aria-live={tone === 'danger' ? 'assertive' : 'polite'}
-      accessibilityLiveRegion={tone === 'danger' ? 'assertive' : 'polite'}>
+      role={danger ? 'alert' : 'status'}
+      aria-live={live === 'none' ? 'off' : live}
+      accessibilityLiveRegion={live}>
       <Ionicons name={icon ?? t.icon} size={16} color={t.fg} style={styles.noticeIcon} />
       <Text style={[styles.noticeText, { color: tone === 'info' ? colors.textMuted : t.fg }]}>{children}</Text>
     </View>
@@ -764,18 +923,23 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
   },
-  buttonShadow: { ...shadow },
-  buttonText: { fontSize: 16, lineHeight: 20, fontWeight: '700', letterSpacing: 0.2 },
+  // O Pressable não recorta os filhos: sem o raio próprio, o gradiente sairia pelas pontas da pílula.
+  buttonFill: { borderRadius: radius.pill },
+  buttonText: { fontFamily: font.display, fontSize: 16, lineHeight: 20, fontWeight: 'normal', letterSpacing: 0.5, textTransform: 'uppercase', textAlign: 'center' },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 5,
+    // Alvo de 48 também na largura: o chip "10" das páginas ficava com 44.
     minHeight: TOUCH,
+    minWidth: TOUCH,
     paddingHorizontal: 14,
     borderRadius: radius.pill,
     borderWidth: 1.5,
     borderColor: colors.border,
-    backgroundColor: colors.surface,
+    // Um degrau acima do cartão e do preto: o chip aparece nos dois.
+    backgroundColor: colors.surfaceAlt,
   },
   chipSelected: { borderColor: semantic.selected.border, backgroundColor: semantic.selected.bg },
   chipHint: { borderStyle: 'dashed', borderColor: colors.textMuted },
@@ -783,23 +947,26 @@ export const styles = StyleSheet.create({
   chipText: { color: colors.text, fontWeight: '600', fontSize: 14 },
   chipTextSelected: { color: semantic.selected.fg },
   segmented: { flexDirection: 'row', backgroundColor: colors.surfaceAlt, borderRadius: radius.pill, padding: 2, gap: 2 },
+  // Seis opções em 296 de largura: 6 × 48 + 4 de trilho = 292.
+  segmentedTight: { gap: 0 },
   segment: { flex: 1, minHeight: TOUCH, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
-  segmentOn: { backgroundColor: semantic.selected.bg, ...shadow },
+  segmentOn: { backgroundColor: semantic.selected.bg },
   segmentHover: { backgroundColor: semantic.hover.onLight },
   segmentText: { color: colors.textMuted, fontWeight: '700', fontSize: 14 },
   segmentTextOn: { color: semantic.selected.fg },
   section: { gap: 10, marginBottom: space.xl },
   sectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: space.sm },
-  sectionTitle: { ...typography.heading, color: colors.text },
+  sectionTitle: { ...typography.heading, color: colors.heading },
   hint: { ...typography.caption, color: colors.textMuted },
-  card: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: space.lg, ...shadow },
+  card: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: space.lg },
   groupLabel: { ...typography.label, color: colors.textMuted, marginTop: space.sm, marginBottom: 10 },
   input: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surfaceAlt,
     borderWidth: 1.5,
     borderColor: colors.borderStrong,
     borderRadius: radius.md,
     color: colors.text,
+    minHeight: TOUCH,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 16,
@@ -808,12 +975,11 @@ export const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 2,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surfaceAlt,
     borderRadius: radius.pill,
     borderWidth: 1.5,
-    borderColor: colors.surface,
+    borderColor: colors.borderStrong,
     paddingHorizontal: 4,
-    ...shadow,
   },
   searchIcon: { width: TOUCH, height: TOUCH, alignItems: 'center', justifyContent: 'center' },
   searchInput: { flex: 1, color: colors.text, fontSize: 16, paddingVertical: 13, minWidth: 0 },
@@ -824,7 +990,7 @@ export const styles = StyleSheet.create({
     width: TOUCH,
     height: TOUCH,
     borderRadius: radius.pill,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surfaceAlt,
     borderWidth: 1.5,
     borderColor: colors.border,
     alignItems: 'center',
@@ -838,30 +1004,31 @@ export const styles = StyleSheet.create({
   toggleLabel: { flex: 1, minHeight: TOUCH, justifyContent: 'center' },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   swatch: { width: TOUCH, height: TOUCH, borderRadius: TOUCH / 2, alignItems: 'center', justifyContent: 'center', borderWidth: 3, borderColor: 'transparent' },
-  swatchActive: { borderColor: colors.surface, outlineColor: colors.text, outlineWidth: 2, outlineStyle: 'solid' },
+  swatchBlends: { borderColor: colors.borderStrong },
+  swatchActive: { borderColor: semantic.selected.border },
   bottomBar: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
     paddingTop: 12,
-    paddingHorizontal: 20,
     backgroundColor: colors.backgroundTranslucent,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    // A barra é preta como o fundo: o fio é o que a separa da rolagem.
+    borderTopWidth: 1,
     borderTopColor: colors.border,
     alignItems: 'center',
   },
-  bottomInner: { width: '100%', maxWidth: 680, gap: space.sm },
+  bottomInner: { width: '100%', gap: space.sm },
   loading: { alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: space.xxxl },
   empty: { alignItems: 'center', gap: space.sm, paddingVertical: 40, paddingHorizontal: space.xl },
-  emptyTitle: { color: colors.text, fontSize: 17, lineHeight: 22, fontWeight: '700', textAlign: 'center' },
+  emptyTitle: { ...typography.heading, color: colors.heading, textAlign: 'center' },
   emptyText: { color: colors.textMuted, fontSize: 14, lineHeight: 20, textAlign: 'center', maxWidth: 420 },
   linkText: { color: semantic.link.fg, fontWeight: '700', textDecorationLine: 'underline' },
   linkOnBrand: { color: semantic.link.onBrand },
   linkMuted: { color: colors.textMuted },
   linkArrow: { textDecorationLine: 'none' },
-  // Link solto: 20 px de linha + 12 em cima e embaixo = 44 px de alvo, também na web (onde o hitSlop não vale).
-  linkBlock: { paddingVertical: 12, alignSelf: 'flex-start' },
+  // Link solto: 20 px de linha + 14 em cima e embaixo = 48 px de alvo, também na web (onde o hitSlop não vale).
+  linkBlock: { paddingVertical: 14, alignSelf: 'flex-start' },
   linkBlockText: { fontSize: 14, lineHeight: 20 },
   linkButton: {
     minHeight: TOUCH,

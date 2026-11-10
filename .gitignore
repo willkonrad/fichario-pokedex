@@ -46,3 +46,6 @@ yarn-error.*
 
 # Supabase CLI (projeto vinculado e cache local)
 supabase/.temp/
+
+# Capturas da revisão de design (com arte de cartas: fora do repositório público)
+.impeccable/review/

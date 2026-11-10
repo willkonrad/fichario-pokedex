@@ -1,4 +1,4 @@
-import { cardParams, destinationsFor, parseCardCode, placedText } from '@/lib/add-card';
+import { buildNewEntry, cardParams, defaultVersion, destinationsFor, parseCardCode, placedText, type Destination } from '@/lib/add-card';
 
 import { binder, entry, settings } from './fixtures';
 
@@ -82,5 +82,26 @@ describe('cardParams (da lista para a tela da carta)', () => {
     expect(cardParams({ ...card, image })).toMatchObject({ image, imageUrl: undefined, name: 'Pikachu' });
     const imageUrl = 'https://tcgplayer-cdn.tcgplayer.com/product/1_in_1000x1000.jpg';
     expect(cardParams({ ...card, imageUrl })).toMatchObject({ image: undefined, imageUrl });
+  });
+});
+
+describe('defaultVersion e buildNewEntry: versão vista na Consulta (card.version)', () => {
+  const card = { id: 'base1-4', localId: '4', name: 'Charizard', lang: 'en' as const, setId: 'base1', setName: 'Base Set', setOrder: 1, setNameEn: 'Base Set' };
+  const options = [{ variant: 'holo' as const }, { variant: 'firstEdition' as const }, { variant: 'shadowless' as const }];
+  const dest: Destination = { key: 'dex', kind: 'dex', dex: 6, slot: 0, title: '#006 Charizard', detail: '', where: '' };
+
+  it('marca a versão vista quando ela está entre as opções', () => {
+    expect(defaultVersion(options, { ...card, version: 'shadowless' })).toEqual({ variant: 'shadowless' });
+    expect(defaultVersion(options, { ...card, version: 'firstEdition' })).toEqual({ variant: 'firstEdition' });
+  });
+
+  it('versão que não está na lista: a primeira comum', () => {
+    expect(defaultVersion(options, { ...card, version: 'reverse' })).toEqual({ variant: 'holo' });
+    expect(defaultVersion(options, card)).toEqual({ variant: 'holo' });
+  });
+
+  it('sem ficha nem versões: salva a versão vista', () => {
+    expect(buildNewEntry({ card: { ...card, version: 'shadowless' }, facts: null, version: null, condition: 'NM', dest }).variant).toBe('shadowless');
+    expect(buildNewEntry({ card: { ...card, version: 'firstEdition' }, facts: null, version: null, condition: 'NM', dest, known: { variant: 'holo' } }).variant).toBe('firstEdition');
   });
 });

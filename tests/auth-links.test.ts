@@ -3,6 +3,8 @@ import {
   hasAuthFragment,
   isResetLink,
   isSignupDisabled,
+  LINK_EXPIRED_TEXT,
+  linkErrorText,
   linkSessionCheck,
   MIN_PASSWORD,
   newPasswordProblem,
@@ -162,5 +164,29 @@ describe('erros do login em português', () => {
     expect(authErrorText(new TypeError('Network request failed'))).toBe('Sem conexão com a internet.');
     expect(authErrorText('algo estranho')).toBe('Não consegui concluir agora (algo estranho). Tente de novo em instantes.');
     expect(authErrorText(null)).toContain('erro desconhecido');
+  });
+});
+
+describe('erro que veio no próprio link (texto do endereço)', () => {
+  it('texto montado por qualquer um no endereço nunca aparece no aviso: só textos fixos', () => {
+    const url =
+      'http://127.0.0.1:8081/nova-senha?error_description=Sua%20conta%20foi%20bloqueada.%20Acesse%20golpe.example%20para%20liberar';
+    const link = readAuthLink(url);
+    expect(link?.kind).toBe('error');
+    const text = linkErrorText(link?.kind === 'error' ? link.code : '');
+    expect(text).toBe(LINK_EXPIRED_TEXT);
+    expect(text).not.toMatch(/golpe|bloqueada/);
+    // O código também vem do endereço: um desconhecido vale como link vencido, sem ser repetido na tela.
+    const coded = readAuthLink('pokedexbinder://nova-senha?error=Ligue%20para%200800&error_code=Acesse%20golpe.example');
+    expect(linkErrorText(coded?.kind === 'error' ? coded.code : '')).toBe(LINK_EXPIRED_TEXT);
+  });
+
+  it('códigos conhecidos do Supabase têm o texto próprio', () => {
+    expect(linkErrorText('otp_expired')).toBe(LINK_EXPIRED_TEXT);
+    expect(linkErrorText('access_denied')).toBe(LINK_EXPIRED_TEXT);
+    expect(linkErrorText('over_email_send_rate_limit')).toContain('máximo de e-mails');
+    expect(linkErrorText('session_not_found')).toContain('A sessão do link terminou');
+    expect(linkErrorText('signup_disabled')).toBe(SIGNUP_CLOSED_TEXT);
+    expect(linkErrorText('toString')).toBe(LINK_EXPIRED_TEXT);
   });
 });

@@ -1,17 +1,18 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useEffect, useRef } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View, type ScrollViewInstance } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View, type ScrollViewInstance } from 'react-native';
 
 import { IconButton, type PressState } from '@/components/icon-button';
-import { colors, radius, semantic, shadow, space, TOUCH, typography } from '@/theme';
+import { useReducedMotion } from '@/components/motion';
+import { SELECTED_FOCUS } from '@/components/ui';
+import { colors, radius, semantic, space, TOUCH, typography } from '@/theme';
 
 const WEB = Platform.OS === 'web';
-/** Largura da janela abaixo da qual o paginador fica compacto. */
-const COMPACT_BELOW = 420;
 
 /**
- * Paginador (H5): ‹ | "Pág. 13 de 52" com a faixa e quantos bolsos têm carta ("#241–#260 · 15/20") | › | "Próxima
- * falta". Tocar no número abre "Ir para a página". A página nova é anunciada pelo leitor de tela (A7).
+ * Paginador do computador (H5): ‹ | "Pág. 13 de 52" com a faixa e quantos bolsos têm carta ("#241–#260 · 15/20") | › |
+ * "Próxima falta". Tocar no número abre "Ir para a página". A página nova é anunciada pelo leitor de tela (A7). No
+ * celular, quem faz isso é a base fixa (`HomeDock`).
  */
 export function HomePager({
   label,
@@ -39,11 +40,8 @@ export function HomePager({
   /** "Próxima falta" (Pokédex) ou "Próximo vazio" (fichário livre). */
   nextEmptyLabel: string;
 }) {
-  // Celular estreito (375 px): sem o ícone e com menos respiro no "Próxima falta", para "Pág. 113 de 114" e a faixa
-  // "#1009–#1017 · 5/9" caberem no meio sem reticências.
-  const compact = useWindowDimensions().width < COMPACT_BELOW;
   return (
-    <View style={[styles.pager, compact && styles.pagerCompact]}>
+    <View style={styles.pager}>
       <IconButton icon="chevron-back" label="Página anterior" onPress={onPrev} disabled={!canPrev} size={22} tone="soft" style={styles.arrow} />
       <Pressable
         onPress={onGoTo}
@@ -71,9 +69,9 @@ export function HomePager({
           accessibilityLabel={`Ir para: ${nextEmptyLabel.toLowerCase()}`}
           style={(s) => {
             const { pressed, hovered } = s as PressState;
-            return [styles.next, compact && styles.nextCompact, hovered && styles.nextHover, pressed && { opacity: 0.8 }];
+            return [styles.next, hovered && styles.nextHover, pressed && { opacity: 0.8 }];
           }}>
-          {compact ? null : <Ionicons name="arrow-redo-outline" size={15} color={colors.text} />}
+          <Ionicons name="play-skip-forward-outline" size={15} color={colors.text} />
           <Text style={styles.nextText} numberOfLines={1}>
             {nextEmptyLabel}
           </Text>
@@ -85,20 +83,26 @@ export function HomePager({
 
 export type RegionChip = { id: string; label: string; filled: number; count: number; active: boolean; onPress: () => void };
 
+/** Posição de rolagem que deixa a região à vista, com um respiro antes dela. */
+const scrollSpot = (vertical: boolean, at: number, animated: boolean) =>
+  vertical ? { y: Math.max(0, at - space.sm), animated } : { x: Math.max(0, at - space.lg), animated };
+
 /**
  * Régua de regiões (H5): "Kanto 31/151" com uma barrinha de progresso; a da página aberta fica marcada e o toque leva
- * à região. `vertical`: lista com barras, para o painel do computador.
+ * à região. `vertical`: lista com barras, para o painel do computador; com `maxHeight`, ela rola por dentro.
  */
-export function RegionRuler({ regions, vertical = false }: { regions: RegionChip[]; vertical?: boolean }) {
+export function RegionRuler({ regions, vertical = false, maxHeight }: { regions: RegionChip[]; vertical?: boolean; maxHeight?: number }) {
   const scroll = useRef<ScrollViewInstance>(null);
-  const xs = useRef<Record<string, number>>({});
+  const spots = useRef<Record<string, number>>({});
   const activeId = regions.find((r) => r.active)?.id;
+  const reduceMotion = useReducedMotion();
 
-  // A região da página aberta fica à vista na régua (ao folhear para outra região, a régua acompanha).
+  // A região da página aberta fica à vista na régua (ao folhear para outra região, a régua acompanha; com "reduzir
+  // movimento", sem deslizar).
   useEffect(() => {
-    const x = activeId ? xs.current[activeId] : undefined;
-    if (!vertical && x != null) scroll.current?.scrollTo({ x: Math.max(0, x - space.lg), animated: true });
-  }, [activeId, vertical]);
+    const at = activeId ? spots.current[activeId] : undefined;
+    if (at != null) scroll.current?.scrollTo(scrollSpot(vertical, at, !reduceMotion));
+  }, [activeId, vertical, reduceMotion]);
 
   const chips = regions.map((r) => {
     const done = r.filled >= r.count;
@@ -108,14 +112,15 @@ export function RegionRuler({ regions, vertical = false }: { regions: RegionChip
         key={r.id}
         onPress={r.onPress}
         onLayout={(e) => {
-          xs.current[r.id] = e.nativeEvent.layout.x;
-          if (r.active && !vertical) scroll.current?.scrollTo({ x: Math.max(0, e.nativeEvent.layout.x - space.lg), animated: false });
+          const at = vertical ? e.nativeEvent.layout.y : e.nativeEvent.layout.x;
+          spots.current[r.id] = at;
+          if (r.active) scroll.current?.scrollTo(scrollSpot(vertical, at, false));
         }}
         role="button"
         accessibilityLabel={`${r.label}: ${r.filled} de ${r.count}${done ? ', completa' : ''}${r.active ? ', página aberta' : ''}`}
         style={(s) => {
           const { pressed, hovered } = s as PressState;
-          return [vertical ? styles.regionRow : styles.chip, r.active && styles.chipActive, hovered && !r.active && styles.chipHover, pressed && { opacity: 0.75 }];
+          return [vertical ? styles.regionRow : styles.chip, r.active && styles.chipActive, r.active && SELECTED_FOCUS, hovered && !r.active && styles.chipHover, pressed && { opacity: 0.75 }];
         }}>
         <View style={styles.chipHead}>
           {done ? <Ionicons name="checkmark-circle" size={14} color={r.active ? semantic.selected.fg : semantic.success.fg} /> : null}
@@ -127,15 +132,24 @@ export function RegionRuler({ regions, vertical = false }: { regions: RegionChip
           </Text>
         </View>
         <View style={[styles.bar, r.active && styles.barActive]}>
-          <View style={[styles.barFill, { width: pct }]} />
+          <View style={[styles.barFill, r.active && styles.barFillActive, { width: pct }]} />
         </View>
       </Pressable>
     );
   });
 
-  if (vertical) return <View style={styles.regionList}>{chips}</View>;
+  if (vertical && maxHeight == null) return <View style={styles.regionList}>{chips}</View>;
   return (
-    <ScrollView ref={scroll} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.ruler} role="toolbar" aria-label="Regiões">
+    <ScrollView
+      ref={scroll}
+      horizontal={!vertical}
+      nestedScrollEnabled={vertical}
+      // Na web, qualquer indicador em `false` esconde a barra de rolagem: a lista vertical precisa dela à vista.
+      showsHorizontalScrollIndicator={vertical}
+      style={vertical ? [styles.regionScroll, { maxHeight }] : undefined}
+      contentContainerStyle={vertical ? styles.regionList : styles.ruler}
+      role="toolbar"
+      aria-label="Regiões">
       {chips}
     </ScrollView>
   );
@@ -143,8 +157,7 @@ export function RegionRuler({ regions, vertical = false }: { regions: RegionChip
 
 const styles = StyleSheet.create({
   pager: { flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: 52, paddingVertical: space.xs },
-  pagerCompact: { gap: space.xs },
-  arrow: { backgroundColor: colors.surface, ...shadow },
+  arrow: { backgroundColor: colors.surface, borderWidth: 1.5, borderColor: colors.border },
   mid: { flex: 1, minWidth: 0, minHeight: TOUCH, alignItems: 'center', justifyContent: 'center', borderRadius: radius.md },
   midHover: { backgroundColor: semantic.hover.onLight },
   title: { color: colors.text, fontSize: 15, lineHeight: 20, fontWeight: '800', ...typography.tabular },
@@ -162,14 +175,14 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     flexShrink: 0,
   },
-  nextCompact: { paddingHorizontal: space.sm },
   nextHover: { borderColor: colors.borderStrong },
   nextText: { color: colors.text, fontSize: 13, fontWeight: '700' },
   ruler: { gap: space.sm, paddingVertical: space.xs },
   regionList: { gap: space.xs },
+  regionScroll: { flexGrow: 0 },
   chip: {
     minWidth: 92,
-    minHeight: 40,
+    minHeight: TOUCH,
     paddingHorizontal: space.md,
     paddingTop: 6,
     paddingBottom: 7,
@@ -188,7 +201,9 @@ const styles = StyleSheet.create({
   chipLabelActive: { color: semantic.selected.fg },
   chipCount: { color: colors.textMuted, fontSize: 12, lineHeight: 16, fontWeight: '600', ...typography.tabular },
   countEnd: { marginLeft: 'auto' },
-  bar: { height: 3, borderRadius: 2, backgroundColor: colors.surfaceAlt, overflow: 'hidden' },
-  barActive: { backgroundColor: semantic.brand.track },
-  barFill: { height: 3, borderRadius: 2, backgroundColor: semantic.special.fill },
+  bar: { height: 3, borderRadius: 2, backgroundColor: semantic.progress.track, overflow: 'hidden' },
+  // Na região aberta o fundo é branco: a barra precisa de tinta escura.
+  barActive: { backgroundColor: colors.textMuted },
+  barFill: { height: 3, borderRadius: 2, backgroundColor: semantic.progress.fill },
+  barFillActive: { backgroundColor: semantic.selected.fg },
 });

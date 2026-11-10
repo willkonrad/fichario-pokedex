@@ -1,6 +1,6 @@
 import { tcgplayerFor } from './tcgplayer';
 import type { Entry, Origin, ValueBasis } from './types';
-import { mypApiFor, pricePending, valuation, type SourceId } from './valuation';
+import { mypApiFor, mypCovers, pricePending, valuation, type SourceId } from './valuation';
 
 // Totais da coleção (valor, faixa, compras, idade dos preços). Os formatadores moram em lib/format.ts; os de baixo
 // continuam exportados daqui para as telas antigas.
@@ -22,7 +22,8 @@ export {
  * padrão), a soma dos mínimos, das médias e dos máximos (cartas com "Meu valor" entram com ele em tudo) e quantas
  * cartas têm valor: por confiança, por escolha (`byPick`: "média em 46, menor anúncio em 7, Meu valor em 2") e por
  * fonte (`byBasis`: "MYP Cards (41) · TCGplayer (5) · Meu valor (2)"). `approx` = cartas com valor aproximado;
- * `mypPending` = cartas sem valor (fora as em inglês) esperando a busca no MYP, que só o app no celular faz.
+ * `mypPending` = cartas sem valor esperando a busca no MYP, que só o app no celular faz (a em inglês só depois de
+ * olhada na TCGplayer, que a web também consulta; a japonesa nunca).
  */
 export function collectionTotals(entries: Entry[]) {
   let value = 0;
@@ -38,7 +39,9 @@ export function collectionTotals(entries: Entry[]) {
   for (const e of entries) {
     const ref = valuation(e);
     if (!ref.range || ref.value == null) {
-      if (e.lang !== 'en' && pricePending(e)) mypPending++;
+      // Em inglês: já olhada na TCGplayer, sem preço lá, e ainda sem a busca no MYP (como noPriceReason 'pending'). A
+      // japonesa nunca espera o MYP (ele não tem cartas japonesas): só a TCGplayer, que a web também consulta.
+      if (e.lang === 'en' ? !!tcgplayerFor(e) && !mypApiFor(e) : mypCovers(e.lang) && pricePending(e)) mypPending++;
       continue;
     }
     value += ref.value;

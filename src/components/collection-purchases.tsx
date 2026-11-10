@@ -55,7 +55,7 @@ export function PurchasesCard({ summary }: { summary: ReturnType<typeof purchase
 
 const styles = StyleSheet.create({
   card: { gap: space.xs },
-  title: { ...typography.heading, color: colors.text, marginBottom: space.xs },
+  title: { ...typography.heading, color: colors.heading, marginBottom: space.xs },
   row: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', columnGap: space.sm },
   main: { ...typography.bodyStrong, ...typography.tabular, color: semantic.money.fg },
   diff: { ...typography.numeric },

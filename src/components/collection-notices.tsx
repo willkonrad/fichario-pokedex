@@ -87,5 +87,5 @@ export function MyValueNotice({ entries }: { entries: Record<string, Entry> }) {
 const styles = StyleSheet.create({
   wrap: { gap: space.xxs },
   action: { alignSelf: 'flex-end', minHeight: TOUCH, paddingHorizontal: space.md, justifyContent: 'center' },
-  actionText: { ...typography.bodyStrong, color: colors.primaryText },
+  actionText: { ...typography.bodyStrong, color: semantic.link.fg },
 });

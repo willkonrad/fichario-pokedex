@@ -1,4 +1,5 @@
 import {
+  formatAgo,
   formatBRL,
   formatBRLShort,
   formatBRLTight,
@@ -137,5 +138,43 @@ describe('datas', () => {
     expect(formatDay('2026-10-20')).toBe('20/10');
     expect(formatDate('2026-10-20')).toBe('20/10/2026');
     expect(formatDate('2026-01-01')).toBe('01/01/2026');
+  });
+});
+
+describe('formatAgo (há quanto tempo, no fuso do aparelho)', () => {
+  // 05/11/2026 14:00 em Brasília (os testes rodam com TZ=America/Sao_Paulo).
+  const NOW = Date.parse('2026-11-05T17:00:00.000Z');
+  const ago = (min: number) => new Date(NOW - min * 60_000).toISOString();
+
+  it('minutos e horas', () => {
+    expect(formatAgo(ago(0.5), NOW)).toBe('agora mesmo');
+    expect(formatAgo(ago(0), NOW)).toBe('agora mesmo');
+    expect(formatAgo(ago(1), NOW)).toBe('há 1 min');
+    expect(formatAgo(ago(59.9), NOW)).toBe('há 59 min');
+    expect(formatAgo(ago(60), NOW)).toBe('há 1 h');
+    expect(formatAgo(ago(5 * 60 + 59), NOW)).toBe('há 5 h');
+  });
+
+  it('hoje, ontem e antes', () => {
+    expect(formatAgo('2026-11-05T11:00:00.000Z', NOW)).toBe('hoje, 08:00');
+    expect(formatAgo('2026-11-05T03:05:00.000Z', NOW)).toBe('hoje, 00:05');
+    expect(formatAgo('2026-11-05T02:59:00.000Z', NOW)).toBe('ontem, 23:59');
+    expect(formatAgo('2026-11-04T09:05:00.000Z', NOW)).toBe('ontem, 06:05');
+    expect(formatAgo('2026-11-04T02:59:00.000Z', NOW)).toBe('03/11, 23:59');
+    // Hora do servidor ("+00:00").
+    expect(formatAgo('2026-10-20T09:05:00+00:00', NOW)).toBe('20/10, 06:05');
+  });
+
+  it('logo depois da meia-noite, a véspera ainda é "há N h"', () => {
+    const night = Date.parse('2026-11-05T03:30:00.000Z'); // 00:30
+    expect(formatAgo('2026-11-05T02:00:00.000Z', night)).toBe('há 1 h');
+    expect(formatAgo('2026-11-04T20:00:00.000Z', night)).toBe('ontem, 17:00');
+  });
+
+  it('relógio um pouco atrás do servidor é "agora mesmo"; data inválida, vazio', () => {
+    expect(formatAgo(ago(-2), NOW)).toBe('agora mesmo');
+    expect(formatAgo('2026-11-06T17:00:00.000Z', NOW)).toBe('06/11, 14:00');
+    expect(formatAgo('', NOW)).toBe('');
+    expect(formatAgo('ontem', NOW)).toBe('');
   });
 });

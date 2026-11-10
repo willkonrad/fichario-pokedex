@@ -3,7 +3,7 @@ import { Platform, StyleSheet, Text, View } from 'react-native';
 
 import { HEADING_3 } from '@/components/collection-chart';
 import { Button, Card, Input, Notice, showToast } from '@/components/ui';
-import { backupFileName, backupToCsv, backupToJson, pickBackupFile, shareBackupFile } from '@/lib/backup';
+import { backupFileName, backupToCsv, backupToJson, pickBackupFile, saveBackupFile } from '@/lib/backup';
 import { useCollectionActions, type ImportResult } from '@/store/collection';
 import { colors, space, typography } from '@/theme';
 
@@ -36,8 +36,8 @@ const errorMessage = (e: unknown) => (e instanceof Error ? e.message : 'Não con
 
 /**
  * Cópia da coleção (S7): exportar em JSON (para restaurar) ou CSV (planilha), sem os preços das fontes, e importar uma
- * cópia, que se junta à coleção carta por carta (vence a edição mais recente; nada é apagado). Na web, o arquivo é
- * baixado e escolhido; no celular, vai pelo menu de compartilhar e volta colando o conteúdo.
+ * cópia, que se junta à coleção carta por carta (vence a edição mais recente; nada é apagado). Sai como arquivo (na
+ * web, baixado; no Android, numa pasta escolhida) e volta escolhendo o arquivo. No celular dá para colar o conteúdo.
  */
 export function BackupCard() {
   const { exportCollection, importCollection } = useCollectionActions();
@@ -52,8 +52,8 @@ export function BackupCard() {
     try {
       const backup = exportCollection();
       const content = kind === 'json' ? backupToJson(backup) : backupToCsv(backup);
-      await shareBackupFile(content, backupFileName(kind), kind === 'json' ? 'application/json' : 'text/csv');
-      if (WEB) showToast({ message: `${backupFileName(kind)} baixado` });
+      const saved = await saveBackupFile(content, backupFileName(kind), kind === 'json' ? 'application/json' : 'text/csv');
+      if (saved) showToast({ message: saved });
     } catch (e) {
       setMessage({ text: errorMessage(e), error: true });
     }
@@ -90,14 +90,13 @@ export function BackupCard() {
           Cópia da coleção
         </Text>
         <Text style={styles.note}>Suas cartas, fichários e anotações, sem os preços (o app busca de novo).</Text>
+        {Platform.OS === 'android' ? <Text style={styles.note}>Ao exportar, escolha uma pasta, como Documents. O Android não libera a pasta Download.</Text> : null}
       </View>
       <View style={styles.buttons}>
         <Button title="Exportar cópia" icon="download-outline" variant="secondary" onPress={() => exportAs('json')} busy={busy === 'json'} style={styles.button} />
         <Button title="Planilha (CSV)" icon="grid-outline" variant="secondary" onPress={() => exportAs('csv')} busy={busy === 'csv'} style={styles.button} />
       </View>
-      {WEB ? (
-        <Button title="Importar cópia" icon="push-outline" variant="ghost" onPress={pickAndImport} busy={busy === 'import'} />
-      ) : pasting ? (
+      {pasting ? (
         <View style={styles.paste}>
           <Input
             value={pasted}
@@ -109,11 +108,16 @@ export function BackupCard() {
             accessibilityLabel="Conteúdo da cópia"
             style={styles.pasteInput}
           />
-          <Button title="Importar" icon="push-outline" onPress={() => runImport(pasted)} busy={busy === 'import'} disabled={!pasted.trim()} />
+          {/* Contorno: o vermelho da tela da conta é o "Entrar" ou o "Sincronizar agora". */}
+          <Button title="Importar" variant="secondary" icon="push-outline" onPress={() => runImport(pasted)} busy={busy === 'import'} disabled={!pasted.trim()} />
           <Button title="Cancelar" variant="ghost" onPress={() => setPasting(false)} />
         </View>
       ) : (
-        <Button title="Importar cópia" icon="push-outline" variant="ghost" onPress={() => setPasting(true)} />
+        <>
+          <Button title="Importar cópia" icon="push-outline" variant="ghost" onPress={pickAndImport} busy={busy === 'import'} />
+          {/* Cópias antigas saíram do celular como texto. */}
+          {WEB ? null : <Button title="Colar o conteúdo" variant="ghost" onPress={() => setPasting(true)} />}
+        </>
       )}
       {message ? <Notice tone={message.error ? 'danger' : 'success'}>{message.text}</Notice> : null}
     </Card>
@@ -123,7 +127,7 @@ export function BackupCard() {
 const styles = StyleSheet.create({
   card: { gap: space.md },
   head: { gap: space.xxs },
-  title: { ...typography.heading, color: colors.text },
+  title: { ...typography.heading, color: colors.heading },
   note: { ...typography.caption, color: colors.textMuted },
   buttons: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   button: { flexGrow: 1, flexBasis: 160 },

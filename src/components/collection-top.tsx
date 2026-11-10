@@ -4,7 +4,8 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { CardImage } from '@/components/card-image';
 import { HEADING_3 } from '@/components/collection-chart';
 import { type PressState } from '@/components/icon-button';
-import { Button, Card, ListRow } from '@/components/ui';
+import { Button, Card, ListRow, withMarkIcons } from '@/components/ui';
+import { entryImageUrl } from '@/lib/catalog';
 import { basisNote, valueMark } from '@/lib/copy';
 import { formatBRL, formatBRLTight, formatPct } from '@/lib/format';
 import { mypPtImage } from '@/lib/myp-api';
@@ -52,7 +53,7 @@ function Thumb({ e, style }: { e: Entry; style: object }) {
     <View style={style}>
       <CardImage
         image={e.image}
-        imageUrl={e.imageUrl}
+        imageUrl={entryImageUrl(e)}
         cardId={e.lang === 'ja' ? undefined : e.cardId}
         localId={e.localId}
         dex={e.dex || undefined}
@@ -154,7 +155,7 @@ function Value({ item, total, card }: { item: TopItem; total: number; card?: boo
       </Text>
       {basis ? (
         <Text style={styles.note} numberOfLines={1}>
-          {basis}
+          {withMarkIcons(basis, { size: typography.caption.fontSize, color: colors.textMuted })}
         </Text>
       ) : null}
       {share ? (
@@ -193,7 +194,7 @@ function chunk<T>(list: T[], size: number): T[][] {
 
 const styles = StyleSheet.create({
   card: { gap: space.sm },
-  title: { ...typography.heading, color: colors.text },
+  title: { ...typography.heading, color: colors.heading },
   thumb: { width: 40, height: 40 / CARD_RATIO, borderRadius: radius.card, overflow: 'hidden', backgroundColor: binderColors.pocket },
   value: { alignItems: 'flex-end', maxWidth: 150 },
   valueStart: { alignItems: 'flex-start', maxWidth: '100%' },

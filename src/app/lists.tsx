@@ -1,13 +1,15 @@
 import { Image } from 'expo-image';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { Fragment, useState } from 'react';
-import { FlatList, Platform, Pressable, Share, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { FlatList, Platform, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useIosAnnouncement } from '@/components/add-card-list';
 import { EntryRow } from '@/components/add-entry-row';
+import { digitsInSystemFont } from '@/components/digits';
 import type { PressState } from '@/components/icon-button';
-import { BOTTOM_BAR_SPACE, BottomBar, Button, EmptyState, ExternalLink, gridColumns, Loading, Segmented, showToast, Toggle } from '@/components/ui';
+import { heading } from '@/components/layer-a11y';
+import { BOTTOM_BAR_SPACE, BottomBar, Button, EmptyState, ExternalLink, gridColumns, Loading, Segmented, showToast, Toggle, useLayout, withMarkIcons } from '@/components/ui';
 import { formatDex, spriteUrl, type Species } from '@/data/pokedex';
 import { sourceCredits } from '@/lib/copy';
 import { formatInt } from '@/lib/format';
@@ -75,7 +77,7 @@ function ListsBody({ settings }: { settings: BinderSettings }) {
   const entries = useEntries();
   const binders = useBinders();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, gutter } = useLayout();
   const [tab, setTab] = useState<Tab>(params.tab === 'have' ? 'have' : 'need');
   const [prices, setPrices] = useState(false);
 
@@ -89,7 +91,7 @@ function ListsBody({ settings }: { settings: BinderSettings }) {
   const listed = [...groups.map((g) => g.spare), ...trades.flatMap((t) => t.entries)];
   const movable = need.groups.reduce((n, g) => n + g.species.filter((s) => need.elsewhere.has(s.id)).length, 0);
 
-  const contentWidth = Math.min(width, MAX_WIDTH) - space.lg * 2;
+  const contentWidth = Math.min(width, MAX_WIDTH) - gutter * 2;
   const cols = gridColumns(contentWidth, { cell: 150, gap: GAP, min: 2, max: 6 });
   const cellWidth = Math.floor((contentWidth - GAP * (cols - 1)) / cols);
 
@@ -112,8 +114,8 @@ function ListsBody({ settings }: { settings: BinderSettings }) {
   const title = tab === 'need' ? 'Preciso' : 'Tenho repetida';
   const summary =
     tab === 'need'
-      ? `${formatInt(need.total)} Pokémon sem carta no ${binderName}${movable ? ` · ${movable} em outros fichários` : ''}`
-      : `${groups.length} ${groups.length === 1 ? 'repetida' : 'repetidas'} · ${tradeCount} para troca`;
+      ? `${formatInt(need.total)} Pokémon sem carta no ${binderName}${movable ? ` · ${formatInt(movable)} em outros fichários` : ''}`
+      : `${formatInt(groups.length)} ${groups.length === 1 ? 'repetida' : 'repetidas'} · ${formatInt(tradeCount)} para troca`;
   // O resumo é uma região ao vivo (Android e web); no iOS, anunciado à parte ao trocar de lista (A7).
   useIosAnnouncement(summary);
   const credits = prices ? sourceCredits(collectionTotals(listed).byBasis).filter((c) => c.count > 0) : [];
@@ -124,17 +126,17 @@ function ListsBody({ settings }: { settings: BinderSettings }) {
   const priceOf = (e: Entry) => {
     if (!prices) return undefined;
     const p = listPrice(e);
-    return <Text style={styles.money}>{p ? listPriceText(p) : '—'}</Text>;
+    return <Text style={styles.money}>{p ? withMarkIcons(listPriceText(p), { size: typography.caption.fontSize, color: semantic.money.fg }) : '—'}</Text>;
   };
   const priceLabel = (e: Entry) => (prices ? listPriceSpeech(listPrice(e)) : undefined);
   const open = (e: Entry) => router.push({ pathname: '/card', params: entryParams(e) });
   const where = (e: Entry) => placeText(entryPlace(e, settings, binders));
-  const listStyle = [styles.list, { paddingBottom: BOTTOM_BAR_SPACE + insets.bottom + space.lg }];
+  const listStyle = [styles.list, { paddingHorizontal: gutter, paddingBottom: BOTTOM_BAR_SPACE + insets.bottom + space.lg }];
 
   return (
     <View style={styles.screen}>
       <Stack.Screen options={{ title: 'Listas' }} />
-      <View style={styles.top}>
+      <View style={[styles.top, { paddingHorizontal: gutter }]}>
         <Segmented label="Lista" options={TABS} value={tab} onChange={setTab} />
         <Text style={styles.summary} role="status" aria-live="polite" accessibilityLiveRegion="polite">
           {summary}
@@ -177,9 +179,7 @@ function ListsBody({ settings }: { settings: BinderSettings }) {
             initialNumToRender={16}
             renderItem={({ item }) =>
               item.kind === 'region' ? (
-                <Text style={styles.region} role="heading">
-                  {item.name} <Text style={styles.regionCount}>· {item.count}</Text>
-                </Text>
+                <ListHeader title={item.name} count={item.count} />
               ) : (
                 <View style={styles.cells}>
                   {item.species.map((s) => (
@@ -205,26 +205,29 @@ function ListsBody({ settings }: { settings: BinderSettings }) {
           initialNumToRender={14}
           renderItem={({ item }) =>
             item.kind === 'header' ? (
-              <Text style={styles.region} role="heading">
-                {item.title} <Text style={styles.regionCount}>· {item.count}</Text>
-              </Text>
+              <ListHeader title={item.title} count={item.count} />
             ) : item.kind === 'copies' ? (
-              <EntryRow
-                entry={item.group.spare}
-                note={`${item.group.copies.length} cópias`}
-                place={item.group.copies.map(where).join('; ')}
-                right={priceOf(item.group.spare)}
-                rightLabel={priceLabel(item.group.spare)}
-                onPress={() => open(item.group.spare)}
-              />
+              // A linha tem 4 de recuo próprio: puxada para fora, a miniatura alinha com o título do grupo.
+              <View style={styles.rowPull}>
+                <EntryRow
+                  entry={item.group.spare}
+                  note={`${formatInt(item.group.copies.length)} cópias`}
+                  place={item.group.copies.map(where).join('; ')}
+                  right={priceOf(item.group.spare)}
+                  rightLabel={priceLabel(item.group.spare)}
+                  onPress={() => open(item.group.spare)}
+                />
+              </View>
             ) : (
-              <EntryRow
-                entry={item.entry}
-                place={where(item.entry)}
-                right={priceOf(item.entry)}
-                rightLabel={priceLabel(item.entry)}
-                onPress={() => open(item.entry)}
-              />
+              <View style={styles.rowPull}>
+                <EntryRow
+                  entry={item.entry}
+                  place={where(item.entry)}
+                  right={priceOf(item.entry)}
+                  rightLabel={priceLabel(item.entry)}
+                  onPress={() => open(item.entry)}
+                />
+              </View>
             )
           }
         />
@@ -237,6 +240,19 @@ function ListsBody({ settings }: { settings: BinderSettings }) {
           <ShareButtons text={text} title={title} />
         </BottomBar>
       ) : null}
+    </View>
+  );
+}
+
+/** Título de um grupo da lista e a contagem ao lado: em texto separado, porque número não vai na fonte dos títulos. */
+function ListHeader({ title, count }: { title: string; count: number }) {
+  return (
+    <View style={styles.header}>
+      <Text style={styles.headerTitle} {...heading(2)}>
+        {/* O nome do fichário pode ter número ("Para troca · Coleção 151"). */}
+        {digitsInSystemFont(title)}
+      </Text>
+      <Text style={styles.headerCount}>· {formatInt(count)}</Text>
     </View>
   );
 }
@@ -310,12 +326,15 @@ function ShareButtons({ text, title }: { text: string; title: string }) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
-  top: { paddingHorizontal: space.lg, paddingTop: space.lg, paddingBottom: space.sm, gap: space.md, maxWidth: MAX_WIDTH, width: '100%', alignSelf: 'center' },
+  // A margem lateral (topo e lista) vem do useLayout().gutter.
+  top: { paddingTop: space.lg, paddingBottom: space.sm, gap: space.md, maxWidth: MAX_WIDTH, width: '100%', alignSelf: 'center' },
   summary: { ...typography.caption, ...typography.tabular, color: colors.textMuted },
   credits: { ...typography.caption, color: colors.textMuted },
-  list: { paddingHorizontal: space.lg, gap: GAP, maxWidth: MAX_WIDTH, width: '100%', alignSelf: 'center' },
-  region: { ...typography.heading, color: colors.text, marginTop: space.md },
-  regionCount: { ...typography.tabular, color: colors.textMuted, fontWeight: '400' },
+  list: { gap: GAP, maxWidth: MAX_WIDTH, width: '100%', alignSelf: 'center' },
+  rowPull: { marginHorizontal: -space.xs },
+  header: { flexDirection: 'row', alignItems: 'baseline', gap: space.xs, marginTop: space.md },
+  headerTitle: { ...typography.heading, color: colors.heading, flexShrink: 1 },
+  headerCount: { ...typography.caption, ...typography.tabular, color: colors.textMuted },
   cells: { flexDirection: 'row', gap: GAP },
   cell: {
     flexDirection: 'row',

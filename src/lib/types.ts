@@ -29,7 +29,7 @@ export const VARIANTS = [
 export type Variant = (typeof VARIANTS)[number]['id'];
 
 /**
- * Preço da carta em inglês na TCGplayer (EUA): cópia diária do TCGCSV feita pelo servidor (tcg_prices), convertida
+ * Preço da carta em inglês ou japonês na TCGplayer (EUA; na japonesa, o produto japonês, categoria 85): cópia diária do TCGCSV feita pelo servidor (tcg_prices), convertida
  * pela PTAX do Banco Central (fx_rates). Gravado pelo app (lib/tcgplayer.ts).
  */
 export type TcgplayerPrice = {
@@ -136,7 +136,7 @@ export type Entry = {
   notes?: string;
   /** Menor, médio e maior preço do produto no MYP Cards (API pública; ver MypApiPrice). */
   mypApi?: MypApiPrice;
-  /** Preço na TCGplayer (EUA), para cartas em inglês (ver TcgplayerPrice). */
+  /** Preço na TCGplayer (EUA), para cartas em inglês e japonês (ver TcgplayerPrice). */
   tcgplayer?: TcgplayerPrice;
   /**
    * Qual dos três preços do MYP é o valor da carta na soma (ex.: mínimo para cartas novas, média para as antigas).
@@ -145,7 +145,7 @@ export type Entry = {
   valueBasis?: ValueBasis;
   /**
    * Valor digitado pelo usuário: o único valor fixo, com prioridade sobre as fontes. É apagado (null) quando a média da
-   * fonte passa dele: a do MYP ou, nas cartas em inglês, o valor de mercado da TCGplayer (em reais).
+   * fonte passa dele: a do MYP ou, nas cartas em inglês e japonês, o valor de mercado da TCGplayer (em reais).
    */
   myValue?: { value: number; setAt: string } | null;
   /** Como a carta chegou: troca, booster ou compra. */

@@ -20,6 +20,17 @@
       html,
       body {
         height: 100%;
+        background: #000;
+        color-scheme: dark;
+      }
+      /* O que o navegador desenha sozinho também segue o visual. */
+      ::selection {
+        background: #fff690;
+        color: #000;
+      }
+      * {
+        scrollbar-color: #3b4046 transparent;
+        caret-color: #fff690;
       }
       /* These styles disable body scrolling if you are using <ScrollView> */
       body {

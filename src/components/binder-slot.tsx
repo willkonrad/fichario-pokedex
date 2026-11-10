@@ -2,12 +2,28 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import { Link, type Href } from 'expo-router';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Animated, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View, type PressableStateCallbackType, type ViewStyle } from 'react-native';
+import {
+  Animated,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+  type GestureResponderEvent,
+  type PressableStateCallbackType,
+  type ViewInstance,
+  type ViewStyle,
+} from 'react-native';
 
-import { CardImage } from '@/components/card-image';
+import type { SlotDrag } from '@/components/binder-drag';
+import { CardImage, POCKET_FONT_SCALE } from '@/components/card-image';
+import { FoilRing } from '@/components/foil';
+import { withMarkIcons } from '@/components/icons';
 import { NATIVE_DRIVER, useReducedMotion } from '@/components/motion';
 import { formatDex, getSpecies, spriteUrl } from '@/data/pokedex';
-import { valueMark } from '@/lib/copy';
+import { entryImageUrl } from '@/lib/catalog';
+import { pricePendingText, valueMark } from '@/lib/copy';
 import { formatBRL, formatCompact } from '@/lib/format';
 import { mypPtImage } from '@/lib/myp-api';
 import { VARIANTS, type Entry } from '@/lib/types';
@@ -17,19 +33,30 @@ import { binderColors as B, CARD_RATIO, radius, semantic, typography } from '@/t
 const WEB = Platform.OS === 'web';
 /** Sem o contorno de foco do navegador no link do bolso (o foco aparece no anel do próprio bolso). */
 const NO_OUTLINE = WEB ? ({ outlineWidth: 0, outlineStyle: 'none' } as unknown as ViewStyle) : null;
+/** Bolso arrastável na web: segurar o botão não começa a selecionar texto. */
+const NO_SELECT = WEB ? ({ userSelect: 'none' } as unknown as ViewStyle) : null;
+/** Tempo segurando para espiar ou levantar a carta. */
+const LONG_PRESS_MS = 350;
 
-/** O texto do bolso cresce com a fonte do sistema até 1,3× (acima disso, o preço e o nome seriam cortados). */
-export const POCKET_FONT_SCALE = 1.3;
+// O teto da fonte no bolso mora em card-image (o arraste usa sem carregar este arquivo).
+export { POCKET_FONT_SCALE };
 
-/** Variações que são especiais de verdade (borda amarela); holo e reverse ganham só o selo de canto. */
+/** Espessura do filete foil em volta da carta especial. */
+const FOIL_WIDTH = 2;
+
+/** Variações que são especiais de verdade (filete foil); holo e reverse ganham só o selo de canto. */
 const SPECIAL_VARIANTS = new Set<string>(['firstEdition', 'shadowless', 'pokeball', 'masterball', 'wPromo', 'staff']);
-/** Raridades altas (TCGdex em inglês e em português): Illustration, Ultra, Hyper, Secret, Shiny e Rare Holo Star. */
-const HIGH_RARITY = /illustration|ilustra|\bultra\b|hyper|hiper|secret|shiny|brilhante|\bstar\b|estrela|☆/i;
-/** Selo de canto da variação (sem borda): ✦ holo, R reverse. */
-const CORNER: Partial<Record<string, string>> = { holo: '✦', reverse: 'R' };
+/** Raridades altas (inglês, português e os nomes japoneses da TCGplayer): Illustration, Art Rare, Ultra, Hyper, Secret, Shiny e Rare Holo Star. */
+const HIGH_RARITY = /illustration|ilustra|\bart rare\b|\bultra\b|hyper|hiper|secret|shiny|brilhante|\bstar\b|estrela|☆/i;
+/** Tamanho do conteúdo do selo de canto (letra ou ícone). */
+const CORNER_SIZE = 11;
+/** Preço do bolso: nunca menor que isto, nem no bolso pequeno. */
+const PRICE_SIZE = 11;
+/** Abaixo desta largura, "esperando preço" não cabe na cápsula e o bolso diz só "esperando". */
+const PENDING_FULL_WIDTH = 100;
 const VARIANT_LABEL = Object.fromEntries(VARIANTS.map((v) => [v.id, v.label])) as Record<string, string>;
 
-/** Carta especial de verdade (1ª edição, Shadowless, Poké/Master Ball, selo, staff ou raridade alta): borda amarela. */
+/** Carta especial de verdade (1ª edição, Shadowless, Poké/Master Ball, selo, staff ou raridade alta): filete foil. */
 export function isSpecialCard(e: Pick<Entry, 'variant' | 'rarity'>) {
   return SPECIAL_VARIANTS.has(e.variant) || (!!e.rarity && HIGH_RARITY.test(e.rarity));
 }
@@ -44,7 +71,7 @@ export function priceBlockHeight(width: number, fontScale = 1) {
 /** O que o leitor de tela diz do preço da carta (a cápsula fica escondida dele). */
 function priceSpeech(entry: Entry) {
   const v = valuation(entry);
-  if (v.value == null) return pricePending(entry) ? 'buscando preço' : 'sem preço';
+  if (v.value == null) return pricePending(entry) ? pricePendingText(WEB).speech : 'sem preço';
   const mark = valueMark(v);
   return `${v.basis === 'manual' ? 'Meu valor' : 'valor'} ${formatBRL(v.value)}${mark.mark === '≈' ? ', aproximado' : ''}`;
 }
@@ -65,7 +92,7 @@ function cardLabel(entry: Entry, { pocket, showPrices, highlighted }: { pocket?:
     .join(', ');
 }
 
-type PressState = PressableStateCallbackType & { hovered?: boolean; focused?: boolean };
+type PressState = PressableStateCallbackType & { hovered?: boolean };
 
 /**
  * Um bolso da página do fichário (folha escura): a carta numa capa plástica, ou o Pokémon/número do bolso quando
@@ -83,6 +110,9 @@ export function BinderSlot({
   onPress,
   href,
   onLongPress,
+  drag,
+  dragSlot,
+  lifted = false,
 }: {
   /** Fichário Pokédex: Pokémon deste espaço (mostra o sprite quando vazio). */
   dex?: number;
@@ -102,17 +132,24 @@ export function BinderSlot({
   /** Endereço do toque (na web vira <a href>; o toque no celular continua em `onPress`). */
   href?: Href;
   onLongPress?: () => void;
+  /** Fichário livre: segurar a carta levanta para mudar de lugar (no lugar de `onLongPress`); vazio, o bolso é destino. */
+  drag?: SlotDrag;
+  /** Nº corrido do bolso, para o arraste. */
+  dragSlot?: number;
+  /** A carta deste bolso está na mão: ele fica vazio, com contorno tracejado. */
+  lifted?: boolean;
 }) {
   const { fontScale } = useWindowDimensions();
   const height = Math.floor(width / CARD_RATIO);
   const small = width < 80;
   const tiny = width < 66;
+  const pad = small ? 2 : 3;
   const scale = scaleOf(fontScale);
   const species = dex ? getSpecies(dex) : undefined;
 
-  // Borda especial só depois de a imagem aparecer (senão o bolso fica uma moldura vazia enquanto carrega). A chave é a
+  // Filete foil só depois de a imagem aparecer (senão o bolso fica uma moldura vazia enquanto carrega). A chave é a
   // da imagem, não a da versão: trocar só a variação não recarrega a imagem (o onLoad não viria de novo).
-  const imageKey = entry ? [entry.id, entry.cardId, entry.image, entry.imageUrl, entry.stampPhoto, mypPtImage(entry)].join('|') : '';
+  const imageKey = entry ? [entry.id, entry.cardId, entry.image, entryImageUrl(entry), entry.stampPhoto, mypPtImage(entry)].join('|') : '';
   const [loadedKey, setLoadedKey] = useState('');
   const special = !!entry && isSpecialCard(entry) && loadedKey === imageKey;
 
@@ -128,6 +165,31 @@ export function BinderSlot({
     Animated.spring(enter, { toValue: 1, speed: 16, bounciness: 7, useNativeDriver: NATIVE_DRIVER }).start();
   }, [entry?.cardId, reduceMotion, enter]);
 
+  // O bolso inteiro (com o preço embaixo) é destino do arraste.
+  const rootRef = useRef<ViewInstance>(null);
+  useEffect(() => {
+    if (!drag || dragSlot == null || !rootRef.current) return;
+    return drag.register(dragSlot, rootRef.current);
+  }, [drag, dragSlot]);
+
+  // Na web o clique também foca o link: o anel é só do foco pelo teclado (senão ficava no bolso depois de arrastar ou espiar).
+  const [keyboardFocus, setKeyboardFocus] = useState(false);
+  const focusEvents = WEB
+    ? {
+        onFocus: (e: { target: unknown }) => setKeyboardFocus((e.target as HTMLElement).matches(':focus-visible')),
+        onBlur: () => setKeyboardFocus(false),
+      }
+    : null;
+
+  const dragPress =
+    drag && entry && dragSlot != null
+      ? {
+          onLongPress: (e: GestureResponderEvent) => drag.lift({ slot: dragSlot, entry, width, height }, e),
+          onPressOut: drag.pressOut,
+          delayLongPress: LONG_PRESS_MS,
+        }
+      : null;
+
   const label = entry
     ? cardLabel(entry, { pocket, showPrices, highlighted })
     : [
@@ -138,32 +200,42 @@ export function BinderSlot({
         .filter(Boolean)
         .join(', ');
 
-  const visual = ({ pressed, hovered, focused }: PressState) => {
+  const visual = ({ pressed, hovered }: PressState) => {
     const frame = [
       styles.pocket,
-      { width, height, padding: small ? 2 : 3 },
+      { width, height, padding: pad },
       !entry && styles.empty,
       !entry && !dex && styles.dashed,
       free && !entry && styles.free,
-      special && styles.special,
-      hovered && !highlighted && styles.hover,
+      lifted && styles.lifted,
+      hovered && !highlighted && !lifted && styles.hover,
       highlighted && styles.highlight,
-      focused && styles.focus,
-      pressed && styles.pressed,
+      keyboardFocus && styles.focus,
+      pressed && !lifted && styles.pressed,
       { transform: [{ scale: enter }, { translateY: hovered && !pressed ? -2 : 0 }] },
     ];
     let inner: ReactNode;
     if (entry) {
-      const corner = CORNER[entry.variant];
       inner = (
         <>
-          <View style={styles.card}>
+          {/* Atrás da carta, e não em volta dela: quando o filete aparece, a carta não remonta nem muda de tamanho. */}
+          {special && !lifted ? (
+            <FoilRing
+              radius={radius.card + FOIL_WIDTH}
+              width={FOIL_WIDTH}
+              style={[styles.foil, { top: pad - FOIL_WIDTH, right: pad - FOIL_WIDTH, bottom: pad - FOIL_WIDTH, left: pad - FOIL_WIDTH }]}>
+              {null}
+            </FoilRing>
+          ) : null}
+          {/* Levantada, a imagem só fica invisível: se a carta voltar, ela não carrega de novo. */}
+          <View style={[styles.card, lifted && styles.cardHidden]}>
             <CardImage
               image={entry.image}
-              imageUrl={entry.imageUrl}
+              imageUrl={entryImageUrl(entry)}
               cardId={entry.lang === 'ja' ? undefined : entry.cardId}
               localId={entry.localId}
               label={entry.cardName}
+              labelMaxScale={POCKET_FONT_SCALE}
               dex={entry.dex || undefined}
               compact
               dark
@@ -175,26 +247,20 @@ export function BinderSlot({
             />
           </View>
           {/* Brilho da capa plástica. */}
-          <View style={styles.sheen} />
-          {corner ? (
-            <View style={[styles.corner, small && styles.cornerSmall]}>
-              <Text style={styles.cornerText} maxFontSizeMultiplier={1}>
-                {corner}
-              </Text>
-            </View>
-          ) : null}
+          {lifted ? null : <View style={styles.sheen} />}
+          {lifted ? null : <VariantCorner variant={entry.variant} small={small} />}
         </>
       );
     } else if (dex) {
       // Espaço vazio do Pokédex (H3): número no canto, arte do Pokémon e o nome legíveis.
       inner = (
         <>
-          <Text style={[styles.dexNumber, { fontSize: small ? 10 : 11 }]} maxFontSizeMultiplier={POCKET_FONT_SCALE}>
+          <Text style={styles.dexNumber} maxFontSizeMultiplier={POCKET_FONT_SCALE}>
             {formatDex(dex)}
           </Text>
           <Image source={spriteUrl(dex)} style={[styles.sprite, { width: width * 0.92, height: width * 0.92 }]} contentFit="contain" cachePolicy="memory-disk" />
           <View style={styles.names}>
-            <Text style={[styles.name, { fontSize: small ? 10 : 12 }]} numberOfLines={1} maxFontSizeMultiplier={POCKET_FONT_SCALE}>
+            <Text style={[styles.name, { fontSize: small ? 11 : 12 }]} numberOfLines={1} maxFontSizeMultiplier={POCKET_FONT_SCALE}>
               {species?.name}
             </Text>
             {tiny ? null : (
@@ -209,7 +275,7 @@ export function BinderSlot({
       inner = (
         <>
           {pocket != null ? (
-            <Text style={[styles.dexNumber, styles.pocketNumber, { fontSize: small ? 10 : 11 }]} maxFontSizeMultiplier={POCKET_FONT_SCALE}>
+            <Text style={[styles.dexNumber, styles.pocketNumber]} maxFontSizeMultiplier={POCKET_FONT_SCALE}>
               {pocket}
             </Text>
           ) : null}
@@ -222,57 +288,81 @@ export function BinderSlot({
         </>
       );
     }
-    return <Animated.View style={frame}>{inner}</Animated.View>;
+    return (
+      <Animated.View style={frame}>
+        {/* Abertura do bolso: ocupa só o recuo de cima, então não cobre a carta. O filete foil vem depois, por cima. */}
+        <View style={[styles.opening, { height: pad }]} />
+        {inner}
+      </Animated.View>
+    );
   };
 
   // Estilo achatado: o Link da web (asChild) não aceita estilo em lista nem em função. O foco aparece no anel do
   // bolso (sem o contorno padrão do navegador por cima).
-  const hit: ViewStyle = { ...styles.hit, ...NO_OUTLINE, width, height };
+  const hit: ViewStyle = { ...styles.hit, ...NO_OUTLINE, ...(drag ? NO_SELECT : null), width, height };
   const button =
     WEB && href ? (
       <Link href={href} push asChild>
-        <Pressable style={hit} accessibilityLabel={label}>
+        <Pressable style={hit} accessibilityLabel={label} {...focusEvents} {...dragPress}>
           {(s) => visual(s as PressState)}
         </Pressable>
       </Link>
     ) : (
-      <Pressable style={hit} onPress={onPress} onLongPress={onLongPress} delayLongPress={350} role="button" accessibilityLabel={label}>
+      <Pressable style={hit} onPress={onPress} onLongPress={onLongPress} delayLongPress={LONG_PRESS_MS} role="button" accessibilityLabel={label} {...focusEvents} {...dragPress}>
         {(s) => visual(s as PressState)}
       </Pressable>
     );
 
   return (
-    <View style={{ width }}>
+    <View ref={rootRef} style={{ width }}>
       {button}
       {showPrices ? (
         <View style={[styles.priceBlock, { minHeight: priceBlockHeight(width, fontScale) }]} aria-hidden>
-          {entry ? <SlotPrice entry={entry} small={small} scale={scale} /> : null}
+          {entry && !lifted ? <SlotPrice entry={entry} small={small} narrow={width < PENDING_FULL_WIDTH} scale={scale} /> : null}
         </View>
       ) : null}
     </View>
   );
 }
 
-/** Valor da carta numa cápsula neutra (o dinheiro não tem cor); ≈ aproximado, ✎ Meu valor. Sem valor: "buscando" ou "sem preço". */
-function SlotPrice({ entry, small, scale }: { entry: Entry; small: boolean; scale: number }) {
-  const size = small ? 10 : 11;
+/** Selo de canto da variação (sem borda): brilho no holo, R no reverse. As outras não têm selo. */
+function VariantCorner({ variant, small }: { variant: string; small: boolean }) {
+  if (variant !== 'holo' && variant !== 'reverse') return null;
+  return (
+    <View style={[styles.corner, small && styles.cornerSmall]}>
+      {variant === 'holo' ? (
+        <Ionicons name="sparkles" size={CORNER_SIZE} color={B.text} />
+      ) : (
+        <Text style={styles.cornerText} maxFontSizeMultiplier={1}>
+          R
+        </Text>
+      )}
+    </View>
+  );
+}
+
+/** Valor da carta numa cápsula neutra (o dinheiro não tem cor); ≈ aproximado, ✎ Meu valor. Sem valor: "buscando" (na web, "esperando") ou "sem preço". */
+function SlotPrice({ entry, small, narrow, scale }: { entry: Entry; small: boolean; narrow: boolean; scale: number }) {
   const ref = valuation(entry);
   const minHeight = Math.ceil((small ? 15 : 17) * scale);
+  const room = small && styles.pillSmall;
   if (ref.value == null) {
-    // Buscando = o app ainda não buscou o preço desta carta (MYP ou TCGplayer).
+    // O app ainda não buscou o preço desta carta (MYP ou TCGplayer). A web não consulta o MYP: lá ela só espera.
+    const pending = pricePendingText(WEB);
     return (
-      <View style={[styles.pill, styles.pillPending, { minHeight }]}>
-        <Text style={[styles.pendingText, { fontSize: size }]} numberOfLines={1} maxFontSizeMultiplier={POCKET_FONT_SCALE}>
-          {pricePending(entry) ? 'buscando…' : 'sem preço'}
+      <View style={[styles.pill, room, styles.pillPending, { minHeight }]}>
+        <Text style={[styles.pendingText, { fontSize: PRICE_SIZE }]} numberOfLines={1} maxFontSizeMultiplier={POCKET_FONT_SCALE}>
+          {pricePending(entry) ? (narrow ? pending.pocketShort : pending.pocket) : 'sem preço'}
         </Text>
       </View>
     );
   }
   const { mark } = valueMark(ref);
   return (
-    <View style={[styles.pill, { minHeight }]}>
-      <Text style={[styles.priceText, { fontSize: size }]} numberOfLines={1} maxFontSizeMultiplier={POCKET_FONT_SCALE}>
-        {mark ? `${mark} ` : ''}
+    <View style={[styles.pill, room, { minHeight }]}>
+      {/* Com a fonte do sistema grande, encolhe de volta até o tamanho normal em vez de cortar o número. */}
+      <Text style={[styles.priceText, { fontSize: PRICE_SIZE }]} numberOfLines={1} maxFontSizeMultiplier={POCKET_FONT_SCALE} adjustsFontSizeToFit minimumFontScale={1 / scale}>
+        {mark ? withMarkIcons(`${mark} `, { size: PRICE_SIZE, color: B.priceFg }) : ''}
         {/* No bolso pequeno, o "R$" sai (fica no rótulo do bolso para o leitor de tela). */}
         {small ? '' : 'R$ '}
         {formatCompact(ref.value)}
@@ -284,7 +374,13 @@ function SlotPrice({ entry, small, scale }: { entry: Entry; small: boolean; scal
 const styles = StyleSheet.create({
   hit: { borderRadius: radius.sm },
   pocket: { borderRadius: radius.sm, overflow: 'hidden', backgroundColor: B.pocket, borderWidth: 1, borderColor: B.pocketBorder },
+  // Degrau tonal no topo, como a boca do bolso plástico (bolso vazio também).
+  opening: { position: 'absolute', top: 0, left: 0, right: 0, backgroundColor: B.pocketBorder, pointerEvents: 'none' },
   card: { flex: 1, borderRadius: radius.card, overflow: 'hidden', backgroundColor: B.page },
+  cardHidden: { opacity: 0 },
+  // A carta foi para a mão: fica só o bolso, tracejado.
+  lifted: { borderStyle: 'dashed', borderColor: B.textFaint },
+  foil: { position: 'absolute' },
   // Faixa diagonal clara, como o reflexo da folha plástica (o mesmo branco translúcido da cápsula, mais fraco).
   sheen: {
     position: 'absolute',
@@ -310,25 +406,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   cornerSmall: { top: 3, right: 3, minWidth: 14, height: 14 },
-  cornerText: { color: B.text, fontSize: 10, lineHeight: 12, fontWeight: '800' },
-  special: { borderColor: B.special, borderWidth: 2 },
+  cornerText: { color: B.text, fontSize: CORNER_SIZE, lineHeight: 12, fontWeight: '800' },
   hover: { borderColor: B.textFaint },
   pressed: { opacity: 0.75 },
-  // Destaque de busca e "Próxima falta": ciano (diferente do amarelo das cartas especiais).
+  // Destaque de busca e "Próxima falta": amarelo-claro (diferente do filete foil das cartas especiais).
   highlight: { borderColor: B.highlight, borderWidth: 3 },
   focus: { outlineColor: semantic.focus.onDark, outlineWidth: semantic.focus.width, outlineStyle: 'solid', outlineOffset: semantic.focus.offset },
   empty: { alignItems: 'center', justifyContent: 'center' },
   dashed: { borderStyle: 'dashed' },
   free: { borderColor: B.special, gap: 4 },
   freeText: { color: B.textMuted, fontSize: 11, fontWeight: '700' },
-  dexNumber: { position: 'absolute', top: 4, right: 5, color: B.textFaint, fontWeight: '600', ...typography.tabular },
+  dexNumber: { position: 'absolute', top: 4, right: 5, color: B.textFaint, fontSize: 11, fontWeight: '600', ...typography.tabular },
   pocketNumber: { top: 5 },
   sprite: { opacity: 0.5, marginTop: -6 },
   names: { position: 'absolute', left: 2, right: 2, bottom: 5, alignItems: 'center' },
   name: { color: B.textMuted, fontWeight: '700' },
-  sub: { color: B.textFaint, fontSize: 10, marginTop: 1 },
+  sub: { color: B.textFaint, fontSize: 11, marginTop: 1 },
   priceBlock: { paddingTop: 3 },
   pill: { borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6, backgroundColor: B.priceBg },
+  pillSmall: { paddingHorizontal: 3 },
   pillPending: { backgroundColor: 'transparent' },
   pendingText: { color: B.textFaint, fontStyle: 'italic' },
   priceText: { color: B.priceFg, fontWeight: '700', includeFontPadding: false, ...typography.tabular },

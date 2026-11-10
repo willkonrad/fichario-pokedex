@@ -31,8 +31,9 @@ function release() {
 }
 
 /**
- * Bloco cinza no lugar de algo que ainda está carregando (H1): imagem, linha de texto, valor.
- * `tone="dark"` para a folha escura do fichário. Fica escondido do leitor de tela.
+ * Bloco grafite no lugar de algo que ainda está carregando (H1): imagem, linha de texto, valor. O pulso só escurece
+ * o bloco: nada de clarão sobre o preto. `tone="dark"` para a folha do fichário; `"light"`, para o resto do app.
+ * Fica escondido do leitor de tela.
  */
 export function Skeleton({
   width,

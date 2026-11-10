@@ -1,14 +1,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Session } from '@supabase/supabase-js';
+import type { AuthChangeEvent, Session, SupabaseClient } from '@supabase/supabase-js';
 import { useEffect, useSyncExternalStore, type ReactNode } from 'react';
 import { AppState, Platform } from 'react-native';
 
 import { buildBackup, parseBackup, stripLegacyFields, type CollectionBackup } from '@/lib/backup';
 import { customTotalSlots, extraSlots, inDexRange } from '@/lib/binder';
+import { upgradeEntry } from '@/lib/entry-upgrade';
 import { mypApiMatches } from '@/lib/myp-api';
 import { describeSyncError, fetchAllPages, isMissingInServer, supabase } from '@/lib/supabase';
 import { clearCatalogCache, freeCatalogCache, pruneStaleCache } from '@/lib/tcgdex';
-import { tcgplayerFor } from '@/lib/tcgplayer';
+import { tcgplayerCovers, tcgplayerFor } from '@/lib/tcgplayer';
 import { DEFAULT_SETTINGS, POKEDEX_BINDER, type BinderSettings, type CustomBinder, type Entry, type MypApiPrice, type TcgplayerPrice } from '@/lib/types';
 import { myValuePatch } from '@/lib/valuation';
 
@@ -26,6 +27,12 @@ const PENDING_KEY = 'binder:pending';
 const SYNC_KEY = 'binder:sync';
 /** Cópia do que não deu para ler (JSON estragado), para não perder nada. */
 const UNREADABLE_PREFIX = 'binder:ilegivel:';
+/** Coleção de outra conta guardada à parte ("binder:conta:<conta>:…") até ela entrar de novo neste aparelho. */
+const STASH_PREFIX = 'binder:conta:';
+/** Troca de conta em andamento ({ from, to }): se o app morrer no meio, a abertura seguinte termina a troca. */
+const SWAP_KEY = 'binder:troca';
+/** Antes de sair da conta, espera o envio da fila por no máximo este tempo. */
+const SIGN_OUT_SEND_MS = 15_000;
 
 /** Gravações no aparelho são agrupadas por este tempo. */
 const WRITE_DELAY_MS = 400;
@@ -56,6 +63,10 @@ const READ_FAILED =
   'Não consegui ler a coleção salva neste aparelho. Nada foi apagado: feche e abra o app de novo. Até lá, as mudanças não são gravadas no aparelho.';
 const UNREADABLE = 'Parte dos dados salvos neste aparelho estava ilegível. Guardei uma cópia à parte e segui com o resto.';
 const STORAGE_FULL = 'O armazenamento do aparelho está cheio: as últimas mudanças ainda não foram gravadas nele.';
+/** saveEntriesNow: as cartas pedidas não ficaram gravadas no aparelho (gravação falhou, leitura travada ou troca de conta). */
+export const NOT_ON_DEVICE = 'As cartas não foram gravadas neste aparelho.';
+const SWAP_FAILED =
+  'Não consegui separar neste aparelho a coleção da outra conta, então nada foi enviado para a nuvem. Feche e abra o app de novo.';
 
 /** Id da carta no fichário Pokédex: "<dex>-<espaço>". */
 export const entryId = (dex: number, slot: number) => `${dex}-${slot}`;
@@ -64,6 +75,15 @@ export const customEntryId = (binderId: string, slot: number) => `${binderId}:${
 /** Id da carta em qualquer fichário. */
 export const keyOf = (binderId: string | undefined, dex: number, slot: number) =>
   binderId && binderId !== POKEDEX_BINDER ? customEntryId(binderId, slot) : entryId(dex, slot);
+
+/** Número de Pokémon ou de bolso que o banco aceita: inteiro de 0 até o limite do int4. */
+const validIndex = (n: unknown) => typeof n === 'number' && Number.isInteger(n) && n >= 0 && n <= 2147483647;
+
+/** Carta com Pokémon ou bolso inválido ("NaN-0", "25-NaN") não entra: travaria todo envio para a nuvem. */
+function checkPlace(input: Pick<Entry, 'dex' | 'slot'>) {
+  if (!validIndex(input.dex)) throw new Error('Pokémon inválido.');
+  if (!validIndex(input.slot)) throw new Error('Bolso inválido.');
+}
 
 /** Cartas de um fichário (Pokédex = as sem `binderId`). */
 export function entriesOf(entries: Record<string, Entry>, binderId: string) {
@@ -114,8 +134,15 @@ export type CollectionActions = {
    * cartas for parar no espaço de outro Pokémon no fichário Pokédex.
    */
   moveEntryTo: (id: string, target: MoveTarget) => Promise<void>;
+  /**
+   * Coloca várias cartas de uma vez: uma gravação e um envio só. Só entra em bolso vazio: o que estiver ocupado agora
+   * (ex.: uma sincronização no meio) fica de fora. Devolve os ids das que entraram.
+   */
+  saveEntries: (list: Omit<Entry, 'id' | 'updatedAt'>[]) => Promise<string[]>;
   /** Remove a carta pelo id (ver `keyOf`). */
   removeEntry: (id: string) => Promise<void>;
+  /** Remove várias cartas de uma vez (o "Desfazer" do lote): uma gravação e um envio só. */
+  removeEntries: (ids: string[]) => Promise<void>;
   /**
    * Recoloca exatamente uma carta removida ou substituída (o "Desfazer"). Lança erro (em português) se o fichário dela
    * tiver sido apagado.
@@ -127,7 +154,7 @@ export type CollectionActions = {
    * aparelho. Preço não conta como edição: não muda o updatedAt da carta.
    */
   applyMypPrice: (id: string, price: MypApiPrice) => Promise<void>;
-  /** Grava o preço da TCGplayer de uma carta em inglês (mesma ideia, pela função patch_entry_tcgplayer). */
+  /** Grava o preço da TCGplayer de uma carta em inglês ou japonês (mesma ideia, pela função patch_entry_tcgplayer). */
   applyTcgplayerPrice: (id: string, price: TcgplayerPrice) => Promise<void>;
   setActiveBinder: (id: string) => Promise<void>;
   saveBinder: (b: CustomBinder) => Promise<void>;
@@ -144,6 +171,11 @@ export type CollectionActions = {
    * português) se o arquivo não for uma cópia válida.
    */
   importCollection: (data: unknown) => Promise<ImportResult>;
+  /**
+   * Antes de sair da conta, com ela ainda aberta: tenta enviar a fila. Devolve o aviso (em português) quando algo ficou
+   * sem enviar (fica guardado neste aparelho e vai quando esta conta entrar de novo); null quando está tudo na nuvem.
+   */
+  prepareSignOut: () => Promise<string | null>;
 };
 
 type Ctx = CollectionActions & {
@@ -168,6 +200,11 @@ type Ctx = CollectionActions & {
 type SyncMeta = {
   /** Conta com a qual este aparelho já sincronizou. */
   owner?: string;
+  /**
+   * Conta dona da coleção deste aparelho: a última que entrou aqui, mesmo antes da primeira sincronização (nos aparelhos
+   * que sincronizaram antes desta regra, vale `owner`). Outra conta que entra não recebe esta coleção (ver claimDevice).
+   */
+  holder?: string;
   /** Maior updated_at (relógio do servidor) já recebido: a busca incremental parte dele. */
   cursor?: string;
   lastSyncAt?: string;
@@ -190,6 +227,15 @@ type RemoteRow = { id: string; data: unknown; updated_at: string };
 type Tombstone = { id: string; deleted_at: string };
 type MetaKey = 'settings' | 'active' | 'pending' | 'deleted' | 'meta';
 type ReadResult = { ok: true; value: string | null } | { ok: false };
+/** Tudo o que é de uma conta neste aparelho (a coleção, a fila e a sincronização). */
+type AccountData = {
+  settings: BinderSettings | null;
+  activeBinderId: string;
+  entries: Record<string, Entry>;
+  pending: Record<string, string>;
+  deleted: Record<string, string>;
+  meta: SyncMeta;
+};
 
 const NO_BINDERS: CustomBinder[] = [];
 
@@ -235,10 +281,13 @@ function stableJson(v: unknown): string {
 
 const sameJson = (a: unknown, b: unknown) => a === b || stableJson(a) === stableJson(b);
 
-/** Carta lida do aparelho ou da nuvem: sem os campos antigos e com o id do bolso; null se não for uma carta. */
+/**
+ * Carta lida do aparelho ou da nuvem: sem os campos antigos, com o id do bolso e como o app de hoje a entende
+ * (upgradeEntry: ex.: o Mirror japonês salvo sem selo); null se não for uma carta.
+ */
 function cleanEntry(raw: unknown, id: string): Entry | null {
   if (!isObject(raw) || typeof raw.cardId !== 'string') return null;
-  const e = stripLegacyFields(raw as unknown as Entry);
+  const e = upgradeEntry(stripLegacyFields(raw as unknown as Entry));
   if (e.id === id && typeof e.updatedAt === 'string') return e;
   return { ...e, id, updatedAt: typeof e.updatedAt === 'string' ? e.updatedAt : '' };
 }
@@ -274,17 +323,33 @@ export function mergeEntry(local: Entry, remote: Entry): Entry {
 }
 
 /**
- * Regra do "Meu valor" sobre a carta: o preço da fonte dela (TCGplayer nas cartas em inglês, MYP nas outras), desta
- * carta, versão e selo, mais novo que o "Meu valor" e com a média acima dele, apaga o "Meu valor" e deixa o registro da
- * troca. Devolve a mesma carta quando nada muda.
+ * Regra do "Meu valor" sobre a carta: o preço da fonte dela (TCGplayer nas cartas em inglês e japonês, MYP nas
+ * outras), desta carta, versão e selo, mais novo que o "Meu valor" e com a média acima dele, apaga o "Meu valor" e deixa
+ * o registro da troca. Devolve a mesma carta quando nada muda.
  */
 function applyMyValueRule(e: Entry): Entry {
   if (!e.myValue) return e;
-  const en = e.lang === 'en';
-  const price = en ? tcgplayerFor(e) : e.mypApi && mypApiMatches(e, e.mypApi) ? e.mypApi : undefined;
+  const tcg = tcgplayerCovers(e.lang);
+  const price = tcg ? tcgplayerFor(e) : e.mypApi && mypApiMatches(e, e.mypApi) ? e.mypApi : undefined;
   if (!price || !(price.checkedAt > (e.myValue.setAt ?? ''))) return e;
-  const patch = myValuePatch(e, price, en ? 'tcgplayer' : 'myp');
+  const patch = myValuePatch(e, price, tcg ? 'tcgplayer' : 'myp');
   return 'myValue' in patch ? { ...e, ...patch } : e;
+}
+
+/**
+ * "Meu valor" depois de um preço novo do MYP gravado sem conta (o banco faz o mesmo em patch_entry_myp): só nas cartas
+ * em que o MYP é a fonte. Nas em inglês (e nas japonesas, que o MYP não tem) ele é só referência: não apaga.
+ */
+export function mypMyValuePatch(cur: Entry, price: MypApiPrice): Partial<Entry> {
+  return mypApiMatches(cur, price) && !tcgplayerCovers(cur.lang) ? myValuePatch(cur, price, 'myp') : {};
+}
+
+/**
+ * "Meu valor" depois de um preço novo da TCGplayer gravado sem conta (o banco faz o mesmo em patch_entry_tcgplayer):
+ * nas cartas em inglês e japonês, quando o preço é desta carta, versão e selo.
+ */
+export function tcgplayerMyValuePatch(cur: Entry, price: TcgplayerPrice): Partial<Entry> {
+  return tcgplayerCovers(cur.lang) && tcgplayerFor({ ...cur, tcgplayer: price }) ? myValuePatch(cur, price, 'tcgplayer') : {};
 }
 
 /**
@@ -338,8 +403,18 @@ export function mergeSettings(
 }
 
 function toRow(userId: string, e: Entry) {
-  return { user_id: userId, id: e.id, dex: e.dex, slot: e.slot, data: e, updated_at: e.updatedAt };
+  // O updated_at da linha é do servidor (gatilho entries_touch), mas a coluna é timestamptz: vai sempre uma data válida.
+  // Uma carta sem data (lista feita à mão) faria o envio falhar a cada tentativa e travar a sincronização.
+  return { user_id: userId, id: e.id, dex: e.dex, slot: e.slot, data: e, updated_at: iso(e.updatedAt) ?? new Date().toISOString() };
 }
+
+/** Só os valores que são datas (texto) de um mapa id → quando. */
+function datesOf(v: unknown): Record<string, string> {
+  if (!isObject(v)) return {};
+  return Object.fromEntries(Object.entries(v).filter(([, at]) => typeof at === 'string')) as Record<string, string>;
+}
+
+const emptyAccount = (): AccountData => ({ settings: null, activeBinderId: POKEDEX_BINDER, entries: {}, pending: {}, deleted: {}, meta: {} });
 
 function parseJson(raw: string): unknown {
   try {
@@ -373,6 +448,111 @@ function chunks<T>(list: T[], size: number): T[][] {
   return out;
 }
 
+/**
+ * Grava; com o armazenamento cheio, libera o cache do catálogo (pode ser baixado de novo) e tenta de novo. Primeiro só
+ * as listas e as fichas (a parte maior); se ainda não couber, o cache inteiro.
+ */
+async function withRoom(write: () => Promise<void>) {
+  try {
+    await write();
+  } catch {
+    await freeCatalogCache();
+    try {
+      await write();
+    } catch {
+      await clearCatalogCache();
+      await write();
+    }
+  }
+}
+
+const stashKey = (uid: string, part: string) => `${STASH_PREFIX}${uid}:${part}`;
+
+/** A coleção de uma conta guardada à parte, ou null se não há (ou ficou pela metade). Falha de leitura propaga. */
+async function readStash(uid: string): Promise<AccountData | null> {
+  const raw = await AsyncStorage.getItem(stashKey(uid, 'estado'));
+  const st = raw ? parseJson(raw) : undefined;
+  // O "estado" é gravado por último: sem ele, a cópia não terminou (e a coleção continuou nas chaves de sempre).
+  if (!isObject(st)) return null;
+  const prefix = stashKey(uid, 'e:');
+  const keys = (await AsyncStorage.getAllKeys()).filter((k) => k.startsWith(prefix));
+  const entries: Record<string, Entry> = {};
+  for (const part of chunks(keys, 500)) {
+    for (const [key, value] of await AsyncStorage.multiGet(part)) {
+      if (value == null) continue;
+      const id = key.slice(prefix.length);
+      const e = cleanEntry(parseJson(value), id);
+      if (e) entries[id] = e;
+      else if (!(await keepUnreadable(key, value))) throw new Error('Carta guardada ilegível');
+    }
+  }
+  return {
+    settings: isObject(st.settings) ? (st.settings as BinderSettings) : null,
+    activeBinderId: typeof st.activeBinderId === 'string' ? st.activeBinderId : POKEDEX_BINDER,
+    entries,
+    pending: datesOf(st.pending),
+    deleted: datesOf(st.deleted),
+    meta: isObject(st.meta) ? (st.meta as SyncMeta) : {},
+  };
+}
+
+/** Guarda à parte a coleção de uma conta (a cópia anterior dela sai antes). */
+async function writeStash(uid: string, d: AccountData) {
+  const prefix = stashKey(uid, '');
+  const { entries, ...rest } = d;
+  await withRoom(async () => {
+    const old = (await AsyncStorage.getAllKeys()).filter((k) => k.startsWith(prefix));
+    for (const part of chunks(old, 500)) await AsyncStorage.multiRemove(part);
+    const sets = Object.values(entries).map((e): [string, string] => [stashKey(uid, `e:${e.id}`), JSON.stringify(e)]);
+    for (const part of chunks(sets, 500)) await AsyncStorage.multiSet(part);
+    await AsyncStorage.setItem(stashKey(uid, 'estado'), JSON.stringify(rest));
+  });
+}
+
+async function removeStash(uid: string) {
+  const prefix = stashKey(uid, '');
+  const keys = (await AsyncStorage.getAllKeys()).filter((k) => k.startsWith(prefix));
+  for (const part of chunks(keys, 500)) await AsyncStorage.multiRemove(part);
+}
+
+/** Grava a coleção de uma conta nas chaves de sempre; as cartas que não são dela saem. */
+async function writeMain(d: AccountData) {
+  await withRoom(async () => {
+    const ids = new Set(Object.keys(d.entries));
+    const sets: [string, string][] = Object.values(d.entries).map((e) => [ENTRY_PREFIX + e.id, JSON.stringify(e)]);
+    sets.push([ACTIVE_KEY, d.activeBinderId], [PENDING_KEY, JSON.stringify(d.pending)], [DELETED_KEY, JSON.stringify(d.deleted)]);
+    sets.push([SYNC_KEY, JSON.stringify(d.meta)]);
+    if (d.settings) sets.push([SETTINGS_KEY, JSON.stringify(d.settings)]);
+    const removes = (await AsyncStorage.getAllKeys()).filter((k) => k.startsWith(ENTRY_PREFIX) && !ids.has(k.slice(ENTRY_PREFIX.length)));
+    removes.push(LEGACY_ENTRIES_KEY);
+    if (!d.settings) removes.push(SETTINGS_KEY);
+    for (const part of chunks(sets, 500)) await AsyncStorage.multiSet(part);
+    for (const part of chunks(removes, 500)) await AsyncStorage.multiRemove(part);
+  });
+}
+
+/** Termina uma troca de conta: a coleção de `to` (a guardada à parte, ou nenhuma) vai para as chaves de sempre. */
+async function finishSwap(to: string): Promise<AccountData> {
+  const d = (await readStash(to)) ?? emptyAccount();
+  d.meta = { ...d.meta, holder: to };
+  await writeMain(d);
+  await AsyncStorage.removeItem(SWAP_KEY);
+  // Sobra da cópia da conta atual não atrapalha: a próxima vez que ela for guardada, a anterior sai antes.
+  await removeStash(to).catch(() => {});
+  return d;
+}
+
+/** A sessão que o supabase-js guardou no aparelho (mesmo com o token vencido), ou null. */
+async function storedSession(sb: SupabaseClient): Promise<Session | null> {
+  // `storageKey` é protegido no tipo do auth-js, mas é onde ele grava a sessão (o padrão "sb-<projeto>-auth-token").
+  const key = (sb.auth as unknown as { storageKey?: unknown }).storageKey;
+  if (typeof key !== 'string') return null;
+  const r = await readKey(key);
+  const s = r.ok && r.value ? parseJson(r.value) : undefined;
+  if (!isObject(s) || typeof s.access_token !== 'string' || typeof s.refresh_token !== 'string') return null;
+  return isObject(s.user) && typeof s.user.id === 'string' ? (s as unknown as Session) : null;
+}
+
 const countLabel = (n: number) => `${n} ${n === 1 ? 'alteração aguardando' : 'alterações aguardando'} envio.`;
 
 // ---------- Store ----------
@@ -403,12 +583,16 @@ class CollectionStore {
   private remoteError: { kind: 'offline' | 'error'; message: string } | null = null;
   private busy = 0;
   private loading: Promise<void> | null = null;
+  /** A leitura do aparelho terminou (`ready` também fica falso durante uma troca de conta). */
+  private loaded = false;
 
   private dirtyEntries = new Set<string>();
   private dirtyKeys = new Set<MetaKey>();
   private dropLegacyKey = false;
   private writeTimer: ReturnType<typeof setTimeout> | null = null;
   private writing: Promise<void> = Promise.resolve();
+  /** Gravações no aparelho que falharam nesta abertura (writeEntriesNow confere se a dela foi uma delas). */
+  private writeFailures = 0;
 
   private syncing: { uid: string; full: boolean; promise: Promise<SyncResult> } | null = null;
   private flushing: Promise<number> | null = null;
@@ -424,6 +608,22 @@ class CollectionStore {
   private settingsVersion = 0;
   private settingsChain: Promise<void> = Promise.resolve();
   private ctxCache: { state: StoreState; ctx: Ctx } | null = null;
+  /**
+   * A sessão é a guardada no aparelho com o token vencido (o app abriu sem internet): a conta continua aberta, mas nada
+   * vai à nuvem antes de o token renovar (sem ele, a nuvem responderia como se não houvesse conta).
+   */
+  private staleAuth = false;
+  /** Conta do último evento de sessão (um evento mais novo descarta a leitura da sessão guardada de um mais velho). */
+  private authSeq = 0;
+  /** Conta que não sincroniza nesta abertura do app: a coleção daqui não pôde ser separada da de outra conta. */
+  private blockedFor: string | null = null;
+  /** Sincronizações começadas (a busca de cada uma é a desta contagem). */
+  private syncGen = 0;
+  /**
+   * Remoções que a nuvem confirmou: id → data da remoção e `syncGen` na confirmação. Uma busca começada antes da
+   * confirmação ainda pode trazer a carta (ver applyRemote); a primeira que terminar depois dela já não traz.
+   */
+  private confirmedGone = new Map<string, { at: string; gen: number }>();
 
   readonly subscribe = (fn: () => void) => {
     this.listeners.add(fn);
@@ -437,19 +637,16 @@ class CollectionStore {
   readonly actions: CollectionActions = {
     saveSettings: (s) => this.saveSettings(s),
     saveEntry: (e) => this.saveEntry(e),
+    saveEntries: (list) => this.saveEntries(list),
     moveEntry: (id, toSlot) => this.moveEntry(id, toSlot),
     moveEntryTo: (id, target) => this.moveEntryTo(id, target),
     removeEntry: (id) => this.removeEntry(id),
+    removeEntries: (ids) => this.removeEntries(ids),
     restoreEntry: (e) => this.restoreEntry(e),
     applyMypPrice: (id, price) =>
-      // Nas cartas em inglês, o MYP é só referência: não apaga o "Meu valor".
-      this.applyPrice(id, 'patch_entry_myp', { p_id: id, p_myp: price }, { mypApi: price }, (cur) =>
-        mypApiMatches(cur, price) && cur.lang !== 'en' ? myValuePatch(cur, price, 'myp') : {},
-      ),
+      this.applyPrice(id, 'patch_entry_myp', { p_id: id, p_myp: price }, { mypApi: price }, (cur) => mypMyValuePatch(cur, price)),
     applyTcgplayerPrice: (id, price) =>
-      this.applyPrice(id, 'patch_entry_tcgplayer', { p_id: id, p_tcg: price }, { tcgplayer: price }, (cur) =>
-        cur.lang === 'en' && tcgplayerFor({ ...cur, tcgplayer: price }) ? myValuePatch(cur, price, 'tcgplayer') : {},
-      ),
+      this.applyPrice(id, 'patch_entry_tcgplayer', { p_id: id, p_tcg: price }, { tcgplayer: price }, (cur) => tcgplayerMyValuePatch(cur, price)),
     setActiveBinder: (id) => this.setActiveBinder(id),
     saveBinder: (b) => this.saveBinder(b),
     deleteBinder: (id) => this.deleteBinder(id),
@@ -470,6 +667,7 @@ class CollectionStore {
       return buildBackup(this.state.settings, Object.values(this.state.entries), opts);
     },
     importCollection: (data) => this.importCollection(data),
+    prepareSignOut: () => this.prepareSignOut(),
   };
 
   /** O que useCollection devolve (mesmo objeto enquanto nada mudar). */
@@ -494,19 +692,39 @@ class CollectionStore {
     return ctx;
   }
 
-  /** Começa (carrega o aparelho, acompanha a conta e o app). Devolve a função que desliga os ouvintes. */
+  private starts = 0;
+  private stopListening: (() => void) | null = null;
+
+  /**
+   * Começa (carrega o aparelho, acompanha a conta e o app). Devolve a função que desliga os ouvintes. Pode ser chamada
+   * por mais de um (as telas e a busca em segundo plano com o app fechado): os ouvintes são ligados uma vez só e
+   * desligados quando o último desliga.
+   */
   start(): () => void {
+    if (this.starts++ === 0) this.stopListening = this.listen();
+    let stopped = false;
+    return () => {
+      if (stopped) return;
+      stopped = true;
+      if (--this.starts === 0) {
+        this.stopListening?.();
+        this.stopListening = null;
+      }
+    };
+  }
+
+  private listen(): () => void {
     if (!this.loading) this.loading = this.load();
     const stops: (() => void)[] = [];
     if (supabase) {
       const sb = supabase;
-      sb.auth
-        .getSession()
-        .then(({ data }) => this.setSession(data.session))
-        .catch(() => {});
+      sb.auth.getSession().then(
+        ({ data }) => this.onAuth(null, data.session),
+        () => this.onAuth(null, null),
+      );
       // Fora do callback: o Supabase pede para não chamar o cliente dentro dele.
-      const { data } = sb.auth.onAuthStateChange((_event, s) => {
-        setTimeout(() => this.setSession(s), 0);
+      const { data } = sb.auth.onAuthStateChange((event, s) => {
+        setTimeout(() => this.onAuth(event, s), 0);
       });
       stops.push(() => data.subscription.unsubscribe());
     }
@@ -583,6 +801,10 @@ class CollectionStore {
     this.storageError = READ_FAILED;
   }
 
+  private lockAll() {
+    (['entries', 'settings', 'active', 'pending', 'deleted', 'meta'] as const).forEach((k) => this.lock(k));
+  }
+
   /** Objeto JSON guardado numa chave; ilegível vira uma cópia à parte (ou trava a chave, se nem a cópia der certo). */
   private async readObject(k: MetaKey, key: string, r: ReadResult): Promise<Record<string, unknown>> {
     if (!r.ok) {
@@ -602,6 +824,17 @@ class CollectionStore {
     const entries: Record<string, Entry> = {};
     let activeBinderId = POKEDEX_BINDER;
     try {
+      // Troca de conta que não terminou (o app morreu no meio): a coleção da conta nova vai para as chaves de sempre
+      // (a da anterior já estava guardada à parte). Sem conseguir, nada é gravado por cima nesta abertura.
+      const swap = await readKey(SWAP_KEY);
+      if (!swap.ok) this.lockAll();
+      else if (swap.value) {
+        const m = parseJson(swap.value);
+        const to = isObject(m) && typeof m.to === 'string' && m.to ? m.to : null;
+        if (!to) this.lockAll();
+        else await finishSwap(to).catch(() => this.lockAll());
+      }
+
       // Cada chave é lida à parte: uma falha não derruba as outras nem vira coleção vazia.
       const s = await readKey(SETTINGS_KEY);
       if (!s.ok) this.lock('settings');
@@ -675,15 +908,22 @@ class CollectionStore {
 
       const [active, deleted, pending, meta] = await Promise.all([ACTIVE_KEY, DELETED_KEY, PENDING_KEY, SYNC_KEY].map(readKey));
       if (active.ok && active.value) activeBinderId = active.value;
-      const dates = (v: Record<string, unknown>) =>
-        Object.fromEntries(Object.entries(v).filter(([, at]) => typeof at === 'string')) as Record<string, string>;
-      this.deleted = dates(await this.readObject('deleted', DELETED_KEY, deleted));
-      this.pending = dates(await this.readObject('pending', PENDING_KEY, pending));
+      this.deleted = datesOf(await this.readObject('deleted', DELETED_KEY, deleted));
+      this.pending = datesOf(await this.readObject('pending', PENDING_KEY, pending));
       this.meta = (await this.readObject('meta', SYNC_KEY, meta)) as SyncMeta;
+      // O app morreu entre gravar a remoção e apagar a carta (mover ou remover): a carta que ficou sai agora. Só a que
+      // não foi alterada depois da remoção (recolocada no mesmo bolso, a remoção já não vale).
+      for (const [id, at] of Object.entries(this.deleted)) {
+        const e = entries[id];
+        if (!e || e.updatedAt > at) continue;
+        delete entries[id];
+        this.dirtyEntries.add(id);
+      }
     } catch {
       // Erro inesperado: segue com o que deu para ler, sem gravar por cima.
-      (['entries', 'settings', 'pending', 'deleted', 'meta'] as const).forEach((k) => this.lock(k));
+      this.lockAll();
     }
+    this.loaded = true;
     this.commit({ ready: true, settings, entries, activeBinderId });
     if (this.dirtyEntries.size || this.dirtyKeys.size || this.dropLegacyKey) this.scheduleWrite();
     pruneStaleCache();
@@ -706,6 +946,26 @@ class CollectionStore {
     }
     this.writing = this.writing.then(() => this.writeOnce());
     return this.writing;
+  }
+
+  /**
+   * Grava já no aparelho e confere que as cartas `ids` ficaram nele. Rejeita (NOT_ON_DEVICE) quando não ficaram: a
+   * gravação falhou (armazenamento cheio mesmo depois de liberar o cache; a nova tentativa só sai daqui a 30 s), a coleção
+   * salva não pôde ser lida nesta abertura (nada é gravado por cima) ou ela não está pronta (troca de conta). Para quem
+   * apaga algo que só existe nessas cartas (o lote da câmera): writeNow sozinho nunca avisa da falha.
+   */
+  async writeEntriesNow(ids: string[]): Promise<void> {
+    const notOnDevice = () => !this.state.ready || this.locked.has('entries');
+    // Uma carta alterada de novo durante a gravação (um preço que chegou) volta para a fila depois de gravada: sem falha,
+    // ela já está no aparelho; as voltas a mais só cobrem a gravação que não rodou (coleção deixou de estar pronta).
+    for (let round = 0; round < 3; round++) {
+      if (notOnDevice()) throw new Error(NOT_ON_DEVICE);
+      const failures = this.writeFailures;
+      await this.writeNow();
+      if (this.writeFailures !== failures) throw new Error(NOT_ON_DEVICE);
+      if (!ids.some((id) => this.dirtyEntries.has(id))) return;
+    }
+    if (notOnDevice()) throw new Error(NOT_ON_DEVICE);
   }
 
   private serialize(k: MetaKey): [string, string | null] {
@@ -750,25 +1010,14 @@ class CollectionStore {
       if (removes.length) await AsyncStorage.multiRemove(removes);
     };
     try {
-      try {
-        await write();
-      } catch {
-        // Armazenamento cheio: libera o cache do catálogo (pode ser baixado de novo) e tenta de novo. Primeiro só as
-        // listas e as fichas (a parte maior); se ainda não couber, o cache inteiro.
-        await freeCatalogCache();
-        try {
-          await write();
-        } catch {
-          await clearCatalogCache();
-          await write();
-        }
-      }
+      await withRoom(write);
       if (dropLegacy) this.dropLegacyKey = false;
       if (this.storageError === STORAGE_FULL) {
         this.storageError = null;
         this.commit();
       }
     } catch {
+      this.writeFailures++;
       ids.forEach((id) => this.dirtyEntries.add(id));
       keys.forEach((k) => this.dirtyKeys.add(k));
       this.setStorageError(STORAGE_FULL);
@@ -826,19 +1075,171 @@ class CollectionStore {
 
   // ----- conta e sincronização -----
 
-  private setSession(s: Session | null) {
+  /**
+   * Evento da conta. Sessão nula sem "saiu da conta" (SIGNED_OUT) não tira a conta do aparelho: aberto sem internet com
+   * o token vencido, o supabase-js não consegue renovar e entrega null, mas a sessão continua guardada. Aí a conta segue
+   * aberta, sem sincronizar até o token renovar, e o estado fica "sem conexão". Sai só sem sessão guardada.
+   */
+  private onAuth(event: AuthChangeEvent | null, s: Session | null) {
+    const seq = ++this.authSeq;
+    if (s || event === 'SIGNED_OUT' || !supabase) {
+      this.setSession(s);
+      return;
+    }
+    void storedSession(supabase).then((kept) => {
+      if (seq !== this.authSeq) return; // chegou outro evento enquanto lia
+      const valid = !!kept?.expires_at && kept.expires_at * 1000 > Date.now();
+      this.setSession(kept, !!kept && !valid);
+    });
+  }
+
+  /** `stale`: sessão guardada com o token vencido (ver staleAuth). */
+  private setSession(s: Session | null, stale = false) {
     const uid = s?.user.id ?? null;
     const changed = uid !== this.uid;
+    // O token renovou depois de uma abertura sem internet: agora a nuvem atende esta conta.
+    const renewed = !changed && !!uid && this.staleAuth && !stale;
     this.uid = uid;
+    this.staleAuth = !!uid && stale;
     if (changed) {
       this.fullDoneFor = null;
       this.remoteError = null;
       this.retryStep = 0;
       this.serverV3 = true;
+      this.confirmedGone.clear();
       this.clearRetry();
+      if (uid) {
+        // A coleção daqui pode ser de outra conta: antes de qualquer busca ou envio, ela é separada (ver claimDevice).
+        // Ações e sincronizações esperam por isso (whenLoaded). Sendo de outra, já sai da tela enquanto isso.
+        const holder = this.holder();
+        if (this.loaded && holder && holder !== uid) this.commit({ ready: false });
+        const waits = [this.syncing?.promise, this.flushing, this.settingsChain];
+        this.loading = this.whenLoaded()
+          .then(() => this.claimDevice(uid, waits))
+          .catch(() => {
+            this.blockedFor = uid;
+          });
+      }
     }
-    this.commit({ session: s });
-    if (changed && uid && this.state.ready) this.startSync(uid, 'full');
+    // "Última sincronização desta abertura" é da conta: as buscas de preço esperam a da conta nova.
+    this.commit(changed ? { session: s, lastSyncAt: null } : { session: s });
+    if ((changed || renewed) && uid && this.loaded) this.startSync(uid, 'full');
+  }
+
+  /**
+   * Conta que entrou neste aparelho. A coleção daqui é de quem entrou por último (`holder`). Sem dono (o app era usado
+   * sem conta): a coleção vai para esta conta, na sincronização completa. De outra conta: fica guardada à parte, até ela
+   * entrar de novo, e esta conta volta com o que guardou aqui antes (ou parte do zero) e recebe o resto da nuvem. Nada de
+   * uma conta vai para a outra.
+   */
+  private async claimDevice(uid: string, waits: (Promise<unknown> | null | undefined)[]) {
+    try {
+      // Antes, termina o que a conta anterior estava fazendo (sem a sessão dela, falha; a fila fica guardada com ela).
+      await Promise.all(waits.map((p) => p?.catch(() => undefined)));
+      if (this.uid !== uid) return; // trocou de novo enquanto esperava: a próxima chamada resolve
+      if (this.blockedFor === uid) this.blockedFor = null;
+      if (this.locked.has('meta')) {
+        // Sem saber de quem é a coleção daqui, nada vai para a nuvem (a leitura falhou: o aviso pede para abrir de novo).
+        this.blockedFor = uid;
+        return;
+      }
+      const holder = this.holder();
+      if (holder && holder !== uid) {
+        await this.swapAccount(holder, uid);
+        return;
+      }
+      if (this.meta.holder !== uid) {
+        this.meta = { ...this.meta, holder: uid };
+        this.markMeta('meta');
+      }
+    } finally {
+      // Escondida durante a espera e a troca (ver setSession); sem troca, ou com ela falhando, a coleção daqui volta.
+      if (!this.state.ready) {
+        this.commit({ ready: true });
+        this.scheduleWrite();
+      }
+    }
+  }
+
+  /** Conta dona da coleção deste aparelho (ver SyncMeta.holder). */
+  private holder() {
+    return this.meta.holder ?? this.meta.owner;
+  }
+
+  /** Guarda à parte a coleção de `from` e passa a usar a de `to` (a guardada aqui antes, ou nenhuma). */
+  private async swapAccount(from: string, to: string) {
+    // Parte da coleção daqui não foi lida: guardar à parte só o resto perderia o que ficou de fora.
+    if (this.locked.size) {
+      this.blockedFor = to;
+      return;
+    }
+    await this.writeNow();
+    // As telas esperam (sem mostrar a coleção da outra conta nesta), e nada é gravado no meio da troca.
+    this.commit({ ready: false });
+    let marked = false;
+    try {
+      const s = this.state;
+      await writeStash(from, {
+        settings: s.settings,
+        activeBinderId: s.activeBinderId,
+        entries: s.entries,
+        pending: this.pending,
+        deleted: this.deleted,
+        meta: this.meta,
+      });
+      await AsyncStorage.setItem(SWAP_KEY, JSON.stringify({ from, to }));
+      marked = true;
+      this.useAccount(await finishSwap(to));
+    } catch {
+      // Antes da marca, o aparelho continua só com a coleção anterior (a troca tenta de novo na próxima abertura).
+      // Depois dela, quem termina a troca é a próxima abertura: até lá, nada é gravado por cima.
+      if (marked) this.lockAll();
+      this.blockedFor = to;
+    }
+  }
+
+  /** Passa a usar a coleção de uma conta (já gravada nas chaves de sempre). */
+  private useAccount(d: AccountData) {
+    if (this.writeTimer) clearTimeout(this.writeTimer);
+    this.writeTimer = null;
+    this.dirtyEntries.clear();
+    this.dirtyKeys.clear();
+    this.dropLegacyKey = false;
+    this.pending = d.pending;
+    this.deleted = d.deleted;
+    this.meta = d.meta;
+    // Um envio da configuração da conta anterior que ainda termine não marca a desta como enviada.
+    this.settingsVersion++;
+    this.fullDoneFor = null;
+    this.confirmedGone.clear();
+    this.commit({ ready: true, settings: d.settings, entries: d.entries, activeBinderId: d.activeBinderId });
+  }
+
+  /** Antes de sair da conta (ver CollectionActions.prepareSignOut). */
+  private async prepareSignOut(): Promise<string | null> {
+    await this.whenLoaded();
+    const uid = this.uid;
+    if (!supabase || !uid) return null;
+    // Duas voltas: uma sincronização que já estava no meio pode não levar o que mudou depois do envio dela.
+    const deadline = Date.now() + SIGN_OUT_SEND_MS;
+    for (let round = 0; round < 2 && this.pendingCount() && this.uid === uid && Date.now() < deadline; round++) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const sent = this.sync(uid, this.fullDoneFor === uid ? 'auto' : 'full').then(
+        () => true,
+        () => false,
+      );
+      const late = new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), deadline - Date.now());
+      });
+      const ok = await Promise.race([sent, late]);
+      clearTimeout(timer);
+      if (!ok) break;
+    }
+    const n = this.pendingCount();
+    if (!n) return null;
+    return n === 1
+      ? '1 alteração ainda não foi para a nuvem. Ela fica guardada neste aparelho e vai quando você entrar de novo nesta conta.'
+      : `${n} alterações ainda não foram para a nuvem. Elas ficam guardadas neste aparelho e vão quando você entrar de novo nesta conta.`;
   }
 
   private startSync(uid: string, mode: 'auto' | 'full') {
@@ -932,12 +1333,25 @@ class CollectionStore {
   private async runSync(uid: string, full: boolean): Promise<SyncResult> {
     const sb = supabase!;
     await this.whenLoaded();
+    if (this.blockedFor === uid) {
+      this.remoteError = { kind: 'error', message: SWAP_FAILED };
+      this.commit();
+      throw new Error(SWAP_FAILED);
+    }
     this.busy++;
     this.commit();
     try {
+      if (this.staleAuth) {
+        // Token vencido de uma abertura sem internet: renova antes (sem internet, falha e tenta de novo mais tarde).
+        const { data, error } = await sb.auth.getSession();
+        if (this.uid !== uid) return { sent: 0, received: 0 };
+        if (data.session?.user.id !== uid) throw error ?? new Error('Auth session missing');
+        this.setSession(data.session);
+      }
       const neverSynced = this.meta.owner !== uid;
       const cursorMs = Date.parse(this.meta.cursor ?? '');
       const since = full || Number.isNaN(cursorMs) ? undefined : new Date(cursorMs - CURSOR_OVERLAP_MS).toISOString();
+      const gen = ++this.syncGen;
       const [settingsRes, rows, tombs] = await Promise.all([
         sb.from('binder_settings').select('data').eq('user_id', uid).maybeSingle(),
         fetchAllPages<RemoteRow>((from, to) => {
@@ -957,7 +1371,7 @@ class CollectionStore {
       const pushSettings = this.reconcileSettings(remoteSettings, neverSynced);
 
       // Cartas: aplica sobre o estado de agora (o que mudou durante a busca continua valendo).
-      const received = this.applyRemote(rows, tombs, full);
+      const received = this.applyRemote(rows, tombs, full, gen);
 
       const sent = await this.flush(uid);
       if (pushSettings) await this.pushSettings(uid);
@@ -969,9 +1383,12 @@ class CollectionStore {
       for (const r of rows) maxMs = Math.max(maxMs, Date.parse(iso(r.updated_at) ?? '') || 0);
       for (const t of tombs) maxMs = Math.max(maxMs, Date.parse(iso(t.deleted_at) ?? '') || 0);
       const now = new Date().toISOString();
+      // As remoções confirmadas antes desta busca já não voltam numa próxima (o servidor já não tinha a carta).
+      for (const [id, c] of this.confirmedGone) if (c.gen < gen) this.confirmedGone.delete(id);
       this.meta = {
         ...this.meta,
         owner: uid,
+        holder: uid,
         cursor: new Date(maxMs).toISOString(),
         lastSyncAt: now,
         lastFullAt: full ? now : this.meta.lastFullAt,
@@ -1032,8 +1449,8 @@ class CollectionStore {
     return n;
   }
 
-  /** Aplica o que veio da nuvem sobre as cartas de agora. Devolve quantas mudaram aqui. */
-  private applyRemote(rows: RemoteRow[], tombs: Tombstone[], full: boolean): number {
+  /** Aplica o que veio da nuvem (na busca `gen`) sobre as cartas de agora. Devolve quantas mudaram aqui. */
+  private applyRemote(rows: RemoteRow[], tombs: Tombstone[], full: boolean, gen: number): number {
     const cur = this.state.entries;
     const changes: Record<string, Entry | null> = {};
     let received = 0;
@@ -1067,6 +1484,9 @@ class CollectionStore {
       // Lida junto com o registro de remoção (consultas em paralelo): vale o mais recente.
       const tomb = tombAt.get(id);
       if (tomb && tomb >= (iso(row.updated_at) ?? '')) continue;
+      // Removida aqui e confirmada pela nuvem depois que esta busca começou: a linha é de antes da remoção.
+      const done = this.confirmedGone.get(id);
+      if (done && done.gen >= gen && remote.updatedAt <= done.at) continue;
       const gone = this.deleted[id];
       if (gone) {
         if (remote.updatedAt > gone) this.forgetDeleted(id); // recolocada em outro aparelho depois da remoção daqui
@@ -1177,6 +1597,8 @@ class CollectionStore {
         }
       } else throw res.error;
       const goneSet = new Set(gone);
+      // Uma busca que já estava rodando ainda pode trazer estas cartas (ver confirmedGone).
+      if (this.uid === uid) for (const id of gone) if (dels[id]) this.confirmedGone.set(id, { at: dels[id], gen: this.syncGen });
       // As que não saíram: não estavam na nuvem ou foram recolocadas depois em outro aparelho (essas voltam para cá).
       const kept = delIds.filter((id) => !goneSet.has(id));
       const back: Record<string, Entry | null> = {};
@@ -1244,6 +1666,11 @@ class CollectionStore {
     this.meta = { ...this.meta, settingsDirty: true };
     this.markMeta('meta');
     this.commit();
+    // Token vencido (sem internet ao abrir): vai na sincronização, que renova antes.
+    if (this.staleAuth) {
+      this.requestFlush();
+      return;
+    }
     this.settingsChain = this.settingsChain
       .then(() => this.pushSettings(uid))
       .then(
@@ -1312,6 +1739,7 @@ class CollectionStore {
   }
 
   private async saveEntry(input: Omit<Entry, 'id' | 'updatedAt'>) {
+    checkPlace(input);
     await this.whenLoaded();
     const id = keyOf(input.binderId, input.dex, input.slot);
     const cur = this.state.entries[id];
@@ -1324,6 +1752,25 @@ class CollectionStore {
     // Os preços chegam depois: os do MYP Cards pelo app no celular (MypRefresher), os da TCGplayer pelo TcgplayerRefresher.
   }
 
+  private async saveEntries(list: Omit<Entry, 'id' | 'updatedAt'>[]): Promise<string[]> {
+    // Uma carta inválida recusa o lote inteiro (nada pela metade).
+    for (const input of list) checkPlace(input);
+    await this.whenLoaded();
+    const changes: Record<string, Entry | null> = {};
+    for (const input of list) {
+      const id = keyOf(input.binderId, input.dex, input.slot);
+      if (this.state.entries[id] || changes[id]) continue;
+      changes[id] = stripLegacyFields({ ...input, id, updatedAt: stampAfter(this.deleted[id]) } as Entry);
+      this.forgetDeleted(id);
+      this.markPending(id);
+    }
+    const ids = Object.keys(changes);
+    if (!ids.length) return ids;
+    this.applyEntries(changes);
+    this.requestFlush();
+    return ids;
+  }
+
   private async removeEntry(id: string) {
     await this.whenLoaded();
     const e = this.state.entries[id];
@@ -1332,6 +1779,22 @@ class CollectionStore {
     this.deleted[id] = stampAfter(e?.updatedAt);
     this.markMeta('deleted');
     if (e) this.applyEntries({ [id]: null });
+    else this.commit();
+    this.requestFlush();
+  }
+
+  private async removeEntries(ids: string[]) {
+    await this.whenLoaded();
+    if (!ids.length) return;
+    const changes: Record<string, Entry | null> = {};
+    for (const id of ids) {
+      const e = this.state.entries[id];
+      this.dropPending(id);
+      this.deleted[id] = stampAfter(e?.updatedAt);
+      if (e) changes[id] = null;
+    }
+    this.markMeta('deleted');
+    if (Object.keys(changes).length) this.applyEntries(changes);
     else this.commit();
     this.requestFlush();
   }
@@ -1429,7 +1892,8 @@ class CollectionStore {
     const cur = this.state.entries[id];
     if (!cur) return; // removida enquanto a busca acontecia
     const uid = this.uid;
-    if (supabase && uid) {
+    // Com o token vencido (ver staleAuth), o preço fica só aqui: a sincronização leva a carta com ele.
+    if (supabase && uid && !this.staleAuth) {
       const { data, error } = await supabase.rpc(rpc, args);
       if (error) {
         this.onRemoteError(error);
@@ -1498,6 +1962,9 @@ class CollectionStore {
 
     const binderIds = new Set((this.state.settings?.extras ?? []).map((b) => b.id));
     const changes: Record<string, Entry | null> = {};
+    // Carta sem data (lista feita à mão): vale a data da cópia, se ela tiver; sem nenhuma, a carta perde para qualquer
+    // edição (e o envio leva uma data válida, ver toRow).
+    const copyDate = iso(parsed.exportedAt) ?? '';
     for (const raw of parsed.entries) {
       const binderId = raw.binderId && raw.binderId !== POKEDEX_BINDER ? raw.binderId : undefined;
       if (binderId && !binderIds.has(binderId)) {
@@ -1505,7 +1972,7 @@ class CollectionStore {
         continue;
       }
       const id = keyOf(binderId, raw.dex, raw.slot);
-      const entry: Entry = { ...raw, id, binderId };
+      const entry: Entry = { ...raw, id, binderId, updatedAt: raw.updatedAt || copyDate };
       if (!binderId) delete entry.binderId;
       const local = changes[id] ?? this.state.entries[id];
       if (!local) {
@@ -1556,6 +2023,20 @@ export function useCollection(): Ctx {
 export function useCollectionActions(): CollectionActions {
   return store.actions;
 }
+
+/** Fora das telas (a busca em segundo plano): a coleção como está agora, as ações e como ligar e gravar. */
+export const collectionState = () => store.getSnapshot();
+export const subscribeCollection = (fn: () => void) => store.subscribe(fn);
+export const collectionActions: CollectionActions = store.actions;
+/** Liga a coleção sem tela aberta (como o CollectionProvider); devolve como desligar. */
+export const startCollection = () => store.start();
+/**
+ * Grava já no aparelho o que estiver esperando (com o app em segundo plano, a gravação agrupada pode atrasar). Não avisa
+ * de falha: quem precisa saber se as cartas ficaram no aparelho usa saveEntriesNow.
+ */
+export const saveCollectionNow = () => store.writeNow();
+/** Grava já no aparelho e rejeita (NOT_ON_DEVICE) se as cartas `ids` não ficaram gravadas nele. */
+export const saveEntriesNow = (ids: string[]) => store.writeEntriesNow(ids);
 
 const selectReady = () => store.getSnapshot().ready;
 const selectEntries = () => store.getSnapshot().entries;

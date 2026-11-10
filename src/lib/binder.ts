@@ -165,6 +165,84 @@ export function physicalPosition(s: Grid & { sheets?: number }, index: number): 
   return pos;
 }
 
+/**
+ * Lado da lombada e dos furos da página (`page` a partir de 0). Frente e verso: a frente (pág. 1, 3, 5…) fura à esquerda
+ * e o verso (pág. 2, 4, 6…), à direita. Só frente: sempre à esquerda.
+ */
+export function spineSide(doubleSided: boolean, page: number): 'left' | 'right' {
+  return doubleSided && page % 2 === 1 ? 'right' : 'left';
+}
+
+/**
+ * Páginas abertas lado a lado (índices a partir de 0): [0] com a capa à esquerda, [1, 2], [3, 4]… e a última sozinha
+ * com a contracapa à direita, se cair à esquerda. A da esquerda é sempre verso e a da direita, frente (`spineSide`).
+ */
+export function spreadOf(page: number, pages: number) {
+  if (page <= 0) return [0];
+  const left = page % 2 === 1 ? page : page - 1;
+  return left + 1 < pages ? [left, left + 1] : [left];
+}
+
+// ---------- Encaixe da folha na tela ----------
+
+export type PocketFit = {
+  /** Largura do bolso. */
+  width: number;
+  /** Altura das linhas da página, com os vãos entre elas. */
+  height: number;
+  /** Nem no bolso mínimo a página cabe na altura: só a área dela rola. */
+  overflow: boolean;
+};
+
+/**
+ * Largura do bolso para a página caber na largura E na altura livres (`width` e `height`: o espaço das colunas e das
+ * linhas, já sem margens e lombada). Encolhe até `min`; se nem assim couber, sobra na altura (`overflow`), nunca na
+ * largura. `priceHeight(w)`: bloco de preço embaixo do bolso de largura `w` (0 sem preços). `ratio`: largura ÷ altura.
+ */
+export function fitPocket({
+  width,
+  height,
+  rows,
+  cols,
+  gap,
+  ratio,
+  priceHeight,
+  min,
+  max = Infinity,
+}: {
+  width: number;
+  height: number;
+  rows: number;
+  cols: number;
+  gap: number;
+  ratio: number;
+  priceHeight: (w: number) => number;
+  min: number;
+  max?: number;
+}): PocketFit {
+  const byWidth = Math.max(1, Math.floor((width - gap * (cols - 1)) / cols));
+  const rowRoom = (height - gap * (rows - 1)) / rows;
+  const byRow = (w: number) => Math.floor((rowRoom - priceHeight(w)) * ratio);
+  // O bloco de preço diminui no bolso pequeno: a conta é refeita com a largura achada.
+  const first = byRow(byWidth);
+  const second = byRow(first);
+  const byHeight = priceHeight(second) === priceHeight(first) ? second : first;
+  const pocket = Math.max(1, Math.min(byWidth, max, Math.max(min, byHeight)));
+  const total = rows * (Math.floor(pocket / ratio) + priceHeight(pocket)) + gap * (rows - 1);
+  return { width: pocket, height: total, overflow: total > height };
+}
+
+/** Com a busca aberta no celular, encolher mais que isto (px) é o teclado; menos, um aviso ou dica que entrou na tela. */
+export const KEYBOARD_MIN = 120;
+
+/**
+ * A área da folha encolheu por causa do teclado (então a folha guarda a altura de antes). Compara a área, e não a janela:
+ * no Android, o teclado encolhe a tela do app sem mudar a medida da janela. `keyboard`: altura avisada pelo sistema (0 na web).
+ */
+export function squeezedByKeyboard(heldHeight: number, height: number, keyboard: number) {
+  return keyboard > 0 || heldHeight - height > KEYBOARD_MIN;
+}
+
 /** Folhas que o fichário Pokédex ocupa (com os bolsos livres da última página). */
 export function sheetsNeeded(s: BinderSettings) {
   return Math.ceil(totalPages(s) / (s.doubleSided ? 2 : 1));

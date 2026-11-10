@@ -3,14 +3,22 @@ import type { ReactNode } from 'react';
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import Svg, { Defs, LinearGradient, Mask, Rect, Stop } from 'react-native-svg';
 
-import { Button, gridColumns } from '@/components/ui';
+import { Button, gridColumns, radioGroupKeys, radioTabIndex, spaceToPress } from '@/components/ui';
+import { TAP } from '@/lib/tap-word';
 import { VARIANTS } from '@/lib/types';
-import type { VersionOption } from '@/lib/variants';
+import { savedVersionOf, type VersionOption } from '@/lib/variants';
 import { CARD_RATIO, colors, elevation, radius, semantic, space, typography } from '@/theme';
 
 const GAP = space.md;
 /** Na web, o título vira <h2> (sem o nível, o react-native-web faz <h1>, e o <h1> da página é o nome da carta). */
 const HEADING_LEVEL_2 = (Platform.OS === 'web' ? { 'aria-level': 2 } : {}) as object;
+const TITLE = 'Qual é a sua versão?';
+/**
+ * Na web, o Modal já é o diálogo (role=dialog, aria-modal) e leva o nome; a caixa não repete o papel (diálogo dentro de
+ * diálogo). No celular, o Modal não tem papel: a caixa é o diálogo.
+ */
+const MODAL_A11Y = (Platform.OS === 'web' ? { 'aria-label': TITLE } : {}) as object;
+const BOX_A11Y = (Platform.OS === 'web' ? {} : { role: 'dialog', 'aria-modal': true, 'aria-label': TITLE }) as object;
 
 export const versionLabel = (o: VersionOption) => VARIANTS.find((v) => v.id === o.variant)?.label ?? o.variant;
 
@@ -28,8 +36,11 @@ export function VersionPicker({
 }: {
   visible: boolean;
   options: VersionOption[];
-  /** Versão salva; só fica destacada quando bate exatamente com uma opção (variação e selo). */
-  selected?: Pick<VersionOption, 'variant' | 'stamp'>;
+  /**
+   * Versão salva; fica destacada a opção dela: a de mesma variação e selo ou, sem essa, a mesma versão com o nome que uma
+   * versão anterior do app deu ao selo (savedVersionOf). Uma só.
+   */
+  selected?: Pick<VersionOption, 'variant' | 'stamp' | 'stampKeys'>;
   /** Imagem da carta na versão (a foto oficial da versão com selo, quando existir). */
   image: (o: VersionOption) => ReactNode;
   onPick: (o: VersionOption) => void;
@@ -41,19 +52,21 @@ export function VersionPicker({
   const inner = boxWidth - space.xl * 2;
   const cols = options.length <= 2 ? 2 : Math.min(options.length, gridColumns(inner, { cell: 120, gap: GAP, min: 3, max: 5 }));
   const tileWidth = Math.floor((inner - GAP * (cols - 1)) / cols);
-  const same = (o: VersionOption) => !!selected && selected.variant === o.variant && (selected.stamp ?? '') === (o.stamp ?? '');
+  const chosen = selected ? savedVersionOf(options, { variant: selected.variant, stamp: selected.stamp, keys: selected.stampKeys }) : undefined;
+  const same = (o: VersionOption) => o === chosen;
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} {...MODAL_A11Y}>
       <View style={styles.backdrop}>
-        <View style={[styles.box, { width: boxWidth }]} role="dialog" aria-modal aria-label="Qual é a sua versão?">
+        <View style={[styles.box, { width: boxWidth }]} {...BOX_A11Y}>
           <Text style={styles.title} role="heading" {...HEADING_LEVEL_2}>
-            Qual é a sua versão?
+            {TITLE}
           </Text>
           <Text style={styles.text}>
-            {options.length === 1 ? '1 versão' : `${options.length} versões`} no catálogo. Toque na que você tem (dá para mudar depois).
+            {options.length === 1 ? '1 versão' : `${options.length} versões`} no catálogo. {TAP} na que você tem (dá para mudar depois).
           </Text>
-          <ScrollView contentContainerStyle={styles.grid} role="radiogroup" aria-label="Versões da carta">
+          {/* Escolher fecha a janela: as setas só movem o foco, e o Espaço ou o Enter escolhe. */}
+          <ScrollView contentContainerStyle={styles.grid} role="radiogroup" aria-label="Versões da carta" {...radioGroupKeys(false)}>
             {options.map((o) => {
               const on = same(o);
               return (
@@ -63,7 +76,9 @@ export function VersionPicker({
                   onPress={() => onPick(o)}
                   role="radio"
                   aria-checked={on}
-                  accessibilityLabel={`${versionLabel(o)}${o.stamp ? `, selo ${o.stamp}` : ''}${o.photo ? ', com foto oficial' : ''}`}>
+                  accessibilityLabel={`${versionLabel(o)}${o.stamp ? `, selo ${o.stamp}` : ''}${o.photo ? ', com foto oficial' : ''}`}
+                  {...spaceToPress(() => onPick(o))}
+                  {...radioTabIndex(on, options.some(same))}>
                   <View style={[styles.thumb, { height: tileWidth / CARD_RATIO }, on && styles.thumbSelected]}>
                     {image(o)}
                     {o.photo ? null : <VersionEffect option={o} />}
@@ -97,8 +112,9 @@ const ART = { x: 0.08, y: 0.11, w: 0.84, h: 0.4 };
 
 /** Cores do brilho holográfico desenhado sobre a imagem (ilustração, não interface). */
 const SHEEN = ['#ff6ec7', '#ffe46b', '#6bffb8', '#6bb8ff', '#c46bff'];
-/** Roxo da Master Ball, no selo da versão. */
-const MASTER_BALL = '#7B3FC4';
+/** Bolinhas das versões Poké Ball e Master Ball (ilustração, não interface): tons claros, que aparecem na cápsula escura. */
+const POKE_BALL = '#FF7A6B';
+const MASTER_BALL = '#B58CFF';
 
 /** Desenho por cima da imagem: brilho holo na ilustração, brilho reverse fora dela, marcas e selos. */
 function VersionEffect({ option }: { option: VersionOption }) {
@@ -131,7 +147,7 @@ function VersionEffect({ option }: { option: VersionOption }) {
       {mark ? (
         <View style={[styles.mark, v === 'firstEdition' && styles.markLeft]}>
           {v === 'pokeball' || v === 'masterball' ? (
-            <Ionicons name="radio-button-on" size={10} color={v === 'masterball' ? MASTER_BALL : colors.primary} />
+            <Ionicons name="radio-button-on" size={10} color={v === 'masterball' ? MASTER_BALL : POKE_BALL} />
           ) : null}
           <Text style={styles.markText}>{mark}</Text>
         </View>
@@ -142,13 +158,13 @@ function VersionEffect({ option }: { option: VersionOption }) {
 
 const styles = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: colors.backdrop, alignItems: 'center', justifyContent: 'center', padding: space.lg },
-  box: { maxHeight: '92%', backgroundColor: colors.surface, borderRadius: radius.lg, padding: space.xl, gap: space.md, ...elevation[2] },
-  title: { ...typography.title, color: colors.text },
+  box: { maxHeight: '92%', backgroundColor: colors.surface, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.border, padding: space.xl, gap: space.md, ...elevation[2] },
+  title: { ...typography.heading, color: colors.heading },
   text: { ...typography.caption, color: colors.textMuted },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: GAP, paddingVertical: space.xs },
   pressed: { opacity: 0.8, transform: [{ scale: 0.97 }] },
   thumb: { borderRadius: radius.sm, overflow: 'hidden', backgroundColor: colors.surfaceAlt, borderWidth: 2, borderColor: 'transparent' },
-  // Escolhida: borda grafite (a cor da seleção), sem vermelho.
+  // Escolhida: borda branca (a cor da seleção), sem vermelho.
   thumbSelected: { borderColor: semantic.selected.border },
   check: {
     position: 'absolute',

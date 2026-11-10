@@ -11,11 +11,15 @@ describe('snapshotValue (valor de uma carta na foto diária)', () => {
     expect(snapshotValue(s, 'en')).toEqual({ min: 40, avg: 40, max: 40, pick: 40, source: 'manual' });
   });
 
-  it('TCGplayer só nas cartas em inglês; senão o MYP', () => {
+  it('TCGplayer só nas cartas em inglês e japonês; senão o MYP', () => {
     const s = { tcgplayer: { min: 8, avg: 12, max: 15 }, mypApi: { min: 5, avg: 10, max: 20 } };
     expect(snapshotValue(s, 'en')).toEqual({ min: 8, avg: 12, max: 15, pick: 12, source: 'tcgplayer' });
+    expect(snapshotValue(s, 'ja')).toEqual({ min: 8, avg: 12, max: 15, pick: 12, source: 'tcgplayer' });
     expect(snapshotValue(s, 'pt')).toEqual({ min: 5, avg: 10, max: 20, pick: 10, source: 'myp' });
     expect(snapshotValue({ ...s, tcgplayer: { notFound: 'x' } }, 'en')?.source).toBe('myp');
+    // Japonesa sem preço na TCGplayer (e sem MYP, que não tem japonesas): sem valor.
+    expect(snapshotValue({ tcgplayer: { notFound: 'sem vendas recentes na TCGplayer' } }, 'ja')).toBeUndefined();
+    expect(snapshotValue({ basis: 'min', tcgplayer: { min: 8, avg: 12, max: 15 } }, 'ja')?.pick).toBe(8);
   });
 
   it('usa a escolha gravada na foto ("Usar na soma"), ou a pedida', () => {

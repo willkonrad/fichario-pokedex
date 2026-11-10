@@ -116,8 +116,14 @@ function errorCode(err: unknown): string | undefined {
   return undefined;
 }
 
+/** O Postgres cancelou a consulta por tempo (57014): o servidor respondeu, a internet está funcionando. */
+function isStatementTimeout(err: unknown): boolean {
+  return errorCode(err) === '57014' || /statement timeout/i.test(errorText(err));
+}
+
 /** Sem internet ou servidor inalcançável. */
 export function isNetworkError(err: unknown): boolean {
+  if (isStatementTimeout(err)) return false;
   return /failed to fetch|network ?request failed|networkerror|load failed|fetch failed|network error|timed? ?out|timeout|aborted|ECONN|ENOTFOUND|EAI_AGAIN/i.test(
     errorText(err),
   );
@@ -139,6 +145,9 @@ export function describeSyncError(err: unknown): { kind: 'offline' | 'error'; me
   const code = errorCode(err);
   if (isNetworkError(err)) {
     return { kind: 'offline', message: 'Sem conexão com a nuvem. As alterações ficam salvas neste aparelho e vão quando a internet voltar.' };
+  }
+  if (isStatementTimeout(err)) {
+    return { kind: 'error', message: 'A nuvem demorou demais para responder. Tento de novo em alguns minutos.' };
   }
   if (code === 'PGRST301' || code === 'PGRST303' || /jwt|token (is )?expired|invalid claim|refresh token|not authenticated|auth session missing/i.test(raw)) {
     return { kind: 'error', message: 'Sua sessão expirou. Saia e entre na conta de novo para sincronizar.' };

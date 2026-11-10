@@ -174,6 +174,9 @@ export function isSignupDisabled(err: unknown): boolean {
 
 export const SIGNUP_CLOSED_TEXT = 'Cadastro fechado: este app é de uso pessoal. Entre com a conta existente.';
 export const LINK_EXPIRED_TEXT = 'O link expirou ou já foi usado. Peça outro em "Esqueci minha senha".';
+const SESSION_ENDED_TEXT = 'A sessão do link terminou. Peça outro em "Esqueci minha senha".';
+const EMAIL_LIMIT_TEXT = 'O servidor já mandou o máximo de e-mails desta hora. Use o link que já chegou ou tente de novo mais tarde.';
+const REQUEST_LIMIT_TEXT = 'Muitas tentativas seguidas. Espere um pouco e tente de novo.';
 
 /**
  * Erro do login, do cadastro ou da senha nova explicado em português. Vale o código do Supabase (`error.code`, ver
@@ -202,19 +205,37 @@ export function authErrorText(err: unknown): string {
     code === 'bad_jwt' ||
     /auth session missing|refresh token/i.test(msg)
   ) {
-    return 'A sessão do link terminou. Peça outro em "Esqueci minha senha".';
+    return SESSION_ENDED_TEXT;
   }
   if (code === 'reauthentication_needed') return 'Por segurança, saia e entre de novo na conta antes de trocar a senha.';
   if (code === 'email_address_not_authorized' || /email address not authorized/i.test(msg)) {
     return 'O e-mail do Supabase não envia para esse endereço. Confira o e-mail digitado: o envio padrão só vai para quem é da equipe do projeto.';
   }
   if (code === 'over_email_send_rate_limit' || /email rate limit/i.test(msg)) {
-    return 'O servidor já mandou o máximo de e-mails desta hora. Use o link que já chegou ou tente de novo mais tarde.';
+    return EMAIL_LIMIT_TEXT;
   }
-  if (code === 'over_request_rate_limit' || /rate limit|too many/i.test(msg)) return 'Muitas tentativas seguidas. Espere um pouco e tente de novo.';
+  if (code === 'over_request_rate_limit' || /rate limit|too many/i.test(msg)) return REQUEST_LIMIT_TEXT;
   // "Unable to validate email address: invalid format" (validation_failed) e domínio de teste recusado.
   if (code === 'email_address_invalid' || /email address.*invalid/i.test(msg)) return 'Digite um e-mail válido.';
   if (/network|fetch|timed? ?out|aborted/i.test(msg)) return 'Sem conexão com a internet.';
   if (code === 'access_denied') return LINK_EXPIRED_TEXT;
   return `Não consegui concluir agora (${msg || code || 'erro desconhecido'}). Tente de novo em instantes.`;
+}
+
+/** Códigos de erro que o Supabase põe no link do e-mail com texto próprio; o resto vale como link vencido. */
+const LINK_ERROR_TEXTS = new Map<string, string>([
+  ['session_not_found', SESSION_ENDED_TEXT],
+  ['session_expired', SESSION_ENDED_TEXT],
+  ['over_email_send_rate_limit', EMAIL_LIMIT_TEXT],
+  ['over_request_rate_limit', REQUEST_LIMIT_TEXT],
+  ['signup_disabled', SIGNUP_CLOSED_TEXT],
+]);
+
+/**
+ * Erro que veio no próprio link (`?error=…&error_code=…&error_description=…`, ver readAuthLink). Só texto fixo: o
+ * código e a descrição vêm do endereço, que qualquer um pode montar e mandar (ex.: "sua conta foi bloqueada, acesse
+ * …"), então nada dele aparece na tela. Erros de verdade do servidor continuam em authErrorText.
+ */
+export function linkErrorText(code: string): string {
+  return LINK_ERROR_TEXTS.get(code) ?? LINK_EXPIRED_TEXT;
 }

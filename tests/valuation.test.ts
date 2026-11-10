@@ -1,5 +1,16 @@
-import { RANGE_LABELS, rangeLabelsOf, SOURCE_NAME } from '@/lib/copy';
-import { myValueBelowSource, myValuePatch, myValueTrigger, pickLabel, pricePending, rangeLabels, usPriceGap, valuation } from '@/lib/valuation';
+import { MYP_NO_JAPANESE, RANGE_LABELS, rangeLabelsOf, SOURCE_NAME, TCGPLAYER_SEARCHING } from '@/lib/copy';
+import type { Entry } from '@/lib/types';
+import {
+  cardNoPriceText,
+  myValueBelowSource,
+  myValuePatch,
+  myValueTrigger,
+  pickLabel,
+  pricePending,
+  rangeLabels,
+  usPriceGap,
+  valuation,
+} from '@/lib/valuation';
 
 import { AT, entry, LATER, myp, tcg } from './fixtures';
 
@@ -211,13 +222,118 @@ describe('usPriceGap', () => {
 });
 
 describe('pricePending', () => {
-  it('inglês espera a TCGplayer; português, o MYP; japonês, nada', () => {
+  it('inglês e japonês esperam a TCGplayer; português, o MYP', () => {
     const en = entry({ lang: 'en' });
     expect(pricePending(en)).toBe(true);
     expect(pricePending({ ...en, tcgplayer: tcg(en) })).toBe(false);
     const pt = entry();
     expect(pricePending(pt)).toBe(true);
     expect(pricePending({ ...pt, mypApi: myp(pt) })).toBe(false);
-    expect(pricePending(entry({ lang: 'ja' }))).toBe(false);
+    const ja = entry({ lang: 'ja' });
+    expect(pricePending(ja)).toBe(true);
+    expect(pricePending({ ...ja, tcgplayer: tcg(ja) })).toBe(false);
+    // Olhada sem preço (ex.: mais de um produto): não espera mais nada (o MYP não tem japonesas).
+    expect(pricePending({ ...ja, tcgplayer: tcg(ja, { min: undefined, avg: undefined, max: undefined, notFound: 'mais de um produto na TCGplayer' }) })).toBe(
+      false,
+    );
+  });
+});
+
+describe('pricePending: carta em inglês sem preço na TCGplayer', () => {
+  const en = entry({ lang: 'en' });
+  const noTcg = tcg(en, { min: undefined, avg: undefined, max: undefined, notFound: 'sem vendas recentes' });
+
+  it('continua esperando enquanto o MYP não responde', () => {
+    expect(pricePending({ ...en, tcgplayer: noTcg })).toBe(true);
+    // Resposta do MYP de outra versão não é desta carta: ainda vai buscar de novo.
+    expect(pricePending({ ...en, tcgplayer: noTcg, mypApi: myp(en, { variant: 'holo' }) })).toBe(true);
+  });
+
+  it('o MYP respondeu, com ou sem preço: não espera mais', () => {
+    expect(pricePending({ ...en, tcgplayer: noTcg, mypApi: myp(en) })).toBe(false);
+    const noMyp = myp(en, { min: undefined, avg: undefined, max: undefined, qty: undefined, notFound: 'sem produto' });
+    expect(pricePending({ ...en, tcgplayer: noTcg, mypApi: noMyp })).toBe(false);
+  });
+
+  it('carta já avaliada pela TCGplayer não espera o MYP', () => {
+    expect(pricePending({ ...en, tcgplayer: tcg(en) })).toBe(false);
+  });
+});
+
+describe('carta japonesa: TCGplayer (o produto japonês)', () => {
+  const ja = entry({ lang: 'ja', cardId: 'M5-088', setId: 'M5', localId: '088', setTotal: 81, variant: 'holo' });
+
+  it('o valor é o da TCGplayer, com a faixa e a confiança média', () => {
+    const v = valuation({ ...ja, tcgplayer: tcg(ja) });
+    expect(v.basis).toBe('tcgplayer');
+    expect(v.value).toBe(12);
+    expect(v.range).toEqual({ min: 8, avg: 12, max: 15 });
+    expect(v.confidence).toBe('media');
+    expect(v.approx).toBeUndefined();
+  });
+
+  it('preço da carta base (reverse sem o produto Mirror): aproximado pela carta base, nunca "outros idiomas"', () => {
+    const rev = { ...ja, variant: 'reverse' as const };
+    const v = valuation({ ...rev, tcgplayer: tcg(rev, { base: true }) });
+    expect(v.approx).toBe('base');
+    expect(v.confidence).toBe('baixa');
+  });
+
+  it('sem preço na TCGplayer, fica sem valor (o MYP não tem japonesas)', () => {
+    expect(valuation({ ...ja, tcgplayer: tcg(ja, { min: undefined, avg: undefined, max: undefined, notFound: 'sem vendas recentes na TCGplayer' }) }).value).toBeUndefined();
+  });
+
+  it('preço de outra carta ou versão não vale', () => {
+    expect(valuation({ ...ja, tcgplayer: tcg(ja, { cardId: 'sv08-057' }) }).value).toBeUndefined();
+    expect(valuation({ ...ja, tcgplayer: tcg(ja, { variant: 'reverse' }) }).value).toBeUndefined();
+  });
+
+  it('"Meu valor" é apagado pelo mercado da TCGplayer', () => {
+    const mine = { ...ja, myValue: { value: 5, setAt: AT } };
+    expect(valuation({ ...mine, tcgplayer: tcg(ja) }).basis).toBe('manual');
+    expect(myValueTrigger({ ...mine, tcgplayer: tcg(ja, { avg: 30 }) })).toEqual({ avg: 30, source: 'tcgplayer' });
+    expect(myValueBelowSource({ ...mine, tcgplayer: tcg(ja, { avg: 30 }) })).toEqual({ avg: 30, source: 'tcgplayer' });
+    expect(myValueTrigger(mine)).toBeUndefined();
+  });
+
+  it('a TCGplayer não vale para a carta em português (mesmo guardada)', () => {
+    const pt = entry();
+    expect(valuation({ ...pt, tcgplayer: tcg(pt) }).value).toBeUndefined();
+  });
+});
+
+describe('cardNoPriceText (quadro de preço da carta sem valor)', () => {
+  const noPrice = (e: Pick<Entry, 'cardId' | 'variant'>, notFound: string) => tcg(e, { min: undefined, avg: undefined, max: undefined, notFound });
+
+  it('japonesa: buscando na TCGplayer; sem preço lá, o motivo e que o MYP não tem japonesas (na web e no celular)', () => {
+    const ja = entry({ lang: 'ja', cardId: 'M5-088', variant: 'holo' });
+    expect(cardNoPriceText(ja, undefined, undefined, false)).toBe(TCGPLAYER_SEARCHING);
+    for (const web of [false, true]) {
+      expect(cardNoPriceText(ja, undefined, noPrice(ja, 'mais de um produto na TCGplayer'), web)).toBe(
+        `Sem preço na TCGplayer (mais de um produto). ${MYP_NO_JAPANESE}`,
+      );
+    }
+    // Nunca manda esperar o MYP Cards.
+    expect(cardNoPriceText(ja, undefined, noPrice(ja, 'sem vendas recentes na TCGplayer'), false)).not.toMatch(/Buscando/);
+  });
+
+  it('inglesa: TCGplayer primeiro e depois o MYP Cards; portuguesa: só o MYP Cards', () => {
+    const en = entry({ lang: 'en', cardId: 'sv08-057' });
+    expect(cardNoPriceText(en, undefined, undefined, false)).toBe(TCGPLAYER_SEARCHING);
+    expect(cardNoPriceText(en, undefined, noPrice(en, 'sem vendas recentes na TCGplayer'), false)).toBe(
+      'Sem preço na TCGplayer (sem vendas recentes). Buscando no MYP Cards…',
+    );
+    expect(cardNoPriceText(en, undefined, noPrice(en, 'sem vendas recentes na TCGplayer'), true)).toBe(
+      'Sem preço na TCGplayer (sem vendas recentes). O MYP Cards é consultado pelo app no celular.',
+    );
+    expect(cardNoPriceText(en, { cardId: en.cardId, variant: en.variant, checkedAt: AT }, noPrice(en, 'sem vendas recentes na TCGplayer'), false)).toBe(
+      'Sem preço na TCGplayer (sem vendas recentes) nem no MYP Cards.',
+    );
+    const pt = entry();
+    expect(cardNoPriceText(pt, undefined, undefined, false)).toBe('Buscando o preço no MYP Cards…');
+    expect(cardNoPriceText(pt, undefined, undefined, true)).toBe('O MYP Cards é consultado pelo app no celular.');
+    expect(cardNoPriceText(pt, { cardId: pt.cardId, variant: pt.variant, checkedAt: AT, notFound: 'sem o produto' }, undefined, false)).toBe(
+      'Não achei esta carta no MYP Cards (sem o produto).',
+    );
   });
 });

@@ -2,6 +2,7 @@
 
 import { formatBRL, formatBRLShort, formatBRLTight, formatDay, formatInt, formatPct, formatRate, formatUSD, formatWhen } from './format';
 import type { ValueBasis } from './types';
+import type { MypNow, PriceKind, PrintCode, RefFrom } from './lookup-types';
 import type { ApproxReason, SourceId, Valuation } from './valuation';
 
 export const MYP_URL = 'https://mypcards.com';
@@ -22,10 +23,6 @@ export const VALUE_SCOPE = {
   collection: 'Valor da coleção',
 } as const;
 
-/** "Valor da coleção · 3 fichários" (o Pokédex conta como fichário). */
-export function collectionValueLabel(binderCount: number) {
-  return binderCount > 1 ? `${VALUE_SCOPE.collection} · ${binderCount} fichários` : VALUE_SCOPE.collection;
-}
 
 /** Rodapé da estante: "Total da coleção R$ 5.779". */
 export function collectionTotalText(value: number) {
@@ -53,7 +50,7 @@ export const RANGE_LABELS: Record<RangeSource, Record<ValueBasis, { short: strin
   },
   total: {
     min: { short: 'Pelo menor anúncio', long: 'Se cada carta saísse pelo menor anúncio' },
-    avg: { short: 'Pela média', long: 'Se cada carta saísse pela média (o mercado, nas cartas em inglês)' },
+    avg: { short: 'Pela média', long: 'Se cada carta saísse pela média (o mercado, nas cartas em inglês e japonês)' },
     max: { short: 'Pelo maior anúncio', long: 'Soma dos anúncios mais caros, que não é preço de venda' },
   },
 };
@@ -105,7 +102,7 @@ export function usdConversionText(p: { usdMarket?: number; fx?: number; fxDay?: 
   return `${formatUSD(p.usdMarket)} × PTAX ${formatRate(p.fx)}${p.fxDay ? ` de ${formatDay(p.fxDay)}` : ''}`;
 }
 
-/** Uma fonte na linha de créditos ("Preços: MYP Cards ↗ (41) · TCGplayer ↗ (5) · Meu valor (2)"). */
+/** Uma fonte na linha de créditos ("Preços: MYP Cards (41) · TCGplayer (5) · Meu valor (2)"). */
 export type SourceCredit = { id: SourceId; label: string; count: number; url?: string };
 
 /**
@@ -174,9 +171,26 @@ export const USE_MY_VALUE = '✎ Usar meu valor';
 export const MY_VALUE_HINT = 'Opcional · vale até o mercado passar dele';
 /** A regra do "Meu valor", para a folha de explicação. */
 export const MY_VALUE_RULE =
-  'Seu valor vale até a média da fonte passar dele (a média dos anúncios no MYP Cards; nas cartas em inglês, o valor de ' +
-  'mercado na TCGplayer). Aí o app avisa você e a carta volta ao preço escolhido em "Usar na soma", que pode ser menor ' +
-  'que o seu valor (ex.: o menor anúncio). Um valor digitado abaixo dessa média é trocado na próxima atualização do preço.';
+  'Seu valor vale até a média da fonte passar dele (a média dos anúncios no MYP Cards; nas cartas em inglês e japonês, ' +
+  'o valor de mercado na TCGplayer). Aí o app avisa você e a carta volta ao preço escolhido em "Usar na soma", que pode ' +
+  'ser menor que o seu valor (ex.: o menor anúncio). Um valor digitado abaixo dessa média é trocado na próxima ' +
+  'atualização do preço.';
+
+/** Carta japonesa: o MYP Cards não tem japonesas (quadro de preço). */
+export const MYP_NO_JAPANESE = 'O MYP Cards não tem cartas japonesas.';
+/** Carta em inglês ou japonês ainda sem a busca na TCGplayer. */
+export const TCGPLAYER_SEARCHING = 'Buscando o preço na TCGplayer…';
+/** "Sem preço na TCGplayer (sem vendas recentes)" — o motivo já sem o nome da loja (tcgplayerReason). */
+export function tcgplayerNoPriceText(reason?: string) {
+  return reason ? `Sem preço na TCGplayer (${reason})` : 'Sem preço na TCGplayer';
+}
+/**
+ * Carta japonesa avaliada pela TCGplayer: é o preço dos EUA do produto japonês, e não há anúncios do MYP Cards para
+ * comparar (nas inglesas, usPriceGapText avisa quando o preço dos EUA fica longe do daqui).
+ */
+export const JAPANESE_US_PRICE =
+  'Preço dos EUA da carta japonesa (o produto japonês na TCGplayer), convertido em reais. O MYP Cards não tem cartas ' +
+  'japonesas para comparar com os anúncios do Brasil.';
 
 /**
  * Carta em inglês com o preço dos EUA acima do daqui (usPriceGap): um "Meu valor" com o preço daqui ficaria abaixo do
@@ -282,6 +296,97 @@ export function purchaseText(p: { paid: number; current: number; pct?: number | 
 /** Na web, cartas que esperam o preço do MYP Cards (só o app no celular consulta o MYP). */
 export const MYP_ON_PHONE = 'Os preços do MYP Cards são buscados pelo app no celular; abra o app para atualizar.';
 
+/**
+ * Carta que ainda não tem preço, em cada lugar que fala dela. A web não consulta o MYP (só o app no celular): lá a
+ * carta espera, sem promessa de busca, com a mesma palavra do resumo da home.
+ */
+export function pricePendingText(web: boolean) {
+  return web
+    ? { pocket: 'esperando preço', pocketShort: 'esperando', speech: 'esperando preço', peek: 'Esperando preço' }
+    : { pocket: 'buscando…', pocketShort: 'buscando…', speech: 'buscando preço', peek: 'Buscando o preço…' };
+}
+
+/** Quando o preço aparece, na tela de adicionar (a carta ainda não foi colocada). */
+export function priceAfterPlacingText(web: boolean) {
+  return web
+    ? 'Em inglês ou japonês, o preço chega alguns minutos depois de colocar a carta. Em português, quando o app no celular buscar.'
+    : 'O preço chega alguns minutos depois de colocar a carta.';
+}
+
+// ---------- Consulta de cartas ----------
+
+/** Rótulos dos preços da Consulta. A referência de outro idioma é sempre rotulada e nunca entra no valor. */
+export const LOOKUP_PRICE = {
+  market: 'Mercado (Near Mint)',
+  low: 'Menor anúncio',
+  mid: 'Mediana dos anúncios',
+  listing: 'anúncio',
+  noSales: 'Sem vendas recentes',
+  refEn: 'TCGplayer, versão inglesa',
+  refJa: 'TCGplayer, versão japonesa',
+  refShortEn: 'ref. EN',
+  refShortJa: 'ref. JP',
+  onlyLookup: 'Só consulta: não entra na coleção',
+  mypMobileOnly: 'Preço do MYP só no app do celular',
+};
+
+/** Nome de cada impressão da TCGplayer. */
+export const PRINT_LABEL: Record<PrintCode, string> = {
+  N: 'Normal',
+  H: 'Holo',
+  R: 'Reverse',
+  '1': '1ª ed.',
+  '1H': '1ª ed. Holo',
+  U: 'Unlimited',
+  UH: 'Unlimited Holo',
+};
+
+/**
+ * "preços de 08/11 · PTAX 5,5013 de 06/11"; com `usd`, a conta inteira: "US$ 111,20 × PTAX 5,5013 de 06/11 · preços de
+ * 08/11".
+ */
+export function lookupDatesText(p: { pricesDay: string; fxDay: string; fxSell: number; usd?: number | null }) {
+  const prices = `preços de ${formatDay(p.pricesDay)}`;
+  const rate = `PTAX ${formatRate(p.fxSell)} de ${formatDay(p.fxDay)}`;
+  return p.usd != null ? `${formatUSD(p.usd)} × ${rate} · ${prices}` : `${prices} · ${rate}`;
+}
+
+const lookupRefShort = (ref: RefFrom) => (ref === 'en' ? LOOKUP_PRICE.refShortEn : ref === 'ja' ? LOOKUP_PRICE.refShortJa : '');
+
+/** Preço num chip da folha, com o que ele é: "R$ 40", "anúncio R$ 44", "ref. EN R$ 40". Só anúncio nunca parece mercado. */
+export function lookupChipPrice(brl: number, kind: PriceKind, ref: RefFrom) {
+  return [lookupRefShort(ref), kind === 'listing' ? LOOKUP_PRICE.listing : '', formatBRLTight(brl)].filter(Boolean).join(' ');
+}
+
+/** O mesmo preço para o leitor de tela: "R$ 40,00, menor anúncio, TCGplayer, versão inglesa". */
+export function lookupChipSpeech(brl: number, kind: PriceKind, ref: RefFrom) {
+  const source = ref === 'en' ? LOOKUP_PRICE.refEn : ref === 'ja' ? LOOKUP_PRICE.refJa : '';
+  return [formatBRL(brl), kind === 'listing' ? LOOKUP_PRICE.low.toLowerCase() : '', source].filter(Boolean).join(', ');
+}
+
+/** "R$ 480–700 · 12 ofertas" (quantidade só se vier; com um preço só, sem faixa). */
+export function mypOffersText(m: Extract<MypNow, { status: 'ok' }>) {
+  const low = m.min ?? m.avg ?? m.max;
+  const high = m.max ?? m.avg ?? m.min;
+  const range = low == null || high == null ? '—' : high - low >= 0.005 ? `${formatBRLTight(low)}–${formatBRLTight(high).replace('R$', '').trim()}` : formatBRLTight(low);
+  const qty = m.qty != null ? ` · ${formatInt(m.qty)} ${m.qty === 1 ? 'oferta' : 'ofertas'}` : '';
+  return `${range}${qty}`;
+}
+
+/** "MYP pediu uma pausa: 58 s" (429 do MYP); com `by` 'app', o limite do próprio app: "Limite de consultas: 52 s". */
+export const mypPauseText = (seconds: number, by: 'myp' | 'app' = 'myp') => (by === 'app' ? `Limite de consultas: ${seconds} s` : `MYP pediu uma pausa: ${seconds} s`);
+
+/** O MYP respondeu com erro ou recusou a consulta: não é falta de internet. */
+export const MYP_NO_ANSWER = 'MYP Cards não respondeu agora';
+export const MYP_OFFLINE = 'MYP Cards: sem internet agora';
+
+/** Consulta sem índice: 'server' vale tentar de novo; 'format' (arquivo que este app não lê) só atualizando o app. */
+export const LOOKUP_UNAVAILABLE = {
+  title: 'Consulta indisponível agora',
+  server: 'O servidor não entregou a lista de cartas. Tente de novo em instantes.',
+  format: 'Este aparelho não conseguiu ler a lista de cartas. Atualize o app.',
+};
+
 /** Data em que a regra de preço atual entrou em vigor (versão 2.8.0); o histórico do valor começa nela. */
 export const PRICE_RULE_SINCE = '2026-10-22';
 
@@ -297,7 +402,9 @@ export const HOW_WE_CALCULATE: { title: string; since: string; topics: { title: 
       title: 'De onde vem o preço',
       body:
         'Cartas em português: menor anúncio, média e maior anúncio do MYP Cards, que juntam todos os estados e idiomas. ' +
-        'Cartas em inglês: TCGplayer (EUA), convertida em reais pela PTAX do Banco Central.',
+        'Cartas em inglês: TCGplayer (EUA), convertida em reais pela PTAX do Banco Central. ' +
+        'Cartas em japonês: TCGplayer (EUA), o preço do produto japonês (nunca o da carta em inglês), também pela PTAX; ' +
+        'o MYP Cards não tem cartas japonesas.',
     },
     {
       title: 'Qual número entra na soma',
@@ -309,7 +416,10 @@ export const HOW_WE_CALCULATE: { title: string; since: string; topics: { title: 
     {
       title: '≈ Aproximado',
       body:
-        'Quando a versão (selo, Poké Ball…) não é vendida à parte, usamos o preço da carta base, que costuma ser parecido. ' +
+        'Quando a versão (selo, Poké Ball, Mirror das japonesas…) não é vendida à parte, usamos o preço da carta base, que ' +
+        'costuma ser parecido. ' +
+        'A Reverse Foil em português também: o MYP Cards não tem produto próprio para ela, e o preço é o do produto da ' +
+        'carta. ' +
         'Carta em inglês sem preço na TCGplayer usa os anúncios do MYP Cards, de todos os idiomas.',
     },
     {
@@ -331,3 +441,46 @@ export const HOW_WE_CALCULATE: { title: string; since: string; topics: { title: 
 
 /** Crédito das fontes (tela Sobre, rodapés). */
 export const PRICE_CREDITS = 'Preços do MYP Cards (mypcards.com) e da TCGplayer, via TCGCSV. Câmbio: PTAX do Banco Central.';
+
+// ---------- Relatórios ----------
+
+/** Variação do valor no período: "Valor da coleção: ▲ R$ 52 (1,2%) em 14 dias" (`days` = o intervalo real). */
+export function periodChangeText(c: { diff: number; pct?: number | null; days: number }) {
+  return `${VALUE_SCOPE.collection}: ${changeText(c)}`;
+}
+
+/** A mesma variação para o leitor de tela, sem ▲/▼: "Valor da coleção: alta de R$ 52,00 (1,2%) em 14 dias, com as mesmas cartas". */
+export function periodChangeSpoken(c: { diff: number; pct?: number | null; days: number }) {
+  const when = `em ${c.days} ${c.days === 1 ? 'dia' : 'dias'}`;
+  const word = c.diff > 0.005 ? 'alta' : c.diff < -0.005 ? 'queda' : '';
+  if (!word) return `${VALUE_SCOPE.collection}: sem variação ${when}`;
+  const pct = c.pct != null && Number.isFinite(c.pct) ? ` (${formatPct(Math.abs(c.pct))})` : '';
+  return `${VALUE_SCOPE.collection}: ${word} de ${formatBRL(Math.abs(c.diff))}${pct} ${when}, com as mesmas cartas`;
+}
+
+/** Cartas de uma coleção (set) e quantas têm preço: "32 cartas · 28 com preço"; todas com preço, só "32 cartas". */
+export function setCardsText(s: { count: number; valued: number }) {
+  const cards = `${formatInt(s.count)} ${s.count === 1 ? 'carta' : 'cartas'}`;
+  if (s.valued >= s.count) return cards;
+  return `${cards} · ${s.valued ? `${formatInt(s.valued)} com preço` : 'sem preço'}`;
+}
+
+/** Por que a carta está sem preço (selo curto ao lado do nome). Mesmas chaves de NoPriceReason (lib/reports.ts). */
+export const NO_PRICE_REASON: Record<'pending' | 'notFound' | 'noSource', string> = {
+  pending: 'aguardando busca',
+  notFound: 'não encontrada',
+  noSource: 'sem fonte',
+};
+
+/** "5 cartas sem preço: 2 aguardando busca, 1 não encontrada, 2 sem fonte". */
+export function noPriceText(total: number, byReason: Record<'pending' | 'notFound' | 'noSource', number>) {
+  const parts = [
+    byReason.pending ? `${formatInt(byReason.pending)} ${NO_PRICE_REASON.pending}` : null,
+    byReason.notFound ? `${formatInt(byReason.notFound)} ${byReason.notFound === 1 ? 'não encontrada' : 'não encontradas'}` : null,
+    byReason.noSource ? `${formatInt(byReason.noSource)} ${NO_PRICE_REASON.noSource}` : null,
+  ].filter(Boolean);
+  return `${formatInt(total)} ${total === 1 ? 'carta sem preço' : 'cartas sem preço'}${parts.length ? `: ${parts.join(', ')}` : ''}`;
+}
+
+/** O que fazer com a carta que não tem fonte de preço ou não foi encontrada. */
+export const NO_PRICE_HINT = `Sem fonte ou não encontrada: preencha "${SOURCE_NAME.manual}" na carta.`;

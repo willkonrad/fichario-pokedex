@@ -2,26 +2,34 @@ import type { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import type { CardDetail } from '@/lib/tcgdex';
-import { colors, radius, space, typography } from '@/theme';
+import { colors, space, typography } from '@/theme';
 
 /** Cor de cada tipo de energia (nomes em inglês e em português, como vêm da TCGdex). São cores do jogo, não da interface. */
 const ENERGY: Record<string, { color: string; pt: string }> = {
   fire: { color: '#E5484D', pt: 'Fogo' },
   water: { color: '#0090FF', pt: 'Água' },
   grass: { color: '#46A758', pt: 'Planta' },
-  lightning: { color: '#FFC53D', pt: 'Elétrico' },
+  lightning: { color: '#FFC53D', pt: 'Raios' },
   psychic: { color: '#8E4EC6', pt: 'Psíquico' },
-  fighting: { color: '#C2652A', pt: 'Lutador' },
+  fighting: { color: '#C2652A', pt: 'Luta' },
   darkness: { color: '#3A3A46', pt: 'Escuridão' },
   metal: { color: '#8D99A6', pt: 'Metal' },
   fairy: { color: '#D6409F', pt: 'Fada' },
   dragon: { color: '#B08D3A', pt: 'Dragão' },
   colorless: { color: '#C4C8D0', pt: 'Incolor' },
 };
-const PT_TO_EN: Record<string, string> = Object.fromEntries(Object.entries(ENERGY).map(([en, v]) => [v.pt.toLowerCase(), en]));
-const energyKey = (t: string) => {
+const PT_TO_EN: Record<string, string> = {
+  ...Object.fromEntries(Object.entries(ENERGY).map(([en, v]) => [v.pt.toLowerCase(), en])),
+  // A TCGdex em português chama de Sombrio, Elétrico e Lutador; a carta impressa, de Escuridão, Raios e Luta.
+  sombrio: 'darkness',
+  elétrico: 'lightning',
+  eletrico: 'lightning',
+  lutador: 'fighting',
+  agua: 'water',
+};
+export const energyKey = (t: string) => {
   const k = t.toLowerCase();
-  return ENERGY[k] ? k : (PT_TO_EN[k] ?? (k === 'eletrico' ? 'lightning' : k === 'agua' ? 'water' : k));
+  return ENERGY[k] ? k : (PT_TO_EN[k] ?? k);
 };
 const energyName = (t: string) => ENERGY[energyKey(t)]?.pt ?? t;
 
@@ -166,8 +174,8 @@ export function CardMoves({ detail }: { detail: CardDetail | null }) {
 function Stat({ label, spoken, children }: { label: string; spoken: string; children: ReactNode }) {
   return (
     <View style={styles.stat} accessible accessibilityLabel={`${label}: ${spoken}`}>
-      {/* "Resistência" não cabe inteira na coluna de um celular de 375 px: no celular, a letra diminui um pouco. */}
-      <Text style={styles.statLabel} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+      {/* "Resistência" não cabe na coluna de uma janela bem estreita: o rótulo quebra, sem ficar abaixo de 11 px. */}
+      <Text style={styles.statLabel} numberOfLines={2}>
         {label}
       </Text>
       <View style={styles.statBody}>{children}</View>
@@ -184,16 +192,18 @@ const styles = StyleSheet.create({
   moves: { gap: space.md },
   group: { gap: space.sm },
   groupLabel: { ...typography.label, color: colors.textFaint },
-  box: { backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: space.md, gap: space.xs },
+  // Linhas com fio, sem caixa: a ficha já mora num cartão (nada de cartão dentro de cartão).
+  box: { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: space.sm, gap: space.xs },
   boxKind: { ...typography.label, color: colors.textFaint },
   boxTitle: { ...typography.bodyStrong, fontWeight: '700', color: colors.text },
   boxText: { ...typography.body, fontSize: 14, lineHeight: 20, color: colors.textMuted },
   attackHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   cost: { flexDirection: 'row', gap: 3 },
-  damage: { ...typography.heading, ...typography.tabular, color: colors.text },
-  energy: { borderWidth: 1.5, borderColor: colors.border },
-  stats: { flexDirection: 'row', gap: space.sm },
-  stat: { flex: 1, backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, padding: space.md },
+  damage: { ...typography.figure, fontSize: 18, lineHeight: 24, color: colors.text },
+  // Borda clara: a energia Escuridão (quase preta) sumiria sobre o grafite.
+  energy: { borderWidth: 1, borderColor: colors.borderStrong },
+  stats: { flexDirection: 'row', gap: space.sm, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: space.md },
+  stat: { flex: 1 },
   statLabel: { ...typography.label, fontSize: 11, letterSpacing: 0.4, color: colors.textFaint },
   statBody: { gap: space.xs, marginTop: space.xs },
   statRow: { flexDirection: 'row', alignItems: 'center', gap: space.xs },

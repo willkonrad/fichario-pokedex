@@ -8,7 +8,8 @@ const fs = require('fs');
 const path = require('path');
 const { PNG } = require('pngjs');
 
-const RED = [227, 53, 13];
+// Vermelho da marca (colors.primary, #E6171E).
+const RED = [230, 23, 30];
 const WHITE = [255, 255, 255];
 const POCKET = [223, 226, 233];
 const YELLOW = [255, 203, 5];

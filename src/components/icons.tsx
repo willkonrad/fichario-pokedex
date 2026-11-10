@@ -1,7 +1,19 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
+import type { ReactNode } from 'react';
 import { type StyleProp, type ViewStyle } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 
-import { colors } from '@/theme';
+import { colors, semantic } from '@/theme';
+
+/**
+ * Conteúdo de um <Text> com cada "✎" trocado pelo ícone de lápis (o glifo muda de cara conforme a fonte do aparelho).
+ * Só o desenho muda: o texto salvo e as frases de lib/copy.ts continuam com o ✎. O ícone fica escondido do leitor de tela.
+ */
+export function withMarkIcons(text: string, { size, color }: { size: number; color: string }): ReactNode {
+  const parts = text.split(semantic.myValue.mark);
+  if (parts.length === 1) return text;
+  return parts.flatMap((part, i) => [i > 0 && <Ionicons key={i} name="pencil" size={size} color={color} allowFontScaling aria-hidden />, part]).filter(Boolean);
+}
 
 /**
  * Poké Ball em SVG (D1): substitui o ícone "pokeball" da MaterialCommunityIcons, que trazia a fonte inteira

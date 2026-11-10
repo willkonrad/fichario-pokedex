@@ -1,7 +1,11 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { router, Stack, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import {
+  Animated,
+  AppState,
+  Easing,
   Modal,
   Platform,
   Pressable,
@@ -11,14 +15,22 @@ import {
   View,
   type ScrollViewInstance,
   type TextInputInstance,
+  type TextInstance,
   type ViewInstance,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { isSpecialCard } from '@/components/binder-slot';
 import { CardAttributes, cardAttributeItems, CardMoves } from '@/components/card-facts';
 import { CardImage } from '@/components/card-image';
 import { CardMovePanel } from '@/components/card-move';
+import { digitsInSystemFont } from '@/components/digits';
+import { FoilRing } from '@/components/foil';
+import { headerTitleFor } from '@/components/header-title';
 import type { PressState } from '@/components/icon-button';
+import { useKeyboardAvoid } from '@/components/keyboard-avoid';
+import { focusNode } from '@/components/layer-a11y';
+import { NATIVE_DRIVER, useReducedMotion } from '@/components/motion';
 import { ownershipOf } from '@/components/owned-badge';
 import { PricePanel } from '@/components/price-panel';
 import {
@@ -31,7 +43,6 @@ import {
   Chip,
   ChipGroup,
   EmptyState,
-  GroupLabel,
   IconButton,
   InfoButton,
   InfoParagraph,
@@ -44,19 +55,26 @@ import {
   showToast,
   TextSkeleton,
   Toggle,
+  useAlertAnnouncement,
   useLayout,
   useToast,
 } from '@/components/ui';
 import { VersionPicker } from '@/components/version-picker';
 import { getSpecies, speciesInCardName } from '@/data/pokedex';
+import { isCopyOf, japaneseProductOf } from '@/lib/add-card';
 import { indexOfDex, indexOfExtra, isPlaced, isPlacedCustom, physicalLabel, physicalPosition, volumesNeeded } from '@/lib/binder';
+import { printedNumber } from '@/lib/card-number';
+import { cardRoute, type CardRoute } from '@/lib/card-route';
+import { entryImageUrl } from '@/lib/catalog';
 import { MY_VALUE_HINT, MY_VALUE_RULE, myValueReplacedText, purchaseText as paidVsNowText } from '@/lib/copy';
-import { formatBRL, formatDay, formatInput, parseBRL, type ParsedBRL } from '@/lib/format';
+import { formatBRL, formatDay, formatInput, formatPct, parseBRL, type ParsedBRL } from '@/lib/format';
 import { ligaQuery, ligaSearchUrl } from '@/lib/liga';
 import { entryPlace, placeText, versionText } from '@/lib/lists';
 import { mypApiDue, mypPtImage, prioritizeMypPrice } from '@/lib/myp-api';
 import { useStampImage } from '@/lib/stamp-image';
+import { TAP, TAP_LOWER } from '@/lib/tap-word';
 import { cardDetail, cardImage as tcgdexPhotoUrl, type CardDetail } from '@/lib/tcgdex';
+import { catalogOnlyVariant } from '@/lib/tcgplayer';
 import {
   CONDITIONS,
   LANG_LABEL,
@@ -72,9 +90,10 @@ import {
   type Variant,
 } from '@/lib/types';
 import { valuation } from '@/lib/valuation';
-import { availableVariants, cardVersions, versionOptions, type VersionOption } from '@/lib/variants';
+import { availableVariants, cardVersions, sameStamp, sameVersion, savedVersionOf, versionOptions, type VersionOption } from '@/lib/variants';
 import {
   keyOf,
+  saveCollectionNow,
   useBinders,
   useCollectionActions,
   useCollectionReady,
@@ -84,7 +103,7 @@ import {
   useSyncStatus,
   type MoveTarget,
 } from '@/store/collection';
-import { binderColors, breakpoints, CARD_RATIO, colors, radius, semantic, space, typography, widths } from '@/theme';
+import { breakpoints, CARD_RATIO, colors, radius, semantic, space, TOUCH, typography, widths } from '@/theme';
 
 /** `binder` = fichário livre (sem ele, é o fichário Pokédex e `dex` diz o Pokémon). */
 type Params = {
@@ -107,6 +126,8 @@ type Params = {
   name?: string;
   setName?: string;
   localId?: string;
+  /** Produto da TCGplayer japonesa escolhido na lista: a carta da TCGdex japonesa que é ele (cópias salvas com esse id). */
+  tcgdexId?: string;
   /** Estado escolhido na folha de adicionar (C3). */
   condition?: Condition;
   /** 'add': veio do "+ Carta"; depois de colocar, o aviso oferece "Adicionar outra". */
@@ -136,11 +157,27 @@ type Edits = {
 const NOTE_VARIANTS: Variant[] = ['other', 'staff', 'wPromo'];
 
 const WEB = Platform.OS === 'web';
+/** Espessura do filete foil em volta da arte grande (nas listas e no fichário ele é mais fino). */
+const HERO_FOIL = 4;
+/** Brilho do filete: branco que some nas pontas (com a própria cor em alfa 0, para a ponta não acinzentar). */
+const GLEAM_COLORS = [`${colors.text}00`, colors.text, `${colors.text}00`] as const;
+const GLEAM_WIDTH = 64;
+const GLEAM_MS = 700;
+/** Espera a arte terminar de aparecer (o esmaecer de 200 ms do CardImage). */
+const GLEAM_DELAY = 200;
+/** Idioma da foto do Zukan, que vem no endereço (…/cards/<coleção>/pt/…). */
+const ZUKAN_LANG = /zukan\.com\.br\/cards\/[^/]+\/(pt|en)\//;
 /** Título da tela para o leitor de tela (na web, <h1>). */
 const HEADING_1 = { role: 'heading' as const, ...((WEB ? { 'aria-level': 1 } : {}) as object) };
 const HEADING_2 = { role: 'heading' as const, ...((WEB ? { 'aria-level': 2 } : {}) as object) };
+/** Na web, o título recebe o foco ao abrir a tela (fora da ordem do Tab e sem o contorno do foco). */
+const TITLE_TAB = (WEB ? { tabIndex: -1 } : {}) as object;
+const TITLE_FOCUS = WEB ? ({ outlineWidth: 0 } as const) : null;
 
 const variantName = (v: Variant) => VARIANTS.find((x) => x.id === v)?.label ?? v;
+
+/** Cor da diferença entre o valor de hoje e o pago (o dinheiro em si fica branco, como em Compras). */
+const paidTone = (diff: number) => (diff > 0.005 ? semantic.gain.fg : diff < -0.005 ? semantic.loss.fg : colors.textMuted);
 
 /** A carta tem dados próprios além da ficha (estado, observações, origem, valor pago)? */
 const hasOwnData = (e: Entry) => e.condition !== 'NM' || !!e.notes || !!e.origin || e.purchasePrice != null;
@@ -163,8 +200,10 @@ function failureOf(run: Promise<void>): Promise<string | null> {
 
 export default function CardScreen() {
   const params = useLocalSearchParams<Params>();
+  // Bolso, Pokémon e idioma conferidos: um link digitado com "slot=abc" ou "lang=ko" não chega ao formulário.
+  const route = cardRoute(params);
   const ready = useCollectionReady();
-  const existing = useEntry(keyOf(params.binder, Number(params.dex ?? 0), Number(params.slot ?? 0)));
+  const existing = useEntry(route ? keyOf(route.binder, route.dex, route.slot) : undefined);
   // A carta que está no bolso agora. Atualizada antes da limpeza do formulário que sai (efeito de layout), para o
   // salvamento ao desmontar não gravar o formulário antigo por cima da carta que entrou nem trazer de volta uma removida.
   const inPocket = useRef(existing);
@@ -173,16 +212,36 @@ export default function CardScreen() {
   });
   // O formulário só monta depois de carregar a coleção, para o estado inicial vir da carta salva.
   if (!ready) return <Loading />;
+  if (!route) {
+    return (
+      <EmptyState
+        title="Bolso vazio"
+        text="Este endereço não leva a um bolso do fichário."
+        action={<Button title="Voltar ao fichário" variant="secondary" onPress={() => router.dismissTo('/')} />}
+      />
+    );
+  }
   // T1: o formulário recomeça do zero quando a carta do bolso muda (troca feita por outra tela ou em outro aparelho):
   // o que estava na tela da carta que saiu nunca é gravado na que entrou.
   const formKey = params.cardId
-    ? `escolha:${params.cardId}|${params.lang ?? ''}|${params.variant ?? ''}|${params.stamp ?? ''}`
+    ? `escolha:${params.cardId}|${route.lang ?? ''}|${route.variant ?? ''}|${params.stamp ?? ''}`
     : `salva:${existing ? `${existing.cardId}|${existing.lang}` : ''}`;
-  return <CardForm key={formKey} params={params} existing={existing} inPocket={inPocket} />;
+  return <CardForm key={formKey} params={params} route={route} existing={existing} inPocket={inPocket} />;
 }
 
-function CardForm({ params, existing, inPocket }: { params: Params; existing?: Entry; inPocket: RefObject<Entry | undefined> }) {
-  const slot = Number(params.slot ?? 0);
+function CardForm({
+  params,
+  route,
+  existing,
+  inPocket,
+}: {
+  params: Params;
+  /** Os parâmetros do bolso já conferidos (use estes, não os de `params`). */
+  route: CardRoute;
+  existing?: Entry;
+  inPocket: RefObject<Entry | undefined>;
+}) {
+  const slot = route.slot;
   const entries = useEntries();
   const settings = useSettings();
   const binders = useBinders();
@@ -199,25 +258,22 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
    */
   const fromCollection = () => params.origem === 'colecao' || !!navigation.getState()?.routes.some((r) => r.name === 'menu');
 
-  const customBinder = params.binder ? binders.find((b) => b.id === params.binder) : undefined;
+  const customBinder = route.binder ? binders.find((b) => b.id === route.binder) : undefined;
   const binderId = customBinder?.id;
   // Bolso extra do fichário Pokédex (sobra da última página): a carta fica com dex 0 e slot = nº do bolso extra.
-  const isExtra = !customBinder && Number(params.dex ?? -1) === 0;
-  const lang = (params.lang ?? existing?.lang ?? 'pt') as CardLang;
+  const isExtra = !route.binder && route.dex === 0;
+  const lang: CardLang = route.lang ?? existing?.lang ?? 'pt';
   const pickStamp = (params.stamp ?? '').trim();
   // Carta escolhida na lista (F1): é nova quando o bolso está vazio ou quando muda a carta, o idioma, a variação ou o
   // selo (a mesma carta em inglês, ou a versão com selo, substitui a salva). A mesma carta de novo só abre a ficha.
   const isPick = !!params.cardId;
-  // Decidido ao abrir: mudar aqui a variação ou o selo da carta que já estava no bolso não a transforma em troca.
-  const [pickIsSaved] = useState(
-    () =>
-      isPick &&
-      !!existing &&
-      existing.cardId === params.cardId &&
-      existing.lang === lang &&
-      (params.variant == null || params.variant === existing.variant) &&
-      pickStamp === (existing.variantNote ?? '').trim(),
-  );
+  // Decidido ao abrir: mudar aqui a variação ou o selo da carta que já estava no bolso não a transforma em troca. O selo
+  // salvo com o nome de uma versão anterior do app ("Logo da coleção (Booster Box)", "Pre Release") é o mesmo da lista.
+  const [pickIsSaved] = useState(() => {
+    if (!isPick || !existing || existing.cardId !== params.cardId || existing.lang !== lang) return false;
+    const inPocketNow = { variant: existing.variant, stamp: existing.variantNote, keys: existing.stampKeys };
+    return route.variant == null ? sameStamp({ stamp: pickStamp }, inPocketNow) : sameVersion({ variant: route.variant, stamp: pickStamp }, inPocketNow);
+  });
   const isNewCard = isPick && !(pickIsSaved && !!existing && existing.cardId === params.cardId && existing.lang === lang);
   // A carta do bolso sai quando a escolhida for colocada.
   const replacing = isNewCard && !!existing;
@@ -234,7 +290,7 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
   }, [saved]);
   const cardId = params.cardId ?? existing?.cardId;
   // Idioma do catálogo de onde vêm os dados (pode ser inglês para coleções que não existem em PT).
-  const dataLang = (params.dataLang ?? (isNewCard ? undefined : existing?.dataLang) ?? lang) as CardLang;
+  const dataLang: CardLang = route.dataLang ?? (isNewCard ? undefined : existing?.dataLang) ?? lang;
 
   const [detail, setDetail] = useState<CardDetail | null>(null);
   const [enDetail, setEnDetail] = useState<CardDetail | null>(null);
@@ -280,7 +336,7 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
         (detail ? speciesInCardName(detail.name)?.id : params.name ? speciesInCardName(params.name)?.id : undefined) ??
         (customBinder ? saved?.dex : undefined) ??
         0)
-      : Number(params.dex);
+      : route.dex;
 
   // Troca de carta (F1): estado, origem e observações da antiga podem continuar (já vêm marcados quando é a mesma carta
   // em outro idioma ou versão).
@@ -288,8 +344,25 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
   const [keepOld, setKeepOld] = useState(keepAtOpen);
   const kept = isNewCard ? (keepAtOpen ? existing : undefined) : existing;
   // Variação escolhida (null = ainda não escolheu: usa a primeira que existe para a carta).
-  const [pickedVariant, setPickedVariant] = useState<Variant | null>(isNewCard ? (params.variant ?? null) : (existing?.variant ?? null));
+  const [pickedVariant, setPickedVariant] = useState<Variant | null>(isNewCard ? (route.variant ?? null) : (existing?.variant ?? null));
   const [variantNote, setVariantNote] = useState(isNewCard ? (params.stamp ?? '') : (existing?.variantNote ?? ''));
+  // Carta japonesa só do catálogo ("tcgp-") sem versão escolhida: a variação das impressões do produto (holo, 1ª
+  // edição), a mesma que o "Adicionar" marca (e a versão que a lista mostra). Só enquanto nenhuma foi escolhida aqui.
+  const [productVariant, setProductVariant] = useState<Variant | null>(null);
+  useEffect(() => {
+    if (!isNewCard || route.variant != null || !cardId) return;
+    let live = true;
+    catalogOnlyVariant({ id: cardId, lang, stamp: params.stamp || undefined })
+      .then((v) => {
+        if (!live || !v) return;
+        setProductVariant(v);
+        setPickedVariant((now) => now ?? v);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [isNewCard, route.variant, cardId, lang, params.stamp]);
   // Estado escolhido na folha de adicionar (C3); valor desconhecido no parâmetro vale NM.
   const pickCondition = isNewCard && CONDITIONS.some((c) => c.id === params.condition) ? params.condition : undefined;
   const [condition, setCondition] = useState<Condition>(kept?.condition ?? pickCondition ?? 'NM');
@@ -313,13 +386,18 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
   const valueBasis = basisEdit ? basisEdit.v : isNewCard ? undefined : existing?.valueBasis;
   const [photoChoice, setPhotoChoice] = useState<PhotoChoice>(() =>
     isNewCard
-      ? { variant: params.variant, note: pickStamp, url: params.photo }
+      ? { variant: route.variant, note: pickStamp, url: params.photo }
       : { variant: existing?.variant, note: (existing?.variantNote ?? '').trim(), url: existing?.stampPhoto },
   );
-  const [saving, setSaving] = useState(false);
+  // "Colocar" em andamento; `over` = havia carta no bolso ao tocar. A carta nova entra no bolso antes de a tela fechar, e
+  // a tela continua como estava: o título não vira "Substituir carta" no bolso que estava vazio.
+  const [saving, setSaving] = useState<{ over: boolean } | null>(null);
+  const shownReplacing = saving ? saving.over : replacing;
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [zoom, setZoom] = useState(false);
+  // Arte grande na tela: só então o filete foil aparece (senão fica uma moldura em volta do vazio).
+  const [artLoaded, setArtLoaded] = useState(false);
   const [showAllVariants, setShowAllVariants] = useState(false);
   // Carta nova: só estado e variação à vista; o resto em "Mais detalhes". Carta salva: origem e observações recolhidas
   // quando vazias (U7). Depois de abertas, ficam abertas: apagar as observações não esconde o campo no meio da digitação.
@@ -335,9 +413,27 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
   // Versões da TCGdex mais as do catálogo (C9), as mesmas que a lista de escolha mostra.
   const [catalogVersions, setCatalogVersions] = useState<VersionOption[] | null>(null);
   const scrollRef = useRef<ScrollViewInstance>(null);
+  // "Reduzir movimento": as rolagens até o painel de mover e o "Meu valor" pulam direto (DESIGN.md).
+  const reduceMotion = useReducedMotion();
+  const keyboard = useKeyboardAvoid(scrollRef);
+  // Web: ao abrir a tela, o foco vai para o título (o nome da carta); senão fica no body. Uma vez só, e nunca tirando o
+  // foco de um campo em que a pessoa já está digitando.
+  const titleRef = useRef<TextInstance>(null);
+  const titleFocused = useRef(false);
+  const titleText = detail?.name ?? saved?.cardName ?? params.name;
+  useEffect(() => {
+    if (!WEB || titleFocused.current || !titleText || !titleRef.current) return;
+    titleFocused.current = true;
+    const active = typeof document !== 'undefined' ? document.activeElement : null;
+    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
+    focusNode(titleRef.current);
+  }, [titleText]);
   const contentRef = useRef<ViewInstance>(null);
   const myValueBox = useRef<ViewInstance>(null);
   const myValueInput = useRef<TextInputInstance>(null);
+  // "Mover": a rolagem vai até o painel, que só tem posição depois de montar.
+  const moveScrollPending = useRef(false);
+  const moveY = useRef(0);
 
   useEffect(() => {
     // As versões saem do catálogo em inglês (impressões da TCGdex sem tradução) e do catálogo do TCGCSV.
@@ -362,18 +458,30 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
 
   const avail = availableVariants(detail, enDetail);
   const variant: Variant = pickedVariant ?? avail.ids[0] ?? 'normal';
-  const versions = catalogVersions ?? versionOptions(detail, enDetail);
+  const ownVersions = catalogVersions ?? versionOptions(detail, enDetail);
+  // Ficha sem versões (carta japonesa só do catálogo): a das impressões do produto, como no "Adicionar".
+  const versions = !ownVersions.length && productVariant ? [{ variant: productVariant }] : ownVersions;
   // As versões vêm do catálogo em inglês (carta japonesa: só do próprio).
   const versionsReady = lang === 'ja' ? !!detail : !!catalogVersions;
   const showVersions = versionsOpen || (isNewCard && versionsReady && versions.length > 1 && pickedVariant == null && !versionsDismissed);
 
-  /** Selos da versão escolhida (para desenhar o selo oficial sobre a arte). */
+  /**
+   * Selos da versão escolhida (para desenhar o selo oficial sobre a arte): os da versão da lista que é ela, inclusive com
+   * o nome que uma versão anterior do app deu ao selo (savedVersionOf: "Pre Release" salvo como promo é o "Pré-release"
+   * de hoje). Sem nenhuma, a carta salva nesta versão mantém os selos dela: o salvamento automático nunca os apaga.
+   */
   function stampKeysOf(v: Variant, note: string): string[] | undefined {
     if (v !== 'wPromo' && v !== 'staff') return undefined;
     // Ficha ainda carregando: mantém os selos já salvos.
     if (!versions.length) return saved?.variant === v ? saved.stampKeys : undefined;
-    const stamped = versions.filter((o) => o.variant === v && o.stampKeys?.length);
-    return (stamped.find((o) => o.stamp === note.trim()) ?? (stamped.length === 1 ? stamped[0] : undefined))?.stampKeys;
+    // A carta salva nesta mesma versão (variação e selo como estão na tela).
+    const here = saved && saved.variant === v && (saved.variantNote ?? '').trim() === note.trim() ? saved : undefined;
+    const stamped = versions.filter((o) => o.stampKeys?.length);
+    const hit = savedVersionOf(stamped, { variant: v, stamp: note, keys: here?.stampKeys });
+    if (hit) return hit.stampKeys;
+    if (here?.stampKeys?.length) return here.stampKeys;
+    const ofVariant = stamped.filter((o) => o.variant === v);
+    return ofVariant.length === 1 ? ofVariant[0].stampKeys : undefined;
   }
   // A foto é da versão E do selo escolhidos: trocar um dos dois descarta a foto.
   const photoFits = (v: Variant, note: string, c: PhotoChoice = photoChoice) => !!c.url && v === c.variant && note.trim() === c.note;
@@ -457,22 +565,35 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
   // dispara uma gravação com o formulário antigo (T1).
   const textKey = `${variantNote}|${notes}|${myValueEdit?.text ?? ''}|${purchaseText}`;
   const savedTextKey = useRef(textKey);
-  const flush = useRef<() => void>(() => {});
+  const flush = useRef<() => Promise<void>>(async () => {});
   useEffect(() => {
     // Guarda o salvamento com os valores atuais, para o atraso e a saída da tela usarem os mais recentes.
     flush.current = () => {
-      if (!autoSave || savedTextKey.current === textKey) return;
+      if (!autoSave || savedTextKey.current === textKey) return Promise.resolve();
       savedTextKey.current = textKey;
-      autoPersist().catch(() => {});
+      return autoPersist().catch(() => {});
     };
   });
   useEffect(() => {
-    const t = setTimeout(() => flush.current(), 700);
+    const t = setTimeout(() => void flush.current(), 700);
     return () => clearTimeout(t);
   }, [textKey]);
-  useEffect(() => () => flush.current(), []);
+  useEffect(
+    () => () => {
+      void flush.current();
+    },
+    [],
+  );
+  // App em segundo plano: os relógios param (o de 700 ms e o da gravação agrupada do store), e o Android pode fechar o
+  // app antes da volta. O texto digitado agora é salvo e gravado no aparelho na hora.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') void flush.current().then(() => saveCollectionNow());
+    });
+    return () => sub.remove();
+  }, []);
 
-  if (!settings || (params.binder && !customBinder)) {
+  if (!settings || (route.binder && !customBinder)) {
     return <EmptyState title="Fichário não encontrado" text="Ele pode ter sido apagado em outro aparelho." />;
   }
   if (!cardId) {
@@ -498,29 +619,38 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
   const setName = detail?.set.name ?? saved?.setName ?? params.setName ?? '';
   const total = detail?.set.cardCount?.official || saved?.setTotal;
   const localId = detail?.localId ?? saved?.localId ?? params.localId ?? '';
-  const number = `${localId}${total ? `/${String(total).padStart(3, '0')}` : ''}`;
+  const setId = detail?.set.id ?? saved?.setId;
+  // Como impresso: "1/64" na Jungle, "TG05/TG30" na galeria, "SWSH020" na promo (sem o total inventado).
+  const number = printedNumber({ localId, total, setId, setName });
   const name = detail?.name ?? saved?.cardName ?? params.name ?? '';
   const rarity = detail?.rarity ?? saved?.rarity;
   // Link da carta na Liga: a busca salva (versões antigas, com os casos especiais de numeração) ou
   // "Nome em inglês (número/total)"; carta japonesa usa o nome do Pokémon.
   const ligaName = lang === 'ja' ? (getSpecies(dex)?.name ?? name) : (enDetail?.name ?? name);
   const ligaUrl = name
-    ? ligaSearchUrl(saved?.ligaQuery ?? ligaQuery(ligaName, localId || undefined, (detail?.set.cardCount?.official || detail?.set.cardCount?.total) ?? saved?.setTotal))
+    ? ligaSearchUrl(
+        saved?.ligaQuery ??
+          ligaQuery(ligaName, localId || undefined, (detail?.set.cardCount?.official || detail?.set.cardCount?.total) ?? saved?.setTotal, { setId, setName }),
+      )
     : undefined;
   // Mesma carta (id + idioma) em outros bolsos ou fichários. "Já tem" só com a mesma versão (F3): outro selo, reverse ou
-  // holo é outra versão. Com a variação ainda desconhecida (ficha carregando), só o selo conta.
-  const copies = Object.values(entries).filter((e) => e.cardId === cardId && e.lang === lang && e.id !== existing?.id);
+  // holo é outra versão. Com a variação ainda desconhecida (ficha carregando), só o selo conta. Na japonesa, também a
+  // mesma carta salva com o outro id: o produto da TCGplayer japonesa e a carta da TCGdex que é ele (ver isCopyOf).
+  const self = { id: cardId ?? '', lang, tcgdexId: params.tcgdexId, product: saved ? japaneseProductOf(saved) : undefined };
+  const copies = Object.values(entries).filter((e) => e.id !== existing?.id && isCopyOf(e, self));
   const variantKnown = pickedVariant != null || !!detail || !!enDetail || !!loadError;
   // Selo da versão: o de promo/staff e o das versões do catálogo (Poke Ball Pattern, Cosmos Holo…); "Outra" é texto livre.
   const versionStamp = variant === 'other' ? '' : variantNote.trim();
-  const sameVersion = (c: Entry) =>
-    (!variantKnown || c.variant === variant) && !!ownershipOf([c], { stamp: versionStamp ? { label: versionStamp } : null })?.exact;
-  const sameCopies = copies.filter(sameVersion);
-  const otherCopies = copies.filter((c) => !sameVersion(c));
+  const isSameVersion = (c: Entry) =>
+    variantKnown
+      ? sameVersion({ variant, stamp: versionStamp }, { variant: c.variant, stamp: c.variant === 'other' ? '' : c.variantNote, keys: c.stampKeys })
+      : !!ownershipOf([c], { stamp: versionStamp ? { label: versionStamp } : null })?.exact;
+  const sameCopies = copies.filter(isSameVersion);
+  const otherCopies = copies.filter((c) => !isSameVersion(c));
   // Onde está cada cópia ("Fichário Pokédex · pág. 2, bolso 5", ou "fora das páginas"); a de outra versão diz qual.
   const copyPlace = (c: Entry) => {
     const where = placeText(entryPlace(c, settings, binders));
-    return sameVersion(c) ? where : `${where} (${versionText(c) || variantName(c.variant)})`;
+    return isSameVersion(c) ? where : `${where} (${versionText(c) || variantName(c.variant)})`;
   };
   const placesOf = (list: Entry[]) => `${list.slice(0, 3).map(copyPlace).join('; ')}${list.length > 3 ? ` e mais ${list.length - 3}` : ''}`;
   const copiesText = [
@@ -536,14 +666,14 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
 
   async function addToBinder() {
     if (invalid || !canPlace) return;
-    setSaving(true);
+    setSaving({ over: replacing });
     setSaveError(null);
     const old = replacing ? existing : undefined;
     const entry = buildEntry();
     const failed = await failureOf(saveEntry(entry));
     if (failed !== null) {
       setSaveError(`Não consegui salvar: ${failed}`);
-      setSaving(false);
+      setSaving(null);
       return;
     }
     const newId = keyOf(binderId, entry.dex, entry.slot);
@@ -566,18 +696,31 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
     } else {
       toast.show({ message: placedMessage, actionLabel: 'Desfazer', onAction: () => undoWith(() => removeEntry(newId)) });
     }
-    // Troca feita a partir da Minha coleção (U8): volta para ela, que continua aberta.
-    router.dismissTo(fromCollection() ? '/menu' : '/');
+    // Troca feita a partir dos Relatórios ou da Minha coleção (U8): volta para a tela, que continua aberta.
+    dismissHome();
+  }
+
+  /**
+   * Fecha a tela da carta e volta para quem a abriu e continua aberta (U8): Relatórios (com o período escolhido) ou Minha
+   * coleção; sem nenhuma das duas, o fichário.
+   */
+  function dismissHome() {
+    const routes = navigation.getState()?.routes ?? [];
+    const opener = [...routes].reverse().find((r) => r.name === 'reports' || r.name === 'menu');
+    if (opener?.name === 'reports') {
+      const { periodo } = (opener.params ?? {}) as { periodo?: string };
+      router.dismissTo({ pathname: '/reports', params: periodo ? { periodo } : {} });
+    } else router.dismissTo(fromCollection() ? '/menu' : '/');
   }
 
   /**
    * Sai depois de remover ou mover a carta: volta para a tela que a abriu (fichário, Minha coleção, busca), que continua
-   * aberta (U8); vinda da escolha de carta, ou sem tela anterior (link direto na web), vai para a Minha coleção, se veio
-   * dela, ou para o fichário.
+   * aberta (U8); vinda da escolha de carta, ou sem tela anterior (link direto na web), vai para os Relatórios ou a Minha
+   * coleção, se veio deles, ou para o fichário.
    */
   function leave() {
     if (!isPick && router.canGoBack()) router.back();
-    else router.dismissTo(fromCollection() ? '/menu' : '/');
+    else dismissHome();
   }
 
   /** Tira a carta do bolso (com "Desfazer" no aviso, que a recoloca com as edições desta tela). */
@@ -645,16 +788,26 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
   /** "Trocar por outra carta": abre a escolha para este mesmo bolso. */
   function replaceCard() {
     setMenuOpen(false);
-    flush.current();
+    void flush.current();
     if (customBinder) router.push({ pathname: '/search', params: { binder: customBinder.id, slot } });
     else if (isExtra) router.push({ pathname: '/search', params: { extra: slot } });
     else router.push({ pathname: '/pokemon/[dex]', params: { dex, slot } });
   }
 
+  /** Leva ao painel de mover: no celular, ele fica bem abaixo da arte grande. */
+  function scrollToMove(y: number) {
+    scrollRef.current?.scrollTo({ y: Math.max(0, y - space.lg), animated: !reduceMotion });
+  }
+
   function openMove() {
     setMenuOpen(false);
+    // Já aberto: o onLayout não vem de novo.
+    if (moveOpen) {
+      scrollToMove(moveY.current);
+      return;
+    }
+    moveScrollPending.current = true;
     setMoveOpen(true);
-    scrollRef.current?.scrollTo({ y: 0, animated: true });
   }
 
   /** "Ver no fichário" (U7): abre o fichário desta carta, na página dela (os mesmos parâmetros da URL da home). */
@@ -673,7 +826,7 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
       if (box && content) {
         box.measureLayout(
           content,
-          (_x, y) => scrollRef.current?.scrollTo({ y: Math.max(0, y - space.lg), animated: true }),
+          (_x, y) => scrollRef.current?.scrollTo({ y: Math.max(0, y - space.lg), animated: !reduceMotion }),
           () => {},
         );
       }
@@ -712,24 +865,36 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
     autoPersist({ variant: v, variantNote: note }).catch(() => {});
   }
 
+  // Foto do catálogo (ou reserva) da carta sem imagem da TCGdex: a da lista (carta nova) ou a da carta salva, que numa
+  // japonesa pode ser a do produto da TCGplayer japonesa ligado pelo preço (entryImageUrl).
+  const catalogImageUrl = detail?.imageUrl ?? (isNewCard ? params.imageUrl : saved ? entryImageUrl(saved) : undefined);
   // Idioma da imagem mostrada: a da TCGdex diz no endereço (/pt/, /en/); as reservas (pokemontcg.io, Scrydex) são
-  // da carta em inglês; o Zukan também diz no endereço.
-  const shownImage = tcgdexImage ?? resolvedImageUrl ?? (isNewCard ? params.imageUrl : saved?.imageUrl);
+  // da carta em inglês; o Zukan também diz no endereço. Carta japonesa só usa foto japonesa (TCGdex japonesa ou
+  // TCGplayer japonesa, categoria 85): nunca a reserva de outro idioma.
+  const shownImage = tcgdexImage ?? resolvedImageUrl ?? (isNewCard ? params.imageUrl : saved ? entryImageUrl(saved) : undefined);
   // Carta em português sem foto em português na TCGdex: a foto em português do MYP, quando ele tem.
   const ptImage = saved && !detail?.image?.includes('/pt/') ? mypPtImage(saved) : undefined;
+  // Reserva do Zukan já na tela (a foto do catálogo falhou, ex.: coleção nova sem foto na TCGplayer): vale o idioma dela.
+  const zukanLang = resolvedImageUrl?.match(ZUKAN_LANG)?.[1] as CardLang | undefined;
   const imageLang: CardLang | undefined =
-    photo || stampPhoto || detail?.imageUrl
-      ? 'en'
-      : ptImage
-        ? 'pt'
-        : !shownImage
-          ? undefined
-          : lang === 'ja'
-            ? 'ja'
-            : // Pelo endereço que a imagem usa de fato (a foto em português com selo vira a em inglês, ver cardImage).
-              (((shownImage.includes('assets.tcgdex.net') ? tcgdexPhotoUrl(shownImage) : shownImage)?.match(/tcgdex\.net\/(pt|en|ja)\//)?.[1] ??
-                shownImage.match(/zukan\.com\.br\/cards\/[^/]+\/(pt|en)\//)?.[1] ??
-                'en') as CardLang);
+    lang === 'ja'
+      ? photo || shownImage || catalogImageUrl
+        ? 'ja'
+        : undefined
+      : photo || stampPhoto
+        ? 'en'
+        : zukanLang
+          ? zukanLang
+          : detail?.imageUrl
+            ? 'en'
+            : ptImage
+              ? 'pt'
+              : !shownImage
+                ? undefined
+                : // Pelo endereço que a imagem usa de fato (a foto em português com selo vira a em inglês, ver cardImage).
+                  (((shownImage.includes('assets.tcgdex.net') ? tcgdexPhotoUrl(shownImage) : shownImage)?.match(/tcgdex\.net\/(pt|en|ja)\//)?.[1] ??
+                    shownImage.match(ZUKAN_LANG)?.[1] ??
+                    'en') as CardLang);
 
   // `quality`: 'high' na carta grande; 'low' nas miniaturas do seletor de versões (sem baixar a foto de 1000 px de cada).
   const cardImage = (o: {
@@ -740,10 +905,11 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
     dark?: boolean;
     priority?: 'high';
     quality?: 'low' | 'high';
+    onLoad?: () => void;
   }) => (
     <CardImage
       image={tcgdexImage}
-      imageUrl={detail?.imageUrl ?? (isNewCard ? params.imageUrl : saved?.imageUrl)}
+      imageUrl={catalogImageUrl}
       cardId={lang === 'ja' ? undefined : cardId}
       nameEn={enDetail?.name}
       setNameEn={enDetail?.set.name}
@@ -757,16 +923,18 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
       dark={o.dark}
       priority={o.priority}
       onResolved={setResolvedImageUrl}
+      onLoad={o.onLoad}
     />
   );
 
-  // ---------- Layout: no celular, a carta ao lado do nome; no computador (≥ 960), a carta fixa à esquerda (W4) ----------
+  // ---------- Layout: no celular, a arte grande no alto e o nome embaixo; no computador (≥ 960), a arte fixa à esquerda (W4) ----------
   const wide = layout.width >= breakpoints.desktop;
   const split = layout.width >= breakpoints.wide;
   const barSpace = isNewCard ? BOTTOM_BAR_SPACE + insets.bottom : 0;
   const heroWidth = wide
-    ? Math.round(Math.max(240, Math.min(420, Math.max(320, layout.width * 0.3), (layout.height - 112 - barSpace) * CARD_RATIO)))
-    : Math.round(Math.min(220, Math.max(120, (Math.min(layout.width, widths.reading) - layout.gutter * 2) * 0.38)));
+    ? Math.round(Math.max(280, Math.min(480, Math.max(360, layout.width * 0.34), (layout.height - 112 - barSpace) * CARD_RATIO)))
+    : Math.round(Math.min(300, layout.width * 0.62));
+  const special = isSpecialCard({ variant, rarity });
   const side = Math.max(layout.gutter, (layout.width - widths.wide) / 2);
   // Carta ampliada: o maior tamanho que cabe na tela, mantendo a proporção.
   const zoomWidth = Math.min(layout.width - 40, (layout.height - 140) * CARD_RATIO, 520);
@@ -778,11 +946,21 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
       onPress={() => setZoom(true)}
       role="button"
       accessibilityLabel="Ampliar a imagem da carta">
-      {waitingImage ? (
-        <CardSkeleton width={heroWidth} tone="dark" />
-      ) : (
-        cardImage({ fit: 'contain', stampKeys: stampKeysOf(variant, variantNote), photo, ptImage, dark: true, priority: 'high' })
-      )}
+      {/* O filete é uma camada atrás da arte: trocar a variação liga e desliga o foil sem recarregar a imagem. */}
+      {special && artLoaded ? (
+        <FoilRing radius={radius.md} width={HERO_FOIL} style={StyleSheet.absoluteFill}>
+          {null}
+        </FoilRing>
+      ) : null}
+      {/* Fora da condição do filete: trocar a variação depois não repete o brilho. Com o seletor de versões aberto, espera. */}
+      <FoilGleam active={special && artLoaded && !showVersions} width={heroWidth} height={heroWidth / CARD_RATIO} />
+      <View style={styles.heroArt}>
+        {waitingImage ? (
+          <CardSkeleton width={heroWidth - HERO_FOIL * 2} tone="dark" />
+        ) : (
+          cardImage({ fit: 'contain', stampKeys: stampKeysOf(variant, variantNote), photo, ptImage, dark: true, priority: 'high', onLoad: () => setArtLoaded(true) })
+        )}
+      </View>
       {imageLang && imageLang !== lang ? (
         <View
           style={styles.photoLang}
@@ -792,34 +970,36 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
         </View>
       ) : null}
       <View style={styles.zoomHint} aria-hidden>
-        <Ionicons name="expand-outline" size={14} color={semantic.inverse.fg} />
+        <Ionicons name="expand-outline" size={14} color={colors.text} />
       </View>
     </Pressable>
   );
 
+  // O nome primeiro: a coleção e o número vêm embaixo dele (rótulo em cima de título é kicker). No celular, tudo centralizado sob a arte.
   const titleBlock = (
-    <View style={styles.titleBlock}>
+    <View style={[styles.titleBlock, !wide && styles.titleBlockCenter]}>
+      {name ? (
+        <Text ref={titleRef} style={[styles.title, !wide && styles.textCenter, TITLE_FOCUS]} {...HEADING_1} {...TITLE_TAB}>
+          {/* Porygon2, Zygarde 10%: número nunca em Kanit. */}
+          {digitsInSystemFont(name)}
+        </Text>
+      ) : !loadError ? (
+        <TextSkeleton lines={2} lineHeight={18} />
+      ) : null}
       {setName || number ? (
-        <Text style={styles.setLine} numberOfLines={3}>
+        <Text style={[styles.setLine, !wide && styles.textCenter]} numberOfLines={3}>
           {setName}
           {setName && number ? ' · ' : ''}
           {number}
         </Text>
       ) : null}
-      {name ? (
-        <Text style={styles.title} {...HEADING_1}>
-          {name}
-        </Text>
-      ) : !loadError ? (
-        <TextSkeleton lines={2} lineHeight={18} />
-      ) : null}
-      <View style={styles.badges}>
+      <View style={[styles.badges, !wide && styles.rowCenter]}>
         <Badge label={LANG_SHORT[lang]} accessibilityLabel={`Idioma: ${LANG_LABEL[lang]}`} />
         {rarity && rarity !== 'None' ? <Badge label={rarity} /> : null}
         {!placed ? <Badge tone="warning" icon="alert-circle-outline" label="Fora do fichário" /> : null}
       </View>
       {!placed ? (
-        <Text style={styles.goesTo}>
+        <Text style={[styles.goesTo, !wide && styles.textCenter]}>
           {isNewCard
             ? 'Este bolso não existe na configuração atual do fichário: a carta fica salva e no valor, mas não aparece nele.'
             : 'Fora do fichário na configuração atual: a carta continua salva e entra no valor, mas não aparece nele.'}
@@ -829,10 +1009,10 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
         <Pressable
           onPress={showInBinder}
           role="button"
-          accessibilityLabel={`Ver no fichário: ${binderLabel}, ${posLabel}${volumes > 1 ? `, página ${pos.page} no app` : ''}${isExtra ? ', bolso extra' : ''}`}
+          accessibilityLabel={`Ver no fichário: ${binderLabel}, ${posLabel}${volumes > 1 ? `, página ${pos.page} no app` : ''}${isExtra ? ', bolso livre' : ''}`}
           style={(s) => {
             const { pressed, hovered } = s as PressState;
-            return [styles.position, hovered && styles.positionHover, pressed && styles.pressed];
+            return [styles.position, !wide && styles.positionCenter, hovered && styles.positionHover, pressed && styles.pressed];
           }}>
           <Ionicons name="location-outline" size={16} color={colors.textMuted} />
           <View style={styles.flexShrink}>
@@ -846,9 +1026,9 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
           <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
         </Pressable>
       ) : placed && isNewCard ? (
-        <Text style={styles.goesTo}>
+        <Text style={[styles.goesTo, !wide && styles.textCenter]}>
           Vai para {binderLabel} · {posLabel}
-          {isExtra ? ' (bolso extra)' : ''}
+          {isExtra ? ' (bolso livre)' : ''}
         </Text>
       ) : null}
     </View>
@@ -856,7 +1036,7 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
 
   // Ações da carta salva à vista (também no ⋯ do topo): escondidas só no menu, ninguém as achava.
   const cardActions = autoSave ? (
-    <View style={styles.actions}>
+    <View style={[styles.actions, !wide && styles.rowCenter]}>
       <Chip mode="button" icon="repeat" label="Trocar" accessibilityLabel="Trocar por outra carta" onPress={replaceCard} />
       <Chip mode="button" icon="swap-horizontal" label="Mover" accessibilityLabel="Mover para outro bolso ou fichário" onPress={openMove} />
       <Chip mode="button" icon="trash-outline" label="Remover" accessibilityLabel="Remover do fichário" onPress={removeCard} />
@@ -877,7 +1057,7 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
             Vai substituir {existing.cardName || 'a carta deste bolso'}
             {existing.setName ? ` (${existing.setName}${existing.localId ? ` · ${existing.localId}` : ''})` : ''}.
           </Notice>
-          {!moveOpen ? <Button title="Mover a antiga para…" variant="ghost" icon="arrow-redo-outline" onPress={() => setMoveOpen(true)} /> : null}
+          {!moveOpen ? <Button title="Mover a antiga para…" variant="secondary" icon="arrow-redo-outline" onPress={() => setMoveOpen(true)} /> : null}
         </View>
       ) : null}
       {loadError ? (
@@ -908,15 +1088,25 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
 
   const movePanel =
     moveOpen && existing ? (
-      <CardMovePanel
-        entry={existing}
-        cardDex={isNewCard ? existing.dex : dex}
-        settings={settings}
-        binders={binders}
-        entries={entries}
-        onMove={moveCard}
-        onCancel={() => setMoveOpen(false)}
-      />
+      <View
+        onLayout={(e) => {
+          const { y } = e.nativeEvent.layout;
+          moveY.current = y;
+          if (!moveScrollPending.current) return;
+          moveScrollPending.current = false;
+          scrollToMove(y);
+        }}>
+        <CardMovePanel
+          entry={existing}
+          cardDex={isNewCard ? existing.dex : dex}
+          settings={settings}
+          binders={binders}
+          entries={entries}
+          onMove={moveCard}
+          onCancel={() => setMoveOpen(false)}
+          quiet={isNewCard}
+        />
+      </View>
     ) : null;
 
   const pricePanel = (
@@ -983,17 +1173,24 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
           placeholder="R$ 0,00"
           invalid={!!myValueParsed.error}
           accessibilityLabel="Meu valor em reais"
+          onFocus={keyboard.onFocus}
         />
         <FieldStatus parsed={myValueParsed} echo={!!myValueEdit} />
       </Section>
     </View>
   );
 
+  // "Minha carta" só para o leitor de tela: à vista, seria um rótulo em cima do título "Estado". Na web é um <h2>, que
+  // mantém a ordem dos títulos (as seções são <h3>).
   const myCard = (
-    <View>
-      <GroupLabel>Minha carta</GroupLabel>
+    <View role={WEB ? undefined : 'group'} aria-label={WEB ? undefined : 'Minha carta'}>
+      {WEB ? (
+        <Text style={styles.srOnly} {...HEADING_2}>
+          Minha carta
+        </Text>
+      ) : null}
       <Card>
-        {replacing && existing && hasOwnData(existing) ? (
+        {shownReplacing && existing && hasOwnData(existing) ? (
           <View style={styles.keepOld}>
             <Toggle label="Manter estado, origem e observações" hint={`Da carta que sai (${existing.cardName || 'a antiga'})`} value={keepOld} onChange={applyKeepOld} />
           </View>
@@ -1029,13 +1226,14 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
               onChangeText={setVariantNote}
               placeholder={avail.stamps.length ? `Qual selo? (${avail.stamps.join(', ')})` : 'Descreva (ex.: selo Pokémon Center, Staff)'}
               accessibilityLabel="Descrição da variação"
+              onFocus={keyboard.onFocus}
             />
           ) : null}
         </Section>
         {!isNewCard || showMore ? myValueSection : null}
         {showMore ? (
           <>
-            <Section title="Origem" hint="Como a carta chegou (toque de novo para desmarcar).">
+            <Section title="Origem" hint={`Como a carta chegou (${TAP_LOWER} de novo para desmarcar).`}>
               <ChipGroup label="Origem">
                 {ORIGINS.map((o) => (
                   <Chip
@@ -1063,11 +1261,16 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
                     placeholder="Valor pago (R$ 0,00)"
                     invalid={!!purchaseParsed.error}
                     accessibilityLabel="Valor pago em reais"
+                    onFocus={keyboard.onFocus}
                   />
                   <FieldStatus parsed={purchaseParsed} echo={purchaseTyped} />
                   {purchaseNum != null && currentValue != null ? (
-                    <Text style={[styles.paid, { color: currentValue >= purchaseNum ? semantic.gain.fg : semantic.loss.fg }]}>
-                      {paidVsNowText({ paid: purchaseNum, current: currentValue, pct: paidPct })}
+                    // Dinheiro em branco (a Regra do Dinheiro Branco); só a diferença em porcentagem ganha a cor da alta ou da queda.
+                    <Text style={styles.paid}>
+                      {paidVsNowText({ paid: purchaseNum, current: currentValue })}
+                      {paidPct != null && Number.isFinite(paidPct) ? (
+                        <Text style={{ color: paidTone(currentValue - purchaseNum) }}> ({formatPct(paidPct, { sign: true })})</Text>
+                      ) : null}
                     </Text>
                   ) : null}
                 </>
@@ -1083,6 +1286,7 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
                 placeholder="Ex.: comprada no evento, assinada…"
                 multiline
                 accessibilityLabel="Observações"
+                onFocus={keyboard.onFocus}
               />
             </Section>
           </>
@@ -1092,7 +1296,7 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
           </View>
         )}
         {autoSave ? (
-          <View style={styles.saved} aria-live="polite">
+          <View style={styles.saved} aria-live="polite" collapsable={false}>
             <Ionicons
               name={pendingUpload ? 'cloud-offline-outline' : 'cloud-done-outline'}
               size={14}
@@ -1132,14 +1336,15 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
   // Carta salva: o valor primeiro, depois o que se edita. Carta nova: o que se escolhe primeiro (o preço só chega depois).
   const first = isNewCard ? myCard : pricePanel;
   const second = isNewCard ? pricePanel : myCard;
-  const bottomPad = (isNewCard ? barSpace : insets.bottom) + space.xxl;
+  // Teclado aberto no Android: o fim da rolagem ganha o espaço dele, para "Observações" e "Meu valor" saírem de baixo.
+  const bottomPad = keyboard.bottomPad((isNewCard ? barSpace : insets.bottom) + space.xxl);
 
   return (
     <View style={styles.screen}>
       <Stack.Screen
         options={{
           title: name || 'Carta',
-          headerTitle: isNewCard ? (replacing ? 'Substituir carta' : 'Colocar carta') : binderLabel,
+          headerTitle: headerTitleFor(isNewCard ? (shownReplacing ? 'Substituir carta' : 'Colocar carta') : binderLabel),
           headerRight: autoSave
             ? () => <IconButton icon="ellipsis-horizontal" label="Ações da carta" tone="onBrand" color={semantic.brand.fg} onPress={() => setMenuOpen(true)} />
             : undefined,
@@ -1152,7 +1357,8 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
             ref={scrollRef}
             style={styles.flex}
             contentContainerStyle={[styles.wideContent, { paddingRight: side, paddingBottom: bottomPad }]}
-            keyboardShouldPersistTaps="handled">
+            keyboardShouldPersistTaps="handled"
+            {...keyboard.scrollProps}>
             <View ref={contentRef} collapsable={false} style={styles.column}>
               {titleBlock}
               {cardActions}
@@ -1180,12 +1386,11 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
         <ScrollView
           ref={scrollRef}
           contentContainerStyle={[styles.phoneContent, { paddingHorizontal: layout.gutter, paddingBottom: bottomPad }]}
-          keyboardShouldPersistTaps="handled">
+          keyboardShouldPersistTaps="handled"
+          {...keyboard.scrollProps}>
           <View ref={contentRef} collapsable={false} style={styles.column}>
-            <View style={styles.heroRow}>
-              {hero}
-              <View style={styles.flex}>{titleBlock}</View>
-            </View>
+            <View style={styles.heroCenter}>{hero}</View>
+            {titleBlock}
             {cardActions}
             {notices}
             {movePanel}
@@ -1199,7 +1404,7 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
       <VersionPicker
         visible={showVersions}
         options={versions}
-        selected={pickedVariant ? { variant, stamp: variantNote.trim() || undefined } : undefined}
+        selected={pickedVariant ? { variant, stamp: variantNote.trim() || undefined, stampKeys: saved?.variant === variant ? saved.stampKeys : undefined } : undefined}
         image={(o) => cardImage({ fit: 'cover', stampKeys: o.stampKeys, photo: o.photo, quality: 'low' })}
         onPick={pickVersion}
         onClose={() => {
@@ -1207,12 +1412,17 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
           setVersionsDismissed(true);
         }}
       />
-      <Modal visible={zoom} transparent animationType="fade" onRequestClose={() => setZoom(false)}>
+      <Modal
+        visible={zoom}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setZoom(false)}
+        aria-label={WEB ? `Imagem ampliada de ${name || 'carta'}` : undefined}>
         <Pressable style={styles.zoomBackdrop} onPress={() => setZoom(false)} role="button" accessibilityLabel="Fechar a imagem ampliada">
           <View style={[styles.zoomBox, { width: zoomWidth, height: zoomWidth / CARD_RATIO }]}>
             {cardImage({ fit: 'contain', stampKeys: stampKeysOf(variant, variantNote), photo, ptImage, dark: true })}
           </View>
-          <Text style={styles.zoomClose}>Toque para fechar</Text>
+          <Text style={styles.zoomClose}>{TAP} para fechar</Text>
         </Pressable>
       </Modal>
       <InfoSheet visible={menuOpen} onClose={() => setMenuOpen(false)} title={name || 'Carta'}>
@@ -1235,15 +1445,15 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
             title={
               saving
                 ? 'Colocando…'
-                : replacing
+                : shownReplacing
                   ? 'Substituir carta'
                   : placed
                     ? `Colocar na pág. ${pos.page} · bolso ${pos.pocket}`
                     : 'Colocar no fichário'
             }
-            icon={replacing ? 'swap-horizontal' : 'add-circle-outline'}
+            icon={shownReplacing ? 'swap-horizontal' : 'add-circle-outline'}
             onPress={addToBinder}
-            busy={saving}
+            busy={!!saving}
             disabled={!canPlace || invalid}
           />
         </BottomBar>
@@ -1252,8 +1462,38 @@ function CardForm({ params, existing, inPocket }: { params: Params; existing?: E
   );
 }
 
+/**
+ * Movimento assinatura: uma faixa clara atravessa o filete foil uma vez quando ele aparece. Fica atrás da arte (opaca),
+ * então só se vê no filete. Só nesta tela (nem listas nem fichário) e nunca com "reduzir movimento".
+ */
+function FoilGleam({ active, width, height }: { active: boolean; width: number; height: number }) {
+  const reduceMotion = useReducedMotion();
+  const [sweep] = useState(() => new Animated.Value(0));
+  const [played, setPlayed] = useState(false);
+  const run = active && !reduceMotion && !played;
+  useEffect(() => {
+    if (!run) return;
+    const pass = Animated.timing(sweep, { toValue: 1, delay: GLEAM_DELAY, duration: GLEAM_MS, easing: Easing.inOut(Easing.ease), useNativeDriver: NATIVE_DRIVER });
+    // Interrompido também conta: o brilho nunca passa duas vezes.
+    pass.start(() => setPlayed(true));
+    return () => pass.stop();
+  }, [run, sweep]);
+  if (!run) return null;
+  // Mais comprida que a carta, para a faixa inclinada cobrir o filete de cima a baixo; `lead` a deixa fora dos dois lados.
+  const length = height * 1.25;
+  const lead = height * 0.25;
+  const translateX = sweep.interpolate({ inputRange: [0, 1], outputRange: [-(lead + GLEAM_WIDTH), width + lead] });
+  return (
+    <Animated.View aria-hidden style={[styles.gleam, { height: length, top: (height - length) / 2, transform: [{ translateX }, { rotate: '20deg' }] }]}>
+      <LinearGradient colors={GLEAM_COLORS} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={StyleSheet.absoluteFill} />
+    </Animated.View>
+  );
+}
+
 /** Erro do valor digitado (T2) ou, com `echo`, o valor como foi lido ("= R$ 1.500,00"). */
 function FieldStatus({ parsed, echo }: { parsed: ParsedBRL; echo: boolean }): ReactNode {
+  // O papel 'alert' não fala no Android: o TalkBack lê o erro pelo anúncio.
+  useAlertAnnouncement(parsed.error);
   if (parsed.error) {
     return (
       <Text style={styles.fieldError} role="alert">
@@ -1269,47 +1509,58 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
   flex: { flex: 1 },
   flexShrink: { flexShrink: 1 },
+  srOnly: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 },
   column: { gap: space.lg },
   stack: { gap: space.xs },
   phoneContent: { paddingTop: space.lg, width: '100%', maxWidth: widths.reading, alignSelf: 'center' },
-  heroRow: { flexDirection: 'row', alignItems: 'flex-start', gap: space.lg },
+  heroCenter: { alignItems: 'center' },
   // A coluna da direita (ScrollView) estica até a altura da tela para rolar sozinha; só a imagem fica no topo (W4).
   wideRow: { flex: 1, flexDirection: 'row' },
   wideHero: { paddingTop: space.xl, alignSelf: 'flex-start' },
   wideContent: { paddingTop: space.xl, paddingLeft: space.xxl },
   cols: { flexDirection: 'row', alignItems: 'flex-start', gap: space.xl },
   col: { flex: 1, minWidth: 0, gap: space.lg },
-  hero: {
-    borderRadius: radius.md,
+  hero: { borderRadius: radius.md, overflow: 'hidden' },
+  gleam: { position: 'absolute', left: 0, width: GLEAM_WIDTH, pointerEvents: 'none' },
+  // Fundo opaco: o filete foil, que fica atrás, só aparece na folga em volta da arte.
+  heroArt: {
+    position: 'absolute',
+    top: HERO_FOIL,
+    right: HERO_FOIL,
+    bottom: HERO_FOIL,
+    left: HERO_FOIL,
+    borderRadius: radius.md - HERO_FOIL,
     overflow: 'hidden',
-    backgroundColor: binderColors.pocket,
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: colors.surface,
   },
+  // Sobre a arte: branco em véu escuro, legível em qualquer imagem.
   photoLang: {
     position: 'absolute',
     left: space.sm,
     bottom: space.sm,
-    backgroundColor: semantic.inverse.bg,
+    backgroundColor: colors.backdrop,
     borderRadius: radius.pill,
     paddingHorizontal: space.sm,
     paddingVertical: space.xxs,
   },
-  photoLangText: { ...typography.caption, fontSize: 11, lineHeight: 14, fontWeight: '700', color: semantic.inverse.fg },
-  zoomHint: { position: 'absolute', right: space.sm, bottom: space.sm, backgroundColor: semantic.inverse.bg, borderRadius: radius.pill, padding: 6 },
-  zoomBackdrop: { flex: 1, backgroundColor: semantic.inverse.bg, alignItems: 'center', justifyContent: 'center', gap: space.md },
+  photoLangText: { ...typography.caption, fontSize: 11, lineHeight: 14, fontWeight: '700', color: colors.text },
+  zoomHint: { position: 'absolute', right: space.sm, bottom: space.sm, backgroundColor: colors.backdrop, borderRadius: radius.pill, padding: 6 },
+  zoomBackdrop: { flex: 1, backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center', gap: space.md },
   zoomBox: { borderRadius: radius.md, overflow: 'hidden' },
-  zoomClose: { ...typography.caption, color: semantic.inverse.fgMuted },
+  zoomClose: { ...typography.caption, color: colors.textMuted },
   titleBlock: { gap: space.sm },
-  setLine: { ...typography.label, color: colors.textMuted },
+  titleBlockCenter: { alignItems: 'center' },
+  textCenter: { textAlign: 'center' },
+  rowCenter: { justifyContent: 'center' },
+  setLine: { ...typography.body, ...typography.tabular, color: colors.textMuted },
   title: { ...typography.title, color: colors.text },
   badges: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs },
-  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   position: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
-    minHeight: 44,
+    minHeight: TOUCH,
     paddingVertical: space.xs,
     paddingHorizontal: space.sm,
     borderRadius: radius.md,
@@ -1318,6 +1569,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     alignSelf: 'flex-start',
   },
+  positionCenter: { alignSelf: 'center' },
   positionHover: { backgroundColor: semantic.hover.onLight },
   pressed: { opacity: 0.7 },
   positionMain: { ...typography.caption, fontWeight: '700', color: colors.text },
@@ -1329,11 +1581,11 @@ const styles = StyleSheet.create({
   moreRow: { flexDirection: 'row', marginBottom: space.lg },
   fieldError: { ...typography.caption, fontWeight: '600', color: semantic.danger.fg },
   fieldEcho: { ...typography.caption, ...typography.tabular, color: colors.textMuted },
-  paid: { ...typography.caption, ...typography.tabular, fontWeight: '700' },
+  paid: { ...typography.caption, ...typography.tabular, fontWeight: '700', color: semantic.money.fg },
   saved: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   savedText: { ...typography.caption, fontSize: 12, lineHeight: 16, fontWeight: '600' },
-  aboutHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44, borderRadius: radius.sm },
-  aboutTitle: { ...typography.label, color: colors.textMuted },
+  aboutHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: TOUCH, borderRadius: radius.sm },
+  aboutTitle: { ...typography.heading, color: colors.heading },
   aboutCard: { gap: space.lg },
   menu: { gap: space.sm, paddingBottom: space.sm },
   barError: { ...typography.caption, fontWeight: '600', color: semantic.danger.fg, textAlign: 'center' },

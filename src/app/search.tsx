@@ -1,4 +1,4 @@
-import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useLocalSearchParams, type Href } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Keyboard, StyleSheet, useWindowDimensions, View } from 'react-native';
 
@@ -6,12 +6,13 @@ import { CardPickerList, type PickerState } from '@/components/add-card-list';
 import { AddCardSheet } from '@/components/add-sheet';
 import { gridContentWidth } from '@/components/card-grid';
 import { Button, Chip, ChipGroup, EmptyState, Loading, Notice, SearchField } from '@/components/ui';
-import { cardParams, cardsByCode, parseCardCode } from '@/lib/add-card';
-import { plainName } from '@/lib/catalog';
-import { searchCardsResult, type CardBrief, type CardListResult } from '@/lib/tcgdex';
+import { cardsByCode, parseCardCode, pickParams, rememberCardLang, searchStartLang } from '@/lib/add-card';
+import { canSearchName, searchCardsResult, type CardBrief, type CardListResult } from '@/lib/tcgdex';
 import { LANG_LABEL, LANG_SHORT, type CardLang } from '@/lib/types';
-import { useActiveBinderId, useBinders, useCollectionReady, useSettings } from '@/store/collection';
+import { customEntryId, entryId, useActiveBinderId, useBinders, useCollectionReady, useEntry, useSettings } from '@/store/collection';
 import { colors, space } from '@/theme';
+
+import { isOcrAvailable } from '../../modules/card-ocr';
 
 const LANGS: CardLang[] = ['pt', 'en', 'ja'];
 type SearchBy = 'name' | 'code';
@@ -43,7 +44,17 @@ function SearchForm() {
   const adding = params.mode === 'add' || (!params.binder && extra == null);
   const preferred = adding ? (binder?.id ?? activeBinderId) : undefined;
   const preferredCustom = binders.find((b) => b.id === preferred);
-  const [lang, setLang] = useState<CardLang>((adding ? preferredCustom : binder)?.searchLang ?? settings?.languages?.[0] ?? 'pt');
+  // Bolso de um fichário livre: o idioma dele vale primeiro. No "+ Carta" (e sem idioma no fichário), o último escolhido
+  // nesta sessão (lote de cartas no mesmo idioma).
+  const [lang, setLang] = useState<CardLang>(() =>
+    searchStartLang({
+      pocketLang: adding ? undefined : binder?.searchLang,
+      preferredLang: adding ? preferredCustom?.searchLang : undefined,
+      fallback: settings?.languages?.[0] ?? 'pt',
+    }),
+  );
+  // Carta do bolso aberto (fora do "+ Carta"): a mesma carta japonesa salva com outro id abre como ela (ver pickParams).
+  const pocket = useEntry(adding ? undefined : binder ? customEntryId(binder.id, slot) : extra != null ? entryId(0, extra) : undefined);
   const [by, setBy] = useState<SearchBy>('name');
   const [query, setQuery] = useState(params.q ?? '');
   const [debounced, setDebounced] = useState((params.q ?? '').trim());
@@ -111,13 +122,22 @@ function SearchForm() {
   function pick(card: CardBrief) {
     if (adding) return openSheet(card);
     const where = binder ? { binder: binder.id, slot } : { dex: 0, slot: extra! };
-    router.push({ pathname: '/card', params: { ...where, ...cardParams(card) } });
+    router.push({ pathname: '/card', params: { ...where, ...pickParams(card, pocket) } });
   }
 
   /** Abre o "Adicionar". O teclado sai antes: no celular, ele cobriria o "Colocar" no rodapé da folha. */
   function openSheet(card: CardBrief) {
     Keyboard.dismiss();
     setPicked(card);
+  }
+
+  /** Nome não serve como código, nem o contrário: trocar de modo limpa o campo e o Enter que esperava a busca. */
+  function changeBy(next: SearchBy) {
+    if (next === by) return;
+    setBy(next);
+    setQuery('');
+    setDebounced('');
+    openWhenReady.current = null;
   }
 
   function placed() {
@@ -148,7 +168,15 @@ function SearchForm() {
 
   const title = adding ? 'Adicionar carta' : binder ? `Bolso ${slot + 1} · ${binder.name}` : 'Bolso livre · carta especial';
   const placeholder =
-    by === 'code' ? 'Ex.: MEG 133 ou swsh12-186' : lang === 'ja' ? 'Nome em japonês (ex.: ピカチュウ)' : 'Nome da carta (ex.: Pikachu, Professor)';
+    by === 'code'
+      ? lang === 'ja'
+        ? 'Ex.: M5 088 ou SV2a 025'
+        : 'Ex.: MEG 133 ou swsh12-186'
+      : lang === 'ja'
+        ? 'Inglês ou japonês: ピカチュウ'
+        : 'Nome da carta (ex.: Pikachu, Professor)';
+  /** Dica do código: na japonesa, a sigla da coleção (como na TCGplayer) e o número. */
+  const codeHint = lang === 'ja' ? 'Use a sigla e o número (ex.: M5 088).' : 'Confira a sigla e o número no canto da carta.';
 
   return (
     <View style={styles.screen}>
@@ -166,13 +194,23 @@ function SearchForm() {
         <View style={styles.chips}>
           <ChipGroup label="Idioma" style={styles.group}>
             {LANGS.map((l) => (
-              <Chip key={l} label={LANG_SHORT[l]} accessibilityLabel={LANG_LABEL[l]} selected={lang === l} onPress={() => setLang(l)} />
+              <Chip
+                key={l}
+                label={LANG_SHORT[l]}
+                accessibilityLabel={LANG_LABEL[l]}
+                selected={lang === l}
+                onPress={() => {
+                  rememberCardLang(l);
+                  setLang(l);
+                }}
+              />
             ))}
           </ChipGroup>
           {/* Sem divisória: no celular os dois grupos quebram em duas linhas (ela ficaria sobrando no fim da primeira). */}
           <ChipGroup label="Buscar por" style={styles.group}>
-            <Chip label="Nome" selected={by === 'name'} onPress={() => setBy('name')} />
-            <Chip label="Código" icon="barcode-outline" selected={by === 'code'} onPress={() => setBy('code')} />
+            <Chip label="Nome" selected={by === 'name'} onPress={() => changeBy('name')} />
+            <Chip label="Código" icon="barcode-outline" selected={by === 'code'} onPress={() => changeBy('code')} />
+            {adding && isOcrAvailable ? <Chip label="Câmera" icon="camera-outline" mode="button" onPress={() => router.push('/scan' as Href)} /> : null}
           </ChipGroup>
         </View>
         {adding && added > 0 ? (
@@ -189,13 +227,27 @@ function SearchForm() {
 
       {!state ? (
         by === 'code' && debounced ? (
-          <EmptyState title="Não entendi o código" text="Sigla da coleção e número, como no canto da carta: MEG 133." />
+          <EmptyState
+            title="Não entendi o código"
+            text={lang === 'ja' ? 'Sigla da coleção e número da carta: M5 088.' : 'Sigla da coleção e número, como no canto da carta: MEG 133.'}
+          />
         ) : by === 'code' ? (
-          <EmptyState title="Adicionar por código" text="Sigla e número do canto da carta (MEG 133) ou o código da TCGdex (swsh12-186)." />
+          <EmptyState
+            title="Adicionar por código"
+            text={
+              lang === 'ja'
+                ? 'Sigla da coleção e número do canto da carta (M5 088). As antigas, sem número, pelo nome.'
+                : 'Sigla e número do canto da carta (MEG 133) ou o código da TCGdex (swsh12-186).'
+            }
+          />
         ) : (
           <EmptyState
             title={adding ? 'Qual carta você quer adicionar?' : 'Qual carta vai neste bolso?'}
-            text="Pelo menos 2 letras do nome: Pokémon, treinador ou energia."
+            text={
+              lang === 'ja'
+                ? 'Pelo menos 3 letras do nome em inglês, ou o nome em japonês.'
+                : 'Pelo menos 2 letras do nome: Pokémon, treinador ou energia.'
+            }
           />
         )
       ) : offline ? (
@@ -212,7 +264,7 @@ function SearchForm() {
           onRetry={() => setRetry({ base, n: attempt + 1 })}
           empty={
             by === 'code'
-              ? { title: 'Nenhuma carta com esse código', text: lang === 'ja' ? 'Nas cartas em japonês, use o código da TCGdex.' : 'Confira a sigla e o número no canto da carta.' }
+              ? { title: 'Nenhuma carta com esse código', text: codeHint }
               : { title: 'Nenhuma carta encontrada', text: 'Tente outro idioma ou o nome em inglês.' }
           }
         />
@@ -223,10 +275,10 @@ function SearchForm() {
   );
 }
 
-/** Dá para buscar: um código reconhecido, ou pelo menos 2 letras do nome. */
+/** Dá para buscar: um código reconhecido, ou o bastante do nome (ver canSearchName). */
 function canSearch(by: SearchBy, lang: CardLang, text: string) {
   if (by === 'code') return !!parseCardCode(text);
-  return (lang === 'ja' ? text : plainName(text)).length >= 2;
+  return canSearchName(text, lang);
 }
 
 const styles = StyleSheet.create({

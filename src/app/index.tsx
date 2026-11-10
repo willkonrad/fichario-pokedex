@@ -1,6 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Redirect, router, Stack, useIsFocused, useLocalSearchParams, useNavigation, type Href } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
@@ -14,22 +13,37 @@ import {
   StyleSheet,
   Text,
   View,
+  type LayoutChangeEvent,
   type TextInputInstance,
   type ViewInstance,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { CardDragLayer, useCardDrag } from '@/components/binder-drag';
 import { BinderSlot, priceBlockHeight } from '@/components/binder-slot';
 import { cardImageUrl, prefetchCardImages } from '@/components/card-image';
+import { digitsInSystemFont } from '@/components/digits';
+import { DOCK_HEIGHT, HomeDock } from '@/components/home-dock';
+import { useHomeEntries } from '@/components/home-entries';
+import { useCloseOnBack, useDebounced, useFocusReturn } from '@/components/home-focus';
 import { hintSeen, markHint, rememberedPage, rememberPage, usePageMemoryReady } from '@/components/home-page-memory';
 import { HomePager, RegionRuler, type RegionChip } from '@/components/home-pager';
-import { HomeSearchInput, SuggestionList, type Suggestion } from '@/components/home-search';
+import { consultSuggestion, HomeSearchInput, suggestionRoom, suggestionsSpeech, SuggestionList, type Suggestion } from '@/components/home-search';
 import { CardPeekSheet, GoToPageSheet, OutsideCardsSheet } from '@/components/home-sheets';
-import { HomeValueSummary, NoticeSlot, type HomeChange, type HomeNotice, type HomeValue } from '@/components/home-summary';
+import {
+  ConsultaPill,
+  HomeValueSummary,
+  LiveStatus,
+  nextSpeech,
+  NoticeSlot,
+  type HomeChange,
+  type HomeNotice,
+  type HomeValue,
+} from '@/components/home-summary';
 import { HomeTopBar } from '@/components/home-top-bar';
 import { NATIVE_DRIVER, useReducedMotion } from '@/components/motion';
 import { type PressState } from '@/components/icon-button';
-import { Card, CardSkeleton, ListRow, onCover, PokeballIcon, useLayout, useToastClearance, type IconName } from '@/components/ui';
+import { Card, CardSkeleton, coverFill, ListRow, PokeballIcon, showToast, useLayout, useToastClearance, type IconName } from '@/components/ui';
 import { formatDex, getSpecies, searchSpeciesList } from '@/data/pokedex';
 import {
   customPlaceText,
@@ -38,30 +52,37 @@ import {
   dexRange,
   extraOnPage,
   extraSlots,
+  fitPocket,
   indexOfDex,
   indexOfEntry,
   indexOfExtra,
   inDexRange,
   isPlaced,
   isPlacedCustom,
+  KEYBOARD_MIN,
   pageOfDex,
   pagePocketText,
   pageSize,
   regionsIn,
   slotAt,
   slotsOnPage,
+  spineSide,
+  spreadOf,
+  squeezedByKeyboard,
   totalPages,
   totalSlots,
 } from '@/lib/binder';
-import { plainName } from '@/lib/catalog';
+import { entryImageUrl, plainName } from '@/lib/catalog';
 import { changeText } from '@/lib/copy';
 import { formatBRLShort, formatInt } from '@/lib/format';
 import { recentChange } from '@/lib/history';
 import { mypPtImage } from '@/lib/myp-api';
 import { collectionTotals } from '@/lib/quotes';
+import { TAP } from '@/lib/tap-word';
 import { POKEDEX_BINDER, type BinderSettings, type CustomBinder, type Entry } from '@/lib/types';
 import { pricePending, valuation } from '@/lib/valuation';
 import {
+  collectionState,
   customEntryId,
   entriesOf,
   entryId,
@@ -69,43 +90,61 @@ import {
   useBinders,
   useCollectionActions,
   useCollectionReady,
-  useEntries,
   useSession,
   useSettings,
   useSyncStatus,
 } from '@/store/collection';
-import { binderColors as B, breakpoints, CARD_RATIO, colors, elevation, radius, semantic, shadow, space, TOUCH, typography, widths } from '@/theme';
+import { binderColors as B, CARD_RATIO, colors, radius, semantic, space, TOUCH, typography, widths } from '@/theme';
 
 const WEB = Platform.OS === 'web';
-/** "Toque" no celular, "Clique" no navegador (W3). */
-const TAP = WEB ? 'Clique' : 'Toque';
 const GAP = 8;
 /** Margem interna da folha escura. */
 const PAGE_PAD = 10;
 /** Borda da folha (entra na largura: sem ela, a última coluna passava 2 px da margem). */
 const SHEET_BORDER = 1;
-/** Lado da lombada (com os furos do fichário): um pouco mais largo. */
-const SPINE_PAD = 18;
+/** Furo de argola, na escala da folha de verdade. */
+const HOLE_SIZE = 14;
+/** Folga de cada lado do furo: até a beira da folha e até os bolsos. */
+const HOLE_INSET = 4;
+/** Lado da lombada: o furo e as duas folgas. */
+const SPINE_PAD = HOLE_INSET * 2 + HOLE_SIZE;
 /** Furos da lombada, em % da altura da folha. */
 const HOLES = ['18%', '50%', '82%'] as const;
+/** Faixa com a cor da capa na contracapa, do lado da lombada. */
+const COVER_STRIP = 14;
 const SPREAD_GAP = 14;
 /** Painel-resumo do computador, à direita da página. */
 const PANEL_WIDTH = 320;
 const PANEL_GAP = 24;
 /** Duas páginas abertas só quando a coluna da página tem esta largura (janela de ~1280 px). */
 const SPREAD_MIN_MAIN = 860;
-/** Bolso mínimo no tablet e no computador (a página cabe na altura da janela). */
-const MIN_SLOT_WIDE = 56;
+/** Bolso mínimo legível: abaixo dele a folha não encolhe mais, e só a área dela rola. */
+const MIN_SLOT = 56;
 /** Bolso máximo no computador: as miniaturas das cartas têm ~245 px; maior que isso, a imagem fica borrada. */
 const MAX_SLOT_DESKTOP = 220;
 /** Coluna mínima das páginas no computador, para o paginador (setas, página e "Próxima falta") caber numa linha. */
 const MIN_MAIN_DESKTOP = 480;
-/** Paginador fixo (48 px + margens). */
-const PAGER_SPACE = 60;
-/** Espaço livre no fim da rolagem para o botão "+ Carta" não cobrir a última linha. */
-const FAB_SPACE = 88;
-/** Altura do botão "+ Carta" do celular. */
-const FAB_HEIGHT = 48;
+/** Folga para a barra de rolagem clássica do navegador (15 a 17 px), quando a área da folha rola no computador. */
+const SCROLLBAR_SPACE = 18;
+/** Folga em cima e embaixo da folha, dentro da faixa que recorta o folhear. */
+const VIEWPORT_PAD = space.xs;
+/** Número embaixo da folha, com duas páginas abertas. */
+const PAGE_NUMBER_SPACE = typography.caption.lineHeight + space.xs;
+/** Margens do corpo no computador. */
+const DESKTOP_TOP = space.md;
+const DESKTOP_BOTTOM = space.lg;
+/** Margem interna do cartão do painel (a do `Card`). */
+const PANEL_PAD = space.lg;
+/** Lista de regiões do painel: com menos altura que 2 linhas, o painel inteiro rola (último recurso, janela muito baixa). */
+const MIN_PANEL_LIST = (TOUCH + space.xs) * 2;
+/** Só até a primeira medida: o que fica acima da folha (resumo e régua; paginador e margens). */
+const ABOVE_SHEET_GUESS = { phone: 136, desktop: 90 };
+/** Barra do topo sem a área segura (HomeTopBar: linha de 56, 64 no computador, e o fio de 3), até a primeira medida. */
+const BAR_HEIGHT = { phone: 59, desktop: 67 };
+/** Espera para ler quantas sugestões abriram (depois que a pessoa para de digitar). */
+const SPEECH_DELAY_MS = 600;
+/** Capa sem a lista: margens, Poké Ball, título em até 2 linhas, rótulo, "Lista completa" e os vãos. */
+const COVER_CHROME = space.xl * 2 + 36 + typography.heading.lineHeight * 2 + typography.label.lineHeight + space.sm * 5 + TOUCH;
 
 /** O que o fichário põe em cada bolso de uma página. */
 type PageItem = {
@@ -142,6 +181,9 @@ function whereIs(e: Entry, settings: BinderSettings | null, binders: CustomBinde
   if (!settings || !isPlaced(settings, e)) return `${name} · fora do fichário`;
   return `${name} · ${pagePocketText(settings, indexOfEntry(settings, e))}`;
 }
+
+/** "#021 Spearow" (só o número, se o Pokémon não estiver na lista). */
+const dexName = (dex: number) => [formatDex(dex), getSpecies(dex)?.name].filter(Boolean).join(' ');
 
 /** Comparação da busca sem acento, apóstrofo nem pontuação (japonês: o texto como está). */
 function matcher(q: string) {
@@ -316,7 +358,7 @@ function HomeSkeleton() {
   const slot = Math.min(140, Math.floor((w - PAGE_PAD - SPINE_PAD - GAP * 2) / 3));
   return (
     <View style={styles.root} aria-busy accessibilityLabel="Carregando o fichário">
-      <View style={{ backgroundColor: semantic.brand.bg, height: insets.top + 59 }} />
+      <View style={[styles.skeletonBar, { height: insets.top + (L.isDesktop ? BAR_HEIGHT.desktop : BAR_HEIGHT.phone) }]} />
       <View style={[styles.sheet, styles.skeletonSheet]}>
         {[0, 1, 2].map((r) => (
           <View key={r} style={[styles.row, { gap: GAP }]}>
@@ -333,7 +375,7 @@ function HomeSkeleton() {
 // ---------- Fichário Pokédex ----------
 
 function PokedexBinderView({ settings }: { settings: BinderSettings }) {
-  const entries = useEntries();
+  const entries = useHomeEntries();
   const binders = useBinders();
   const pages = totalPages(settings);
   const size = pageSize(settings);
@@ -345,6 +387,9 @@ function PokedexBinderView({ settings }: { settings: BinderSettings }) {
   const [emptyAt, setEmptyAt] = useState<number | null>(null);
   const [cycleAt, setCycleAt] = useState(-1);
   const [notice, setNotice] = useState<HomeNotice | null>(null);
+  // Resultado sem aviso na tela (a página pode nem mudar), só para o leitor de tela.
+  const [status, setStatus] = useState('');
+  const say = (text: string) => setStatus((cur) => nextSpeech(cur, text));
   const range = dexRange(settings);
   const name = settings.name || 'Fichário Pokédex';
 
@@ -374,14 +419,15 @@ function PokedexBinderView({ settings }: { settings: BinderSettings }) {
         setPage(Math.floor(i / size));
         setEmptyAt(i);
         setNotice(null);
+        say(`Próxima falta: ${dexName(ref.dex)}, ${pagePocketText(settings, i)}, destacado`);
         return;
       }
     }
     setNotice({ text: 'Fichário completo! Todos os espaços têm carta.', tone: 'success' });
   }
 
-  /** Vai até o Pokémon e destaca os espaços dele. */
-  function selectSpecies(dex: number) {
+  /** Vai até o Pokémon e destaca os espaços dele. `quiet`: quem chamou já mostra um aviso (não lê duas vezes). */
+  function selectSpecies(dex: number, quiet = false) {
     const s = getSpecies(dex);
     if (!inDexRange(settings, dex)) {
       setNotice({ text: `${s?.name ?? formatDex(dex)} não está na faixa deste fichário (${formatDex(range.from)}–${formatDex(range.to)}).`, tone: 'warning' });
@@ -392,6 +438,7 @@ function PokedexBinderView({ settings }: { settings: BinderSettings }) {
     setEmptyAt(null);
     setPage(pageOfDex(settings, dex));
     setNotice(null);
+    if (!quiet) say(`${dexName(dex)}, ${pagePocketText(settings, base)}, destacado`);
   }
 
   const targets = useMemo(() => (q ? searchSpeciesList(q, 6).filter((s) => inDexRange(settings, s.id)) : []), [q, settings]);
@@ -401,7 +448,7 @@ function PokedexBinderView({ settings }: { settings: BinderSettings }) {
     const t = targets[i];
     if (!t) return;
     setCycleAt(i);
-    selectSpecies(t.id);
+    selectSpecies(t.id, targets.length > 1);
     if (targets.length > 1) {
       setNotice({ text: `${i + 1} de ${targets.length}: ${t.name}`, action: { label: 'Próximo', onPress: () => goToTarget((i + 1) % targets.length) } });
     }
@@ -461,6 +508,7 @@ function PokedexBinderView({ settings }: { settings: BinderSettings }) {
           setFound(new Set([i]));
           setEmptyAt(null);
           setPage(Math.floor(i / size));
+          say(`${e.cardName}, bolso livre, ${pagePocketText(settings, i)}, destacada`);
         },
       });
     }
@@ -471,6 +519,7 @@ function PokedexBinderView({ settings }: { settings: BinderSettings }) {
         out.push({ key: e.id, section: 'Outros fichários', title: e.cardName, detail: whereIs(e, settings, binders), entry: e, onSelect: () => router.push(cardHref(e)) });
       });
     out.push(findEverywhere(q));
+    out.push(consultSuggestion(q));
     const top = speciesHits[0];
     out.push({
       key: 'add',
@@ -601,6 +650,7 @@ function PokedexBinderView({ settings }: { settings: BinderSettings }) {
       onMissingList={left > 0 ? () => router.push('/lists') : undefined}
       emptyHint={list.length === 0 ? `${TAP} num espaço ou em “+ Carta” para colocar a primeira carta.` : undefined}
       notice={notice}
+      status={status}
       onDismissNotice={() => setNotice(null)}
       query={query}
       onQuery={(text) => {
@@ -622,9 +672,10 @@ function PokedexBinderView({ settings }: { settings: BinderSettings }) {
 // ---------- Fichário livre ----------
 
 function CustomBinderView({ binder }: { binder: CustomBinder }) {
-  const entries = useEntries();
+  const entries = useHomeEntries();
   const settings = useSettings();
   const binders = useBinders();
+  const { moveEntryTo, restoreEntry, removeEntry } = useCollectionActions();
   const size = pageSize(binder);
   const [page, setPage, asked] = useBinderPage(binder.id, binder.pages, size);
   const [query, setQuery] = useState('');
@@ -634,6 +685,9 @@ function CustomBinderView({ binder }: { binder: CustomBinder }) {
   const [pocketAt, setPocketAt] = useState<number | null>(null);
   const [emptyAt, setEmptyAt] = useState<number | null>(null);
   const [notice, setNotice] = useState<HomeNotice | null>(null);
+  // Resultado sem aviso na tela (a página pode nem mudar), só para o leitor de tela.
+  const [status, setStatus] = useState('');
+  const say = (text: string) => setStatus((cur) => nextSpeech(cur, text));
   const total = customTotalSlots(binder);
   const q = query.trim();
 
@@ -666,6 +720,7 @@ function CustomBinderView({ binder }: { binder: CustomBinder }) {
         ? { text: `${i + 1} de ${hits.length}: ${e.cardName}, ${customPlaceText(binder, e.slot)}`, action: { label: 'Próxima', onPress: () => goToHit((i + 1) % hits.length) } }
         : null,
     );
+    if (hits.length === 1) say(`${e.cardName}, ${customPlaceText(binder, e.slot)}, destacada`);
   }
 
   /** Vai até o bolso pelo número, com carta ou vazio (F6). */
@@ -674,6 +729,8 @@ function CustomBinderView({ binder }: { binder: CustomBinder }) {
     setEmptyAt(null);
     setPage(Math.floor(slot / size));
     setNotice(null);
+    const e = entries[customEntryId(binder.id, slot)];
+    say(`Bolso nº ${slot + 1}, ${pagePocketText(binder, slot)}, ${e ? e.cardName : 'vazio'}, destacado`);
   }
 
   /** Destaca o próximo bolso vazio: começa na primeira página aberta e segue do destacado enquanto ele estiver à vista. */
@@ -685,10 +742,39 @@ function CustomBinderView({ binder }: { binder: CustomBinder }) {
         setPage(Math.floor(i / size));
         setEmptyAt(i);
         setNotice(null);
+        say(`Próximo vazio: ${customPlaceText(binder, i)}, destacado`);
         return;
       }
     }
     setNotice({ text: 'Fichário cheio! Aumente as páginas em ⚙ para ganhar bolsos.', tone: 'success' });
+  }
+
+  /**
+   * Carta solta em outro bolso: vai para lá e, se houver carta nele, as duas trocam de lugar. O "Desfazer" recoloca cada
+   * uma como estava, como no "Mover" da tela da carta.
+   */
+  function moveCard(card: Entry, slot: number) {
+    // Do store, e não do desenho: o desenho da home pode estar até 1 s atrás no preço, e o "Desfazer" regravaria o antigo.
+    const live = collectionState().entries;
+    const before = live[card.id] ?? card;
+    const movedId = customEntryId(binder.id, slot);
+    const occupant = live[movedId];
+    const name = card.cardName || 'Carta';
+    const failed = (fallback: string) => (e: unknown) => {
+      showToast({ message: e instanceof Error ? e.message : fallback, tone: 'error' });
+    };
+    return moveEntryTo(card.id, { binderId: binder.id, slot }).then(() => {
+      showToast({
+        message: occupant ? `${name} e ${occupant.cardName || 'outra carta'} trocaram de lugar` : `${name} foi para ${binder.name} · ${pagePocketText(binder, slot)}`,
+        actionLabel: 'Desfazer',
+        onAction: () => {
+          restoreEntry(before)
+            .then(() => (occupant ? restoreEntry(occupant) : removeEntry(movedId)))
+            .catch(failed('Não consegui desfazer.'));
+        },
+        duration: 8000,
+      });
+    }, failed('Não consegui mover a carta.'));
   }
 
   function cycle() {
@@ -730,6 +816,7 @@ function CustomBinderView({ binder }: { binder: CustomBinder }) {
         out.push({ key: e.id, section: 'Outros fichários', title: e.cardName, detail: whereIs(e, settings, binders), entry: e, onSelect: () => router.push(cardHref(e)) });
       });
     out.push(findEverywhere(q));
+    out.push(consultSuggestion(q));
     out.push({
       key: 'add',
       section: 'Adicionar',
@@ -782,6 +869,7 @@ function CustomBinderView({ binder }: { binder: CustomBinder }) {
       missingTitle={empty > 0 ? `${formatInt(empty)} ${empty === 1 ? 'bolso vazio' : 'bolsos vazios'}` : 'Fichário cheio!'}
       emptyHint={filled === 0 ? `${TAP} num bolso ou em “+ Carta” para colocar a primeira carta. Em ⚙ você muda capa, tamanho e páginas.` : undefined}
       notice={notice}
+      status={status}
       onDismissNotice={() => setNotice(null)}
       query={query}
       onQuery={(text) => {
@@ -796,6 +884,7 @@ function CustomBinderView({ binder }: { binder: CustomBinder }) {
       onEdit={() => router.push({ pathname: '/binder-edit', params: { id: binder.id } })}
       positionOf={(e) => whereIs(e, settings, binders)}
       hasOtherBinders
+      onMoveCard={moveCard}
     />
   );
 }
@@ -838,6 +927,8 @@ type FrameProps = {
   onMissingList?: () => void;
   emptyHint?: string;
   notice: HomeNotice | null;
+  /** Resultado só para o leitor de tela ("Próxima falta: #021 Spearow, pág. 3, bolso 3, destacado"). */
+  status: string;
   onDismissNotice: () => void;
   query: string;
   onQuery: (q: string) => void;
@@ -850,14 +941,9 @@ type FrameProps = {
   positionOf: (e: Entry) => string;
   /** Há outros fichários: a variação é da coleção, não só deste. */
   hasOtherBinders: boolean;
+  /** Fichário livre: a carta foi solta em outro bolso (`slot`). Sem isto, as cartas não se arrastam. */
+  onMoveCard?: (card: Entry, slot: number) => Promise<void>;
 };
-
-/** Páginas abertas lado a lado (índices a partir de 0): [0], [1, 2], [3, 4]… e a última sozinha se cair à esquerda. */
-function spreadOf(page: number, pages: number) {
-  if (page <= 0) return [0];
-  const left = page % 2 === 1 ? page : page - 1;
-  return left + 1 < pages ? [left, left + 1] : [left];
-}
 
 /** Variação dos últimos 7 dias (com conta e histórico de 2 dias ou mais), para o resumo (V5). */
 function useRecentChange(enabled: boolean, scope: string): HomeChange | null {
@@ -930,9 +1016,17 @@ function BinderFrame(p: FrameProps) {
   const focused = useIsFocused();
   const reduceMotion = useReducedMotion();
   const desktop = L.isDesktop;
-  const ink = onCover(p.coverColor);
-  const [barHeight, setBarHeight] = useState(desktop ? 67 : 59);
+  // A medida da barra já inclui a área segura de cima.
+  const [barHeight, setBarHeight] = useState(() => insets.top + (desktop ? BAR_HEIGHT.desktop : BAR_HEIGHT.phone));
   const [searchOpen, setSearchOpen] = useState(false);
+  // Altura da linha do campo de busca do celular (a lista de sugestões abre logo abaixo dela).
+  const [searchRowHeight, setSearchRowHeight] = useState(TOUCH + space.xs + space.sm);
+  // Área da folha, medida na tela (null até a primeira medida).
+  const [stage, setStage] = useState<{ width: number; height: number } | null>(null);
+  // Área e janela de quando a busca abriu no celular (null com ela fechada).
+  const [held, setHeld] = useState<{ width: number; height: number; window: number } | null>(null);
+  // Altura do que fica acima da lista de regiões, no painel do computador.
+  const [panelTop, setPanelTop] = useState(0);
   const [listOpen, setListOpen] = useState(false);
   const [active, setActive] = useState(0);
   const [searchFrame, setSearchFrame] = useState<{ x: number; y: number; width: number } | null>(null);
@@ -940,6 +1034,9 @@ function BinderFrame(p: FrameProps) {
   const [outsideOpen, setOutsideOpen] = useState(false);
   const [peek, setPeek] = useState<Entry | undefined>();
   const [showHint, setShowHint] = useState(() => !(WEB && desktop) && hintSeen('swipe') < 3);
+  const canDrag = !!p.onMoveCard;
+  // Dica à parte da de folhear: quem já folheou ainda não conhece o arraste.
+  const [showDragHint, setShowDragHint] = useState(() => canDrag && !(WEB && desktop) && hintSeen('drag') < 3);
   const inputRef = useRef<TextInputInstance>(null);
   const searchBox = useRef<ViewInstance>(null);
   const blurTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -948,25 +1045,53 @@ function BinderFrame(p: FrameProps) {
   const change = useRecentChange(p.showPrices, p.hasOtherBinders ? ' na coleção' : '');
   const value = useMemo(() => homeValue(p.entries), [p.entries]);
 
-  // ----- Medidas: a página cabe na largura (celular) ou na altura da janela (tablet e computador) -----
+  // ----- Medidas: a folha cabe na largura e na altura da área dela, em qualquer janela -----
   // No computador não há teto de largura: o bolso cresce até a página caber na altura da janela, e o fichário (páginas
   // + painel) fica centralizado. Com o teto de 1.440 px, numa tela grande sobravam as laterais e metade da altura.
   const avail = Math.max(0, L.width - L.gutter * 2);
   const mainAvail = desktop ? avail - PANEL_WIDTH - PANEL_GAP : Math.min(avail, widths.reading);
   const spread = p.doubleSided && desktop && mainAvail >= SPREAD_MIN_MAIN && p.pages > 1;
   const pageWidth = spread ? Math.floor((mainAvail - SPREAD_GAP) / 2) : mainAvail;
-  const byWidth = Math.floor((pageWidth - PAGE_PAD - SPINE_PAD - SHEET_BORDER * 2 - GAP * (p.cols - 1)) / p.cols);
-  const priceSpace = p.showPrices ? priceBlockHeight(byWidth, L.fontScale) : 0;
-  // No computador, mais o respiro de cima e o número das páginas abertas lado a lado.
-  const chrome =
-    barHeight + PAGER_SPACE + (PAGE_PAD + SHEET_BORDER) * 2 + insets.bottom + (desktop ? space.xxl + (spread ? space.xl : 0) : FAB_SPACE);
-  const byHeight = Math.floor(((L.height - chrome - GAP * (p.rows - 1)) / p.rows - priceSpace) * CARD_RATIO);
-  const slot =
-    L.width >= breakpoints.tablet ? Math.max(MIN_SLOT_WIDE, Math.min(byWidth, byHeight, desktop ? MAX_SLOT_DESKTOP : Infinity)) : byWidth;
+  // A área é medida na tela: barra, resumo, créditos, avisos, régua, dica e base já saíram dela.
+  const room = stage ?? {
+    width: 0,
+    height: Math.max(0, L.height - barHeight - insets.bottom - (desktop ? ABOVE_SHEET_GUESS.desktop : ABOVE_SHEET_GUESS.phone + DOCK_HEIGHT)),
+  };
+  const typing = !desktop && searchOpen;
+  // Sem o resumo no fluxo (fichário sem preços), a linha da busca reserva o espaço dela, em vez de cobrir a folha (+1: o fio).
+  const searchReserve = typing && !p.showPrices ? Math.max(0, searchRowHeight + 1 - space.md) : 0;
+  // Busca aberta no celular: enquanto o teclado encolher a área, a folha fica com a altura de antes e não pula. Mudou a
+  // largura (girou o aparelho) ou encolheu por outro motivo (aviso, dica), vale a medida nova.
+  if (typing !== !!held) setHeld(typing ? { ...room, height: room.height - searchReserve, window: L.height } : null);
+  const holding = held && held.width === room.width && squeezedByKeyboard(held.height, room.height, keyboard) ? held : null;
+  const stageHeight = holding ? holding.height : room.height;
+  const keyboardOpen = keyboard > 0 || (WEB && !!holding && holding.window - L.height > KEYBOARD_MIN);
+  const fit = fitPocket({
+    width: pageWidth - PAGE_PAD - SPINE_PAD - SHEET_BORDER * 2,
+    height: stageHeight - (VIEWPORT_PAD + PAGE_PAD + SHEET_BORDER) * 2 - (spread ? PAGE_NUMBER_SPACE : 0),
+    rows: p.rows,
+    cols: p.cols,
+    gap: GAP,
+    ratio: CARD_RATIO,
+    priceHeight: (w) => (p.showPrices ? priceBlockHeight(w, L.fontScale) : 0),
+    min: MIN_SLOT,
+    max: desktop ? MAX_SLOT_DESKTOP : undefined,
+  });
+  const slot = fit.width;
   const sheetWidth = slot * p.cols + GAP * (p.cols - 1) + PAGE_PAD + SPINE_PAD + SHEET_BORDER * 2;
-  // Largura em uso: no computador, só o que as páginas ocupam (com um mínimo para o paginador), mais o painel; no
-  // celular e no tablet, a coluna inteira.
-  const main = desktop ? Math.min(mainAvail, Math.max(spread ? sheetWidth * 2 + SPREAD_GAP : sheetWidth, MIN_MAIN_DESKTOP)) : mainAvail;
+  const sheetHeight = fit.height + (PAGE_PAD + SHEET_BORDER) * 2;
+  // Painel do computador: tem a altura da janela e, dentro dele, só a lista de regiões rola.
+  const panelRoom = Math.max(0, L.height - barHeight - insets.bottom - DESKTOP_TOP - DESKTOP_BOTTOM - PANEL_PAD * 2);
+  const belowTop = panelRoom - panelTop - PANEL_PAD;
+  // A legenda do teclado sai antes de a lista de regiões ficar sem altura.
+  const keysSpace = typography.caption.lineHeight + PANEL_PAD;
+  const showKeys = WEB && belowTop - keysSpace >= (p.regionsAt ? MIN_PANEL_LIST : 0);
+  const listRoom = belowTop - (showKeys ? keysSpace : 0);
+  const panelShort = listRoom < MIN_PANEL_LIST;
+  // Largura em uso: no computador, só o que as páginas ocupam (com um mínimo para o paginador, e com a barra de rolagem
+  // quando a área rola, senão ela cortaria as bordas da folha), mais o painel; no celular e no tablet, a coluna inteira.
+  const scrollbar = WEB && desktop && fit.overflow ? SCROLLBAR_SPACE : 0;
+  const main = desktop ? Math.min(mainAvail, Math.max((spread ? sheetWidth * 2 + SPREAD_GAP : sheetWidth) + scrollbar, MIN_MAIN_DESKTOP)) : mainAvail;
   const outer = desktop ? main + PANEL_WIDTH + PANEL_GAP : main;
 
   const shown = spread ? spreadOf(p.page, p.pages) : [p.page];
@@ -1006,52 +1131,84 @@ function BinderFrame(p: FrameProps) {
 
   // Só muda quando a página muda (depois do gesto) ou a janela muda de tamanho: o gesto em andamento não se perde.
   const onPage = p.onPage;
-  const pan = useMemo(
-    () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 18 && Math.abs(g.dx) > Math.abs(g.dy) * 1.6,
-        onPanResponderTerminationRequest: () => false,
-        onPanResponderMove: (_e, g) => {
-          // Sem página para aquele lado: resiste (mostra que é o fim).
-          const blocked = (g.dx < 0 && !canNext) || (g.dx > 0 && !canPrev);
-          dragX.setValue(blocked ? g.dx * 0.2 : g.dx);
-        },
-        onPanResponderRelease: (_e, g) => {
-          const dir: 1 | -1 = g.dx < 0 ? 1 : -1;
-          const can = dir === 1 ? canNext : canPrev;
-          const target = dir === 1 ? last + 1 : first - 1;
-          if (!can || (Math.abs(g.dx) < main * 0.25 && Math.abs(g.vx) < 0.5)) {
-            Animated.spring(dragX, { toValue: 0, bounciness: 4, useNativeDriver: NATIVE_DRIVER }).start();
-            return;
-          }
-          // Quem já folheou não precisa mais da dica.
-          if (showHint) {
-            markHint('swipe', true);
-            setShowHint(false);
-          }
-          if (reduceMotion) {
-            dragX.setValue(0);
-            onPage(target);
-            return;
-          }
-          Animated.timing(dragX, { toValue: -dir * main, duration: 130, easing: Easing.in(Easing.quad), useNativeDriver: NATIVE_DRIVER }).start(() => {
-            onPage(target);
-            dragX.setValue(dir * main * 0.3);
-            Animated.timing(dragX, { toValue: 0, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: NATIVE_DRIVER }).start();
-          });
-        },
-        onPanResponderTerminate: () => {
-          Animated.spring(dragX, { toValue: 0, bounciness: 4, useNativeDriver: NATIVE_DRIVER }).start();
-        },
-      }),
-    [canNext, canPrev, first, last, main, reduceMotion, showHint, onPage, dragX],
-  );
+  const pan = useMemo(() => {
+    // A página volta ao lugar (gesto curto ou interrompido); com "reduzir movimento", sem a mola.
+    const settle = () => {
+      if (reduceMotion) dragX.setValue(0);
+      else Animated.spring(dragX, { toValue: 0, bounciness: 4, useNativeDriver: NATIVE_DRIVER }).start();
+    };
+    return PanResponder.create({
+      onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 18 && Math.abs(g.dx) > Math.abs(g.dy) * 1.6,
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderMove: (_e, g) => {
+        // Sem página para aquele lado: resiste (mostra que é o fim).
+        const blocked = (g.dx < 0 && !canNext) || (g.dx > 0 && !canPrev);
+        dragX.setValue(blocked ? g.dx * 0.2 : g.dx);
+      },
+      onPanResponderRelease: (_e, g) => {
+        const dir: 1 | -1 = g.dx < 0 ? 1 : -1;
+        const can = dir === 1 ? canNext : canPrev;
+        const target = dir === 1 ? last + 1 : first - 1;
+        if (!can || (Math.abs(g.dx) < main * 0.25 && Math.abs(g.vx) < 0.5)) {
+          settle();
+          return;
+        }
+        // Quem já folheou não precisa mais da dica.
+        if (showHint) {
+          markHint('swipe', true);
+          setShowHint(false);
+        }
+        if (reduceMotion) {
+          dragX.setValue(0);
+          onPage(target);
+          return;
+        }
+        Animated.timing(dragX, { toValue: -dir * main, duration: 130, easing: Easing.in(Easing.quad), useNativeDriver: NATIVE_DRIVER }).start(() => {
+          onPage(target);
+          dragX.setValue(dir * main * 0.3);
+          Animated.timing(dragX, { toValue: 0, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: NATIVE_DRIVER }).start();
+        });
+      },
+      onPanResponderTerminate: settle,
+    });
+  }, [canNext, canPrev, first, last, main, reduceMotion, showHint, onPage, dragX]);
   // No computador com mouse, folhear é pelos botões e pelo teclado (arrastar um link abriria o "arrastar" do navegador).
   const panHandlers = WEB && desktop ? null : pan.panHandlers;
 
   useEffect(() => {
     if (showHint) markHint('swipe');
   }, [showHint]);
+
+  useEffect(() => {
+    if (showDragHint) markHint('drag');
+  }, [showDragHint]);
+
+  // ----- Arrastar as cartas (só fichário livre): segurar levanta, soltar troca de lugar -----
+  const onMoveCard = p.onMoveCard;
+  const contentHeight = sheetHeight + VIEWPORT_PAD * 2 + (spread ? PAGE_NUMBER_SPACE : 0);
+  const { drag, lifted } = useCardDrag(
+    onMoveCard
+      ? {
+          gap: GAP,
+          sheetPad: SPINE_PAD,
+          maxScroll: fit.overflow ? Math.max(0, contentHeight - stageHeight) : 0,
+          canFlip: (dir) => (dir === 1 ? canNext : canPrev),
+          onFlip: (dir) => p.onPage(dir === 1 ? last + 1 : first - 1),
+          onDrop: (card, target) => {
+            // Quem já arrastou não precisa mais da dica.
+            if (showDragHint) {
+              markHint('drag', true);
+              setShowDragHint(false);
+            }
+            return onMoveCard(card, target);
+          },
+          onPeek: setPeek,
+          reduceMotion,
+        }
+      : null,
+    // Com a área: um aviso que entra no meio do arraste muda o lugar e o tamanho dos bolsos.
+    `${first}:${slot}:${stageHeight}`,
+  );
 
   // ----- Pré-carga das miniaturas das páginas vizinhas (H1) -----
   const prefetch = useEffectEvent(() => {
@@ -1061,7 +1218,7 @@ function BinderFrame(p: FrameProps) {
       .flatMap((n) => p.itemsFor(n))
       .map((it) => it.entry)
       .filter((e): e is Entry => !!e)
-      .map((e) => cardImageUrl({ image: e.image, imageUrl: e.imageUrl, photo: e.stampPhoto, ptImage: mypPtImage(e) }));
+      .map((e) => cardImageUrl({ image: e.image, imageUrl: entryImageUrl(e), photo: e.stampPhoto, ptImage: mypPtImage(e) }));
     prefetchCardImages(urls);
   });
   useEffect(() => {
@@ -1085,8 +1242,8 @@ function BinderFrame(p: FrameProps) {
     searchBox.current?.measureInWindow((x, y, width, height) => setSearchFrame({ x, y: y + height, width }));
   }, [desktop, L.width, L.height]);
   const showList = listOpen && p.suggestions.length > 0 && (desktop || searchOpen);
-  // A lista abre logo abaixo do campo (computador) ou da barra (celular).
-  const listTop = desktop && searchFrame ? searchFrame.y + space.xs : barHeight;
+  // A lista abre logo abaixo do campo, na barra (computador) ou na linha que abre embaixo dela (celular).
+  const listTop = desktop && searchFrame ? searchFrame.y + space.xs : barHeight + searchRowHeight;
   const activeIndex = Math.min(active, p.suggestions.length - 1);
   const select = (s: Suggestion) => {
     setListOpen(false);
@@ -1135,6 +1292,16 @@ function BinderFrame(p: FrameProps) {
     if (desktop) inputRef.current?.focus();
     else setSearchOpen(true);
   };
+  // Fecha a busca do celular: o X da barra e o voltar do Android.
+  const closeSearch = () => {
+    p.onQuery('');
+    setListOpen(false);
+    setSearchOpen(false);
+  };
+  // A camada da busca não é um Modal (sem onRequestClose): o voltar do Android fecha a busca, e não o app.
+  useCloseOnBack(typing && focused, closeSearch);
+  // No celular, quantas sugestões abriram, lido quando a pessoa para de digitar (na web, o combobox já diz).
+  const listSpeech = useDebounced(!WEB && showList ? suggestionsSpeech(p.suggestions.length, p.query.trim()) : '', SPEECH_DELAY_MS);
 
   // ----- Teclado no computador (W3): ← → folheiam, Home/End, "/" busca, F próxima falta, Esc limpa -----
   const onKey = useEffectEvent((e: KeyboardEvent) => {
@@ -1160,15 +1327,19 @@ function BinderFrame(p: FrameProps) {
     return () => window.removeEventListener('keydown', handler);
   }, [focused]);
 
+  // Na web, o foco volta ao controle que abriu a outra tela (o bolso, por exemplo) quando a home volta à frente.
+  useFocusReturn(focused);
+
   const onAdd = () => router.push({ pathname: '/search', params: { mode: 'add' } });
   const onOpenCollection = () => router.push('/menu');
+  const onConsulta = () => router.push('/consulta');
 
   // ----- Partes -----
-  const renderPage = (pg: number, side: 'left' | 'right') => {
+  const renderPage = (pg: number) => {
     const items = p.itemsFor(pg);
     const rows = Array.from({ length: Math.ceil(items.length / p.cols) }, (_, r) => items.slice(r * p.cols, (r + 1) * p.cols));
-    // Página da direita (ou sozinha): lombada à esquerda; página da esquerda: à direita.
-    const spineLeft = side === 'right';
+    // O lado vem da página (frente ou verso); com duas abertas, a posição na tela já concorda com ele.
+    const spineLeft = spineSide(p.doubleSided, pg) === 'left';
     return (
       <View key={pg} style={{ width: sheetWidth }}>
         <View style={[styles.sheet, spineLeft ? styles.spineLeft : styles.spineRight]}>
@@ -1191,6 +1362,9 @@ function BinderFrame(p: FrameProps) {
                     href={it.href}
                     onPress={() => router.push(it.href)}
                     onLongPress={it.entry ? () => setPeek(it.entry) : undefined}
+                    drag={canDrag ? drag : undefined}
+                    dragSlot={it.index}
+                    lifted={lifted?.slot === it.index}
                   />
                 ))}
               </View>
@@ -1207,54 +1381,93 @@ function BinderFrame(p: FrameProps) {
    * listam desde o início (ao lado da última página, "a partir dela" só repetiria o que já está à vista).
    */
   const cover = (side: 'front' | 'back') => {
-    const missing = p.missingFrom?.(0) ?? [];
+    // Só os que cabem: a capa não pode ficar mais alta que a folha ao lado (não há rolagem para mostrar o resto).
+    const missing = (p.missingFrom?.(0) ?? []).slice(0, Math.max(0, Math.floor((sheetHeight - COVER_CHROME) / (TOUCH + space.xxs))));
+    // O verso da capa fica à esquerda da pág. 1 (lombada à direita dele); a contracapa, à direita da última.
+    const front = side === 'front';
     return (
-      <View key={side} style={[styles.cover, { width: sheetWidth, backgroundColor: p.coverColor }]}>
-        <PokeballIcon size={36} color={ink} />
-        <Text style={[styles.coverTitle, { color: ink }]}>{p.missingTitle}</Text>
-        {missing.length ? <Text style={[styles.coverLabel, { color: ink }]}>Os primeiros que faltam</Text> : null}
-        <View style={styles.coverList}>
-          {missing.map((m) => (
+      <View key={side} style={{ width: sheetWidth }}>
+        <View style={[styles.cover, front ? styles.coverFront : styles.coverBack]}>
+          <View style={[styles.coverStrip, front ? styles.coverStripFront : styles.coverStripBack, { backgroundColor: coverFill(p.coverColor) }]} aria-hidden />
+          <PokeballIcon size={36} color={colors.iconFaint} />
+          <Text style={styles.coverTitle}>{digitsInSystemFont(p.missingTitle)}</Text>
+          {missing.length ? <Text style={styles.coverLabel}>Os primeiros que faltam</Text> : null}
+          <View style={styles.coverList}>
+            {missing.map((m) => (
+              <Pressable
+                key={m.key}
+                onPress={m.onPress}
+                role="button"
+                accessibilityLabel={`${m.label}, ir para o espaço`}
+                style={(s) => {
+                  const { pressed, hovered } = s as PressState;
+                  return [styles.coverItem, hovered && { backgroundColor: semantic.hover.onLight }, pressed && { opacity: 0.7 }];
+                }}>
+                <Text style={styles.coverItemText} numberOfLines={1}>
+                  {m.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          {p.onMissingList ? (
             <Pressable
-              key={m.key}
-              onPress={m.onPress}
+              onPress={p.onMissingList}
               role="button"
-              accessibilityLabel={`${m.label}, ir para o espaço`}
+              accessibilityLabel="Ver a lista completa do que falta"
               style={(s) => {
                 const { pressed, hovered } = s as PressState;
-                return [styles.coverItem, hovered && { backgroundColor: semantic.hover.onBrand }, pressed && { opacity: 0.7 }];
+                return [styles.coverItem, styles.coverLink, hovered && { backgroundColor: semantic.hover.onLight }, pressed && { opacity: 0.7 }];
               }}>
-              <Text style={[styles.coverItemText, { color: ink }]} numberOfLines={1}>
-                {m.label}
-              </Text>
+              <Text style={styles.coverLinkText}>Lista completa</Text>
+              <Ionicons name="chevron-forward" size={16} color={B.text} />
             </Pressable>
-          ))}
+          ) : null}
         </View>
-        {p.onMissingList ? (
-          <Pressable
-            onPress={p.onMissingList}
-            role="button"
-            accessibilityLabel="Ver a lista completa do que falta"
-            style={(s) => {
-              const { pressed, hovered } = s as PressState;
-              return [styles.coverItem, styles.coverLink, hovered && { backgroundColor: semantic.hover.onBrand }, pressed && { opacity: 0.7 }];
-            }}>
-            <Text style={[styles.coverLinkText, { color: ink }]}>Lista completa</Text>
-            <Ionicons name="chevron-forward" size={16} color={ink} />
-          </Pressable>
-        ) : null}
+        {/* A altura do número da página: a contracapa termina junto com a folha ao lado. */}
+        <Text style={styles.pageNumber} aria-hidden>
+          {' '}
+        </Text>
       </View>
     );
   };
 
   const pagesView = (
-    <View style={styles.viewport}>
+    <View style={styles.viewport} ref={canDrag ? drag.setViewport : undefined}>
       <Animated.View style={[styles.spread, { gap: SPREAD_GAP, transform: [{ translateX: dragX }] }]} {...(panHandlers ?? {})}>
         {spread && first === 0 ? cover('front') : null}
-        {/* Página da esquerda: a primeira de duas, ou a última sozinha (com a contracapa à direita). */}
-        {shown.map((pg, i) => renderPage(pg, spread && (shown.length > 1 ? i === 0 : first > 0) ? 'left' : 'right'))}
+        {shown.map((pg) => renderPage(pg))}
         {spread && shown.length === 1 && first > 0 ? cover('back') : null}
       </Animated.View>
+    </View>
+  );
+
+  // Na web, a tela coberta por outra (display: none) mede 0: a medida zerada não vale, senão a folha volta minúscula.
+  const onStageLayout = (e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout;
+    if (width > 0 && height > 0) setStage({ width: Math.round(width), height: Math.floor(height) });
+  };
+  const onPanelTopLayout = (e: LayoutChangeEvent) => {
+    const { height } = e.nativeEvent.layout;
+    if (height > 0) setPanelTop(Math.ceil(height));
+  };
+  const onBarHeight = (height: number) => {
+    if (height > 0) setBarHeight(height);
+  };
+
+  // Área da folha: rola por dentro só no fichário denso demais, em que nem o bolso mínimo cabe.
+  const stageView = (
+    <View ref={canDrag ? drag.setStage : undefined} style={[styles.stage, { width: main }]} onLayout={onStageLayout}>
+      <ScrollView
+        ref={canDrag ? drag.setScroller : undefined}
+        onScroll={canDrag && fit.overflow ? drag.onScroll : undefined}
+        scrollEventThrottle={16}
+        // Com a carta na mão, a folha não rola com o dedo. Na web quem barra a roda é o `setViewport`: tirar a rolagem sumiria com a barra (a folha andaria).
+        scrollEnabled={fit.overflow && (WEB || !lifted)}
+        showsVerticalScrollIndicator={fit.overflow}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={desktop ? undefined : styles.stageCentered}>
+        {pagesView}
+      </ScrollView>
     </View>
   );
 
@@ -1272,12 +1485,13 @@ function BinderFrame(p: FrameProps) {
         onNextEmpty={nextEmpty}
         nextEmptyLabel={p.nextEmptyLabel}
       />
-      <NoticeSlot notice={p.notice} />
     </View>
   );
 
   const notices = (
     <>
+      {/* Com a busca aberta no celular, o aviso dela fica embaixo do campo, por cima da tela. */}
+      {typing ? null : <NoticeSlot notice={p.notice} />}
       <NoticeSlot notice={syncNotice} />
       <NoticeSlot
         notice={
@@ -1293,64 +1507,90 @@ function BinderFrame(p: FrameProps) {
     </>
   );
 
-  const summary = p.showPrices ? <HomeValueSummary data={value} change={change} layout={desktop ? 'panel' : 'row'} onOpenCollection={onOpenCollection} /> : null;
+  const summary = p.showPrices ? (
+    <HomeValueSummary
+      data={value}
+      change={change}
+      layout={desktop ? 'panel' : 'row'}
+      onOpenCollection={onOpenCollection}
+      trailing={desktop ? undefined : <ConsultaPill onPress={onConsulta} />}
+      // Com a busca aberta no celular, a linha do valor fica embaixo do campo: sai do Tab e do leitor de tela.
+      covered={typing}
+    />
+  ) : null;
 
   const panel = desktop ? (
     <View style={{ width: PANEL_WIDTH }}>
-      <Card style={styles.panel}>
-        <View style={[styles.panelStrip, { backgroundColor: p.coverColor }]} aria-hidden />
-        <View style={styles.panelHead}>
-          <Text style={styles.panelTitle} numberOfLines={2} role="heading">
-            {p.title}
-          </Text>
-          <Text style={styles.panelCounter}>{subtitle}</Text>
-          <View style={styles.panelTrack} aria-hidden>
-            <View style={[styles.panelFill, { width: `${Math.max(1.5, Math.min(100, progress * 100))}%` }]} />
+      <Card>
+        {/* Só a lista de regiões rola; numa janela baixa demais para ela, o painel inteiro. */}
+        <ScrollView
+          style={[styles.panelScroll, { maxHeight: panelRoom }]}
+          scrollEnabled={panelShort}
+          showsVerticalScrollIndicator={panelShort}
+          contentContainerStyle={styles.panel}>
+          <View style={styles.panel} onLayout={onPanelTopLayout}>
+            <View style={styles.panelHead}>
+              <Text style={styles.panelTitle} numberOfLines={2} role="heading">
+                {digitsInSystemFont(p.title)}
+              </Text>
+              <Text style={styles.panelCounter}>{subtitle}</Text>
+              <View style={styles.panelTrack} aria-hidden>
+                <View style={[styles.panelFill, { width: `${Math.max(1.5, Math.min(100, progress * 100))}%` }]} />
+              </View>
+            </View>
+            {summary}
+            {notices}
+            {/* Telas da coleção inteira (E1, E2, Relatórios); no celular, ficam na "Minha coleção" e na busca ao vivo. */}
+            <View>
+              <ListRow
+                title="Buscar na coleção"
+                subtitle="Tenho essa carta? Onde ela está?"
+                left={<ShortcutIcon icon="search-outline" />}
+                right={<Ionicons name="chevron-forward" size={18} color={colors.iconFaint} />}
+                onPress={() => router.push('/find')}
+                accessibilityLabel="Buscar na coleção: tenho essa carta? Onde ela está?"
+              />
+              <ListRow
+                title="Listas"
+                subtitle="Preciso e tenho repetida"
+                left={<ShortcutIcon icon="list-outline" />}
+                right={<Ionicons name="chevron-forward" size={18} color={colors.iconFaint} />}
+                onPress={() => router.push('/lists')}
+                accessibilityLabel="Listas: preciso e tenho repetida"
+              />
+              <ListRow
+                title="Relatórios"
+                subtitle="Últimas cartas, trocas e destaques"
+                left={<ShortcutIcon icon="stats-chart-outline" />}
+                right={<Ionicons name="chevron-forward" size={18} color={colors.iconFaint} />}
+                onPress={() => router.push('/reports')}
+                accessibilityLabel="Relatórios: últimas cartas, trocas e destaques"
+              />
+            </View>
           </View>
-        </View>
-        {summary}
-        {notices}
-        {/* Telas da coleção inteira (E1, E2); no celular, ficam na "Minha coleção" e na busca ao vivo. */}
-        <View>
-          <ListRow
-            title="Buscar na coleção"
-            subtitle="Tenho essa carta? Onde ela está?"
-            left={<ShortcutIcon icon="search-outline" />}
-            right={<Ionicons name="chevron-forward" size={18} color={colors.iconFaint} />}
-            onPress={() => router.push('/find')}
-            accessibilityLabel="Buscar na coleção: tenho essa carta? Onde ela está?"
-          />
-          <ListRow
-            title="Listas"
-            subtitle="Preciso e tenho repetida"
-            left={<ShortcutIcon icon="list-outline" />}
-            right={<Ionicons name="chevron-forward" size={18} color={colors.iconFaint} />}
-            onPress={() => router.push('/lists')}
-            accessibilityLabel="Listas: preciso e tenho repetida"
-          />
-        </View>
-        {regions ? <RegionRuler regions={regions} vertical /> : null}
-        {WEB ? <Text style={styles.keys}>← → folheiam · / busca · F {p.nextEmptyLabel.toLowerCase()}</Text> : null}
+          {regions ? <RegionRuler regions={regions} vertical maxHeight={panelShort ? undefined : listRoom} /> : null}
+          {showKeys ? <Text style={styles.keys}>← → folheiam · / busca · F {p.nextEmptyLabel.toLowerCase()}</Text> : null}
+        </ScrollView>
       </Card>
     </View>
   ) : null;
 
-  const bottomSpace = desktop ? space.xxl : FAB_SPACE + insets.bottom;
-  // No celular, os avisos (toast) ficam acima do "+ Carta" enquanto o fichário está na tela.
-  useToastClearance(!desktop && focused ? insets.bottom + space.lg + FAB_HEIGHT : 0);
+  // No celular, os avisos (toast) ficam acima da base fixa enquanto o fichário está na tela.
+  useToastClearance(!desktop && focused && !keyboardOpen ? insets.bottom + DOCK_HEIGHT : 0);
+
+  // Olha o fichário, e não a página: a altura da dica não pode mudar no meio do folhear (o bolso mudaria junto).
+  const hintLine = [showHint && p.pages > 1 ? 'Arraste a página para o lado para folhear.' : '', showDragHint && p.entries.length > 0 ? 'Segure uma carta para mudar de lugar.' : '']
+    .filter(Boolean)
+    .join(' ');
 
   return (
-    <View style={styles.root}>
+    <View style={styles.root} ref={canDrag ? drag.setRoot : undefined} {...(canDrag ? drag.rootProps : null)}>
       {/* Título da aba na web: "GENGAR · pág. 2 · Fichário Pokédex". */}
       <Stack.Screen options={{ title: `${p.title} · ${shown.length > 1 ? `págs. ${first + 1}–${last + 1}` : `pág. ${first + 1}`}` }} />
-      {/* Barra de status acompanhando a capa (só enquanto a home está na frente). */}
-      {focused ? <StatusBar style={ink === colors.text ? 'dark' : 'light'} /> : null}
 
       <HomeTopBar
         title={p.title}
         subtitle={subtitle}
-        cover={p.coverColor}
-        ink={ink}
         progress={progress}
         desktop={desktop}
         gutter={L.gutter}
@@ -1361,81 +1601,88 @@ function BinderFrame(p: FrameProps) {
             <View ref={searchBox} onLayout={measureSearch}>
               {search}
             </View>
-          ) : (
-            search
-          )
+          ) : null
         }
         searchOpen={searchOpen}
-        onToggleSearch={() => {
-          if (searchOpen) {
-            p.onQuery('');
-            setListOpen(false);
-          }
-          setSearchOpen(!searchOpen);
-        }}
+        onToggleSearch={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
         onMenu={() => router.push('/menu')}
         onSwitch={() => router.push('/binders')}
         onEdit={p.onEdit}
         onAdd={onAdd}
         onFind={() => router.push('/find')}
-        onHeight={setBarHeight}
+        onConsulta={onConsulta}
+        onHeight={onBarHeight}
       />
 
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={[styles.content, { paddingBottom: bottomSpace }]}
-        keyboardShouldPersistTaps="handled"
-        stickyHeaderIndices={desktop ? undefined : [2]}>
-        {desktop ? (
-          <View style={[styles.desktopBody, { width: outer }]}>
-            <View style={{ width: main }}>
-              {pager}
-              {pagesView}
-            </View>
-            {panel}
+      {/*
+        Busca do celular: abre por cima do resumo, abaixo da barra. Com resumo, nada embaixo dela muda de lugar ou de
+        tamanho. Logo depois da barra, para o campo e as sugestões virem em seguida no Tab e no leitor de tela.
+      */}
+      {typing ? (
+        <View style={[styles.searchLayer, { top: barHeight, paddingHorizontal: L.gutter }]}>
+          <View style={styles.searchRow} onLayout={(e) => setSearchRowHeight(Math.ceil(e.nativeEvent.layout.height))}>
+            {search}
           </View>
-        ) : (
-          [
-            <View key="summary" style={[styles.block, styles.summary, { width: outer }]}>
-              {summary}
-              {notices}
-            </View>,
-            <View key="regions" style={[styles.block, { width: outer }]}>
-              {regions ? <RegionRuler regions={regions} /> : null}
-            </View>,
-            <View key="pager" style={styles.sticky}>
-              <View style={[styles.block, { width: outer }]}>{pager}</View>
-            </View>,
-            <View key="pages" style={[styles.block, { width: outer }]}>
-              {pagesView}
-              {showHint && p.pages > 1 ? <Text style={styles.hint}>Arraste a página para o lado para folhear.</Text> : null}
-            </View>,
-          ]
-        )}
-      </ScrollView>
+          <NoticeSlot notice={p.notice} />
+        </View>
+      ) : null}
 
       {showList ? (
         <SuggestionList
           items={p.suggestions}
           active={activeIndex}
           onHover={setActive}
-          maxHeight={Math.max(TOUCH * 2, L.height - listTop - keyboard - space.lg)}
+          maxHeight={suggestionRoom({ windowHeight: L.height, top: listTop, keyboard, bottomInset: insets.bottom })}
           style={[
             styles.suggestions,
             desktop && searchFrame ? { top: listTop, left: searchFrame.x, width: searchFrame.width } : { top: listTop, left: L.gutter, right: L.gutter },
           ]}
         />
       ) : null}
+      <LiveStatus text={listSpeech} />
+      <LiveStatus text={p.status} />
 
-      {desktop ? null : (
-        <Pressable
-          onPress={onAdd}
-          role="button"
-          accessibilityLabel="Adicionar carta"
-          style={({ pressed }) => [styles.fab, { bottom: insets.bottom + space.lg, right: L.gutter }, pressed && { opacity: 0.85 }]}>
-          <Ionicons name="add" size={22} color={colors.onPrimary} />
-          <Text style={styles.fabText}>Carta</Text>
-        </Pressable>
+      {/* A página não rola: o que rola é só a lista de regiões do painel, a régua do celular e, se preciso, a folha. */}
+      {desktop ? (
+        <View style={[styles.desktopBody, { width: outer, paddingBottom: DESKTOP_BOTTOM + insets.bottom }]}>
+          <View style={[styles.desktopMain, { width: main }]}>
+            {pager}
+            {stageView}
+          </View>
+          {panel}
+        </View>
+      ) : (
+        <View style={[styles.phoneBody, { paddingBottom: DOCK_HEIGHT + insets.bottom }]}>
+          <View style={[styles.block, styles.summary, { width: outer, paddingTop: space.md + searchReserve }]}>
+            {summary}
+            {notices}
+          </View>
+          {regions ? (
+            <View style={[styles.block, { width: outer }]}>
+              <RegionRuler regions={regions} />
+            </View>
+          ) : null}
+          {stageView}
+          {hintLine ? <Text style={[styles.block, styles.swipeHint, { width: outer }]}>{hintLine}</Text> : null}
+        </View>
+      )}
+
+      {/* A base fica fora do fluxo e o espaço dela continua reservado: sumir com o teclado não mexe na folha. */}
+      {desktop || keyboardOpen ? null : (
+        <HomeDock
+          label={pageLabel}
+          pages={p.pages}
+          detail={pagerDetail}
+          canPrev={canPrev}
+          canNext={canNext}
+          onPrev={goPrev}
+          onNext={goNext}
+          onGoTo={() => setGoToOpen(true)}
+          onNextEmpty={nextEmpty}
+          nextEmptyLabel={p.nextEmptyLabel}
+          onAdd={onAdd}
+          bottomInset={insets.bottom}
+        />
       )}
 
       <GoToPageSheet
@@ -1477,20 +1724,27 @@ function BinderFrame(p: FrameProps) {
           if (e) router.push(cardHref(e));
         }}
       />
+
+      {canDrag ? <CardDragLayer drag={drag} lifted={lifted} /> : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.background },
-  scroll: { flex: 1 },
-  content: { flexGrow: 1, alignItems: 'stretch' },
+  root: { flex: 1, overflow: 'hidden', backgroundColor: colors.background },
   block: { alignSelf: 'center' },
-  summary: { paddingTop: space.md, gap: space.sm },
-  sticky: { backgroundColor: colors.background, zIndex: 1 },
-  pagerBlock: { gap: space.xs, paddingBottom: space.sm },
-  desktopBody: { alignSelf: 'center', flexDirection: 'row', alignItems: 'flex-start', gap: PANEL_GAP, paddingTop: space.md },
-  viewport: { overflow: 'hidden', paddingVertical: space.xs },
+  summary: { gap: space.sm },
+  phoneBody: { flex: 1, minHeight: 0 },
+  // Área da folha: ocupa a altura que sobra (a medida dela é a conta do bolso).
+  stage: { flex: 1, minHeight: 0, alignSelf: 'center' },
+  stageCentered: { flexGrow: 1, justifyContent: 'center' },
+  pagerBlock: { paddingBottom: space.sm },
+  desktopBody: { flex: 1, minHeight: 0, alignSelf: 'center', flexDirection: 'row', alignItems: 'flex-start', gap: PANEL_GAP, paddingTop: DESKTOP_TOP },
+  desktopMain: { alignSelf: 'stretch' },
+  // A linha do campo cobre só o valor, não os créditos que ficam logo abaixo dele.
+  searchLayer: { position: 'absolute', left: 0, right: 0, zIndex: 9, backgroundColor: semantic.shell.bg, borderBottomWidth: 1, borderBottomColor: colors.border },
+  searchRow: { paddingTop: space.xs, paddingBottom: space.sm },
+  viewport: { overflow: 'hidden', paddingVertical: VIEWPORT_PAD },
   spread: { flexDirection: 'row', justifyContent: 'center' },
   sheet: {
     backgroundColor: B.page,
@@ -1498,47 +1752,62 @@ const styles = StyleSheet.create({
     paddingVertical: PAGE_PAD,
     borderWidth: SHEET_BORDER,
     borderColor: B.pageBorder,
-    ...elevation[1],
   },
+  // Mesma altura e fio vermelho da barra do topo, para ela não "piscar" ao terminar de carregar.
+  skeletonBar: { backgroundColor: semantic.shell.bg, borderBottomWidth: 3, borderBottomColor: semantic.shell.rule },
   skeletonSheet: { alignSelf: 'center', marginTop: space.xl, paddingLeft: SPINE_PAD, paddingRight: PAGE_PAD, gap: GAP },
   spineLeft: { paddingLeft: SPINE_PAD, paddingRight: PAGE_PAD },
   spineRight: { paddingLeft: PAGE_PAD, paddingRight: SPINE_PAD },
   // Furos dos anéis na lombada da folha.
-  hole: { position: 'absolute', width: 7, height: 7, marginTop: -3.5, borderRadius: 4, backgroundColor: colors.background, borderWidth: 1, borderColor: B.pocketBorder },
-  holeLeft: { left: 5 },
-  holeRight: { right: 5 },
+  hole: {
+    position: 'absolute',
+    width: HOLE_SIZE,
+    height: HOLE_SIZE,
+    marginTop: -HOLE_SIZE / 2,
+    borderRadius: radius.pill,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: B.pocketBorder,
+  },
+  holeLeft: { left: HOLE_INSET },
+  holeRight: { right: HOLE_INSET },
   row: { flexDirection: 'row' },
   pageNumber: { ...typography.caption, ...typography.tabular, color: colors.textFaint, fontWeight: '700', textAlign: 'center', marginTop: space.xs },
-  cover: { borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', gap: space.sm, padding: space.xl, ...shadow },
-  coverTitle: { ...typography.title, textAlign: 'center' },
-  coverLabel: { ...typography.label, marginTop: space.sm },
+  // Uma folha como as outras: a cor da capa fica só na faixa do lado da lombada.
+  cover: {
+    flex: 1,
+    backgroundColor: B.page,
+    borderRadius: radius.md,
+    borderWidth: SHEET_BORDER,
+    borderColor: B.pageBorder,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.sm,
+    padding: space.xl,
+  },
+  coverFront: { paddingRight: space.xl + COVER_STRIP },
+  coverBack: { paddingLeft: space.xl + COVER_STRIP },
+  coverStrip: { position: 'absolute', top: 0, bottom: 0, width: COVER_STRIP },
+  coverStripFront: { right: 0 },
+  coverStripBack: { left: 0 },
+  coverTitle: { ...typography.heading, color: colors.heading, textAlign: 'center' },
+  coverLabel: { ...typography.label, color: B.textMuted, marginTop: space.sm },
   coverList: { alignSelf: 'stretch', gap: 2 },
-  coverItem: { minHeight: 36, justifyContent: 'center', paddingHorizontal: space.md, borderRadius: radius.sm },
-  coverItemText: { ...typography.bodyStrong, ...typography.tabular, textAlign: 'center' },
-  coverLink: { flexDirection: 'row', alignItems: 'center', gap: space.xxs, minHeight: TOUCH },
-  coverLinkText: { ...typography.label, textDecorationLine: 'underline' },
+  coverItem: { minHeight: TOUCH, justifyContent: 'center', paddingHorizontal: space.md, borderRadius: radius.sm },
+  coverItemText: { ...typography.bodyStrong, ...typography.tabular, color: B.text, textAlign: 'center' },
+  coverLink: { flexDirection: 'row', alignItems: 'center', gap: space.xxs },
+  coverLinkText: { ...typography.bodyStrong, color: B.text, textDecorationLine: 'underline' },
   shortcutIcon: { width: 36, height: 36, borderRadius: radius.pill, backgroundColor: colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' },
   hint: { ...typography.caption, color: colors.textMuted, textAlign: 'center', marginTop: space.sm },
-  panel: { gap: space.lg, paddingTop: 0, overflow: 'hidden' },
-  panelStrip: { height: 8, marginHorizontal: -space.lg },
+  swipeHint: { ...typography.caption, color: colors.textMuted, textAlign: 'center', paddingVertical: space.xxs },
+  panel: { gap: PANEL_PAD },
+  panelScroll: { flexGrow: 0 },
   panelHead: { gap: space.xs },
-  panelTitle: { ...typography.heading, color: colors.text },
+  panelTitle: { ...typography.heading, color: colors.heading },
   panelCounter: { ...typography.caption, ...typography.tabular, color: colors.textMuted },
-  panelTrack: { height: 6, borderRadius: 3, backgroundColor: colors.surfaceAlt, overflow: 'hidden', marginTop: space.xs },
-  panelFill: { height: 6, borderRadius: 3, backgroundColor: semantic.special.fill },
+  panelTrack: { height: 6, borderRadius: 3, backgroundColor: semantic.progress.track, overflow: 'hidden', marginTop: space.xs },
+  panelFill: { height: 6, borderRadius: 3, backgroundColor: semantic.progress.fill },
   keys: { ...typography.caption, color: colors.textMuted },
   suggestions: { position: 'absolute', zIndex: 10, maxWidth: 520 },
-  fab: {
-    position: 'absolute',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.xs,
-    height: FAB_HEIGHT,
-    paddingLeft: space.md,
-    paddingRight: space.lg + 2,
-    borderRadius: radius.pill,
-    backgroundColor: colors.primaryAction,
-    ...elevation[2],
-  },
-  fabText: { color: colors.onPrimary, fontSize: 16, fontWeight: '700' },
 });

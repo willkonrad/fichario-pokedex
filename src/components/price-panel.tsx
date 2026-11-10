@@ -3,16 +3,19 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { PressState } from '@/components/icon-button';
+import { withMarkIcons } from '@/components/icons';
 import { LineChart } from '@/components/line-chart';
 import { ExternalLink, InfoButton, InfoSheet, InfoTopic, Notice } from '@/components/ui';
 import { ValueRangeRow } from '@/components/value-range';
 import {
   changeText,
   HOW_WE_CALCULATE,
+  JAPANESE_US_PRICE,
   MY_VALUE_BELOW_US,
   myValueBelowText,
   MYP_URL,
   offersText,
+  priceAfterPlacingText,
   SET_MY_VALUE,
   SOURCE_NAME,
   TCGCSV_URL,
@@ -25,10 +28,10 @@ import {
 } from '@/lib/copy';
 import { formatBRL, formatBRLTight, formatDay, formatWhen } from '@/lib/format';
 import { dayTime, entryHistory, entrySeries, type EntryHistoryPoint } from '@/lib/history';
-import { tcgplayerColumns, tcgplayerFor, tcgplayerReason } from '@/lib/tcgplayer';
-import { VARIANTS, type Entry, type MypApiPrice, type TcgplayerPrice, type ValueBasis } from '@/lib/types';
-import { myValueBelowSource, mypApiFitsVariant, mypApiFor, mypCovers, pickLabel, rangeSource, usPriceGap, valuation } from '@/lib/valuation';
-import { colors, radius, semantic, shadow, space, TOUCH, typography } from '@/theme';
+import { tcgplayerColumns, tcgplayerCovers, tcgplayerFor } from '@/lib/tcgplayer';
+import { VARIANTS, type Entry, type ValueBasis } from '@/lib/types';
+import { cardNoPriceText, myValueBelowSource, mypApiFitsVariant, mypApiFor, pickLabel, rangeSource, usPriceGap, valuation } from '@/lib/valuation';
+import { colors, radius, semantic, space, TOUCH, typography } from '@/theme';
 
 const WEB = Platform.OS === 'web';
 /** Título do quadro para o leitor de tela; na web, <h2> (sem o nível, o react-native-web faz <h1>, e o <h1> é o nome da carta). */
@@ -64,14 +67,12 @@ export function PricePanel({
   const [historyOpen, setHistoryOpen] = useState(false);
   const history = useEntryHistory(entry);
 
-  const head = (showSetMyValue: boolean) => (
+  const head = (
     <View style={styles.head}>
       <Text style={styles.label} {...HEADING_2}>
         {VALUE_SCOPE.card}
       </Text>
       <InfoButton label="Como calculamos o valor" onPress={() => setHowOpen(true)} />
-      <View style={styles.flex} />
-      {showSetMyValue && onSetMyValue ? <TextAction label={SET_MY_VALUE} accessibilityLabel="Definir meu valor" onPress={onSetMyValue} /> : null}
     </View>
   );
   const howSheet = <HowWeCalculate visible={howOpen} onClose={() => setHowOpen(false)} />;
@@ -79,8 +80,8 @@ export function PricePanel({
   if (!entry) {
     return (
       <View style={styles.card}>
-        {head(false)}
-        <Text style={styles.muted}>O preço chega alguns minutos depois de colocar a carta.</Text>
+        {head}
+        <Text style={styles.muted}>{priceAfterPlacingText(WEB)}</Text>
         <StoreLinks mypUrl={MYP_URL} ligaUrl={ligaUrl} />
         {howSheet}
       </View>
@@ -99,9 +100,10 @@ export function PricePanel({
   // Mínimo/média/máximo do produto no MYP (API pública), desta carta, versão e selo.
   const api = mypApiFor(entry);
   const apiFits = !!api && mypApiFitsVariant(entry, api);
-  // Carta em inglês: TCGplayer (EUA), em reais pela PTAX.
+  // Carta em inglês ou japonês: TCGplayer (EUA), em reais pela PTAX (na japonesa, o produto japonês).
   const english = entry.lang === 'en';
-  const tcg = english ? tcgplayerFor(entry) : undefined;
+  const japanese = entry.lang === 'ja';
+  const tcg = tcgplayerCovers(entry.lang) ? tcgplayerFor(entry) : undefined;
   const versionLabel = (VARIANTS.find((v) => v.id === entry.variant)?.label ?? entry.variant).toLowerCase();
   // Preço dos EUA longe dos anúncios daqui (V7): explica a diferença, sem mudar a fonte. O atalho "Usar meu valor" só
   // quando o preço daqui é maior (um "Meu valor" abaixo do mercado seria trocado na próxima cópia da TCGplayer).
@@ -132,7 +134,7 @@ export function PricePanel({
     main = (
       <>
         <Text style={styles.main} accessibilityLabel={`${SOURCE_NAME.manual}: ${formatBRL(ref.value)}`}>
-          {mark.mark ? `${mark.mark} ` : ''}
+          {mark.mark ? withMarkIcons(`${mark.mark} `, { size: typography.figure.fontSize, color: semantic.myValue.fg }) : null}
           {formatBRL(ref.value)}
         </Text>
         <Text style={styles.origin}>
@@ -143,7 +145,7 @@ export function PricePanel({
       </>
     );
   } else {
-    main = <Text style={styles.muted}>{noPriceText(entry, api, tcg)}</Text>;
+    main = <Text style={styles.muted}>{cardNoPriceText(entry, api, tcg, WEB)}</Text>;
   }
 
   // Referências (fontes que não são o valor), numa linha cada, sem link próprio (os links ficam nos botões das lojas).
@@ -159,7 +161,9 @@ export function PricePanel({
   // Detalhes da cotação (recolhidos): a conta da TCGplayer, a hora do MYP e o aviso de carta base.
   const details: { key: string; text: ReactNode }[] = [];
   if (tcg && !tcg.notFound && tcg.avg != null) {
-    details.push({ key: 'usd', text: `TCGplayer: mercado ${usdConversionText(tcg)} · todos os estados.` });
+    details.push({ key: 'usd', text: `TCGplayer: mercado ${usdConversionText(tcg)} · Near Mint.` });
+    // Sem o MYP para comparar, a japonesa diz de onde é o preço (nas inglesas, o aviso de diferença faz isso).
+    if (japanese) details.push({ key: 'ja', text: JAPANESE_US_PRICE });
     details.push({
       key: 'tcgcsv',
       text: (
@@ -190,7 +194,7 @@ export function PricePanel({
 
   return (
     <View style={styles.card}>
-      {head(ref.basis !== 'manual' && !gapMyValue)}
+      {head}
       {main}
       {refs.map((r) => (
         <Text key={r} style={styles.reference}>
@@ -203,6 +207,8 @@ export function PricePanel({
           {gapMyValue && onSetMyValue ? <TextAction label={USE_MY_VALUE} accessibilityLabel="Usar meu valor" onPress={onSetMyValue} /> : null}
         </View>
       ) : null}
+      {/* Embaixo do valor: ao lado do título em Kanit não cabe num celular, e o número vem primeiro. */}
+      {ref.basis !== 'manual' && !gapMyValue && onSetMyValue ? <TextAction label={SET_MY_VALUE} accessibilityLabel="Definir meu valor" onPress={onSetMyValue} /> : null}
 
       <StoreLinks mypUrl={api?.url ?? MYP_URL} tcgUrl={tcg?.url} ligaUrl={ligaUrl} />
 
@@ -264,23 +270,7 @@ function rangeText(p: { min?: number; avg?: number; max?: number }) {
   return max - min >= 0.005 ? `${formatBRLTight(min)} – ${formatBRLTight(max)}` : formatBRLTight(min);
 }
 
-/** Carta sem valor ainda: por quê, em uma frase. */
-function noPriceText(entry: Entry, api?: MypApiPrice, tcg?: TcgplayerPrice) {
-  if (entry.lang === 'en') {
-    if (!tcg) return 'Buscando o preço na TCGplayer…';
-    if (tcg.notFound && api?.avg == null) {
-      const why = `Sem preço na TCGplayer (${tcgplayerReason(tcg.notFound)})`;
-      if (api) return `${why} nem no MYP Cards.`;
-      return WEB ? `${why}. O MYP Cards é consultado pelo app no celular.` : `${why}. Buscando no MYP Cards…`;
-    }
-  }
-  if (!mypCovers(entry.lang)) return 'O MYP Cards não tem cartas japonesas.';
-  if (!api) return WEB ? 'O MYP Cards é consultado pelo app no celular.' : 'Buscando o preço no MYP Cards…';
-  if (api.notFound) return `Não achei esta carta no MYP Cards (${api.notFound}).`;
-  return 'Sem anúncios desta carta no MYP Cards agora.';
-}
-
-/** Ação em texto (44 px de altura), ex.: "✎ Definir meu valor". */
+/** Ação em texto (alvo de 48 px de altura), ex.: "✎ Definir meu valor". */
 function TextAction({ label, accessibilityLabel, onPress }: { label: string; accessibilityLabel: string; onPress: () => void }) {
   return (
     <Pressable
@@ -291,7 +281,7 @@ function TextAction({ label, accessibilityLabel, onPress }: { label: string; acc
         const { pressed, hovered } = s as PressState;
         return [styles.textAction, hovered && { backgroundColor: semantic.hover.onLight }, pressed && { opacity: 0.6 }];
       }}>
-      <Text style={styles.textActionText}>{label}</Text>
+      <Text style={styles.textActionText}>{withMarkIcons(label, { size: typography.caption.fontSize, color: semantic.link.fg })}</Text>
     </Pressable>
   );
 }
@@ -336,7 +326,10 @@ function Disclosure({
   );
 }
 
-/** Um link por loja: anúncios no MYP Cards (fonte do valor e atribuição), TCGplayer (cartas em inglês) e LigaPokemon. */
+/**
+ * Um link por loja: anúncios no MYP Cards (fonte do valor e atribuição), TCGplayer (cartas em inglês e japonês, com o
+ * produto achado) e LigaPokemon.
+ */
 function StoreLinks({ mypUrl, tcgUrl, ligaUrl }: { mypUrl: string; tcgUrl?: string; ligaUrl?: string }) {
   return (
     <View style={styles.storeRow}>
@@ -391,16 +384,16 @@ function HowWeCalculate({ visible, onClose }: { visible: boolean; onClose: () =>
 }
 
 const styles = StyleSheet.create({
-  card: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: space.lg, gap: space.sm, ...shadow },
+  card: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: space.lg, gap: space.sm },
   head: { flexDirection: 'row', alignItems: 'center', minHeight: TOUCH },
-  flex: { flex: 1 },
-  label: { ...typography.label, color: colors.textMuted },
-  main: { ...typography.display, color: semantic.money.fg },
+  label: { ...typography.heading, color: colors.heading },
+  main: { ...typography.display, ...typography.tabular, color: semantic.money.fg },
   origin: { ...typography.caption, color: colors.textMuted },
   muted: { ...typography.caption, color: colors.textMuted },
   reference: { ...typography.caption, ...typography.tabular, color: colors.text },
   gap: { gap: space.xxs },
-  textAction: { minHeight: TOUCH, justifyContent: 'center', paddingHorizontal: space.sm, borderRadius: radius.pill, alignSelf: 'flex-start' },
+  // A margem negativa alinha o texto com o resto do quadro (o preenchimento é só do fundo no mouse por cima).
+  textAction: { minHeight: TOUCH, justifyContent: 'center', paddingHorizontal: space.sm, marginLeft: -space.sm, borderRadius: radius.pill, alignSelf: 'flex-start' },
   textActionText: { ...typography.caption, fontWeight: '700', color: semantic.link.fg },
   storeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, marginTop: space.xs },
   storeButton: { flexGrow: 1, minWidth: 96 },

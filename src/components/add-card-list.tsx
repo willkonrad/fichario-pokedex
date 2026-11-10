@@ -4,20 +4,28 @@ import { AccessibilityInfo, ActivityIndicator, Platform, ScrollView, StyleSheet,
 import { CardGrid, CardGridSkeleton, gridContentWidth } from '@/components/card-grid';
 import { Button, Chip, ChipGroup, EmptyState, Notice, SearchField } from '@/components/ui';
 import { formatInt } from '@/lib/format';
-import { CARD_ORDER_LABEL, CARD_SEARCH_MAX, cardSeries, filterCards, type CardBrief, type CardOrder } from '@/lib/tcgdex';
+import { CARD_ORDER_LABEL, CARD_SEARCH_MAX, filterCards, seriesOf, type CardBrief, type CardOrder } from '@/lib/tcgdex';
 import { colors, space, typography } from '@/theme';
 
 const ORDERS: CardOrder[] = ['newest', 'oldest', 'number'];
 /** Com poucas cartas (ex.: busca por código), filtro, ordem e séries só atrapalham. */
 const TOOLS_MIN = 9;
 
-/** Situação da lista: buscando (com a lista base, se já chegou), erro ou pronta. */
+/**
+ * Situação da lista: buscando (com a lista base, se já chegou, e o que ainda falta: "versões com selo", "mais cartas"),
+ * erro ou pronta.
+ */
 export type PickerState =
-  | { status: 'loading'; cards?: CardBrief[] }
+  | { status: 'loading'; cards?: CardBrief[]; pending?: string }
   | { status: 'error'; message: string }
   | { status: 'done'; cards: CardBrief[]; partial?: boolean; truncated?: boolean; number?: string; numberMatched?: boolean };
 
 const cardsWord = (n: number) => `${formatInt(n)} ${n === 1 ? 'carta' : 'cartas'}`;
+
+/** "buscando versões com selo" / "buscando mais cartas" com a lista base já na tela; null quando não falta nada. */
+export function loadingMoreText(state: PickerState): string | null {
+  return state.status === 'loading' && state.cards ? `buscando ${state.pending || 'mais cartas'}` : null;
+}
 
 /**
  * Lista de cartas para escolher (U6): filtro (nome, coleção, número ou selo, sem acento), ordem (mais novas, mais
@@ -50,12 +58,14 @@ export function CardPickerList({
 
   const all = state.status === 'error' ? [] : (state.cards ?? []);
   const loadingAll = state.status === 'loading' && !state.cards;
-  const loadingMore = state.status === 'loading' && !!state.cards;
+  const moreText = loadingMoreText(state);
+  const loadingMore = !!moreText;
   const done = state.status === 'done' ? state : null;
   // Séries na ordem em que aparecem (a lista vem da coleção mais nova para a mais antiga).
-  const seriesList = [...new Set(all.map((c) => cardSeries(c.setId)))];
+  // (Cartas japonesas: séries pela época de lançamento, ex.: "Pocket Monsters (1996–2001)".)
+  const seriesList = [...new Set(all.map(seriesOf))];
   const activeSeries = series && seriesList.includes(series) ? series : null;
-  const visible = filterCards(all, filter).filter((c) => !activeSeries || cardSeries(c.setId) === activeSeries);
+  const visible = filterCards(all, filter).filter((c) => !activeSeries || seriesOf(c) === activeSeries);
   const narrowed = visible.length !== all.length;
   const tools = all.length >= TOOLS_MIN || !!filter || !!activeSeries;
 
@@ -67,7 +77,7 @@ export function CardPickerList({
         : narrowed
           ? `${cardsWord(visible.length)} de ${formatInt(all.length)}`
           : all.length
-            ? `${cardsWord(all.length)}${loadingMore ? ', buscando versões com selo' : ''}`
+            ? `${cardsWord(all.length)}${moreText ? `, ${moreText}` : ''}`
             : empty.title;
 
   const notices: ReactNode[] = [];
@@ -101,7 +111,7 @@ export function CardPickerList({
       {top}
       {tools ? (
         <>
-          <SearchField value={filter} onChangeText={setFilter} placeholder="Filtrar: coleção, nome, nº ou selo" label="Filtrar cartas" icon="filter" style={styles.filter} />
+          <SearchField value={filter} onChangeText={setFilter} placeholder="Filtrar: coleção, nome, nº ou selo" label="Filtrar cartas" icon="filter" />
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips} keyboardShouldPersistTaps="handled">
             <ChipGroup label="Ordem" style={styles.chipGroup}>
               {ORDERS.map((o) => (
@@ -128,7 +138,7 @@ export function CardPickerList({
           {loadingMore ? (
             <View style={styles.more}>
               <ActivityIndicator size="small" color={colors.textMuted} />
-              <Text style={styles.count}>buscando versões com selo…</Text>
+              <Text style={styles.count}>{moreText}…</Text>
             </View>
           ) : null}
         </View>
@@ -225,7 +235,6 @@ const styles = StyleSheet.create({
   scroll: { paddingBottom: space.xxl },
   standalone: { alignSelf: 'center' },
   toolbar: { gap: space.md, paddingTop: space.lg, paddingBottom: space.xs },
-  filter: { shadowOpacity: 0, elevation: 0, borderColor: colors.border },
   chips: { alignItems: 'center', gap: space.sm, paddingRight: space.lg },
   chipGroup: { flexWrap: 'nowrap' },
   divider: { width: 1, height: 28, backgroundColor: colors.border },

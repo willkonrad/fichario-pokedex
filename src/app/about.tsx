@@ -5,7 +5,7 @@ import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { HEADING_3 } from '@/components/collection-chart';
 import { syncSummary } from '@/components/collection-notices';
 import { HowWeCalculate } from '@/components/collection-value';
-import { Card, ExternalLink, Notice, TextSkeleton } from '@/components/ui';
+import { Card, ExternalLink, Notice, TextSkeleton, useLayout } from '@/components/ui';
 import { catalogSyncStatus, type CatalogSyncStatus } from '@/lib/catalog';
 import { HOW_WE_CALCULATE, MYP_URL, TCGCSV_URL, TCGPLAYER_URL } from '@/lib/copy';
 import { formatDay, formatWhen } from '@/lib/format';
@@ -17,8 +17,9 @@ const RUN_STATUS: Record<'ok' | 'partial' | 'error', string> = { ok: 'ok', parti
 
 /** Sobre e fontes (N6, U2): como o valor é calculado, de onde vêm os dados, o estado do servidor e a versão. */
 export default function AboutScreen() {
+  const { gutter } = useLayout();
   return (
-    <ScrollView contentContainerStyle={styles.screen}>
+    <ScrollView contentContainerStyle={[styles.screen, { paddingHorizontal: gutter }]}>
       <Card style={styles.card}>
         <Text style={styles.title} {...HEADING_3}>
           {HOW_WE_CALCULATE.title}
@@ -45,11 +46,11 @@ function Credits() {
         </ExternalLink>
         , consultados pelo app no celular.
       </Line>
-      <Line label="Cartas em inglês">
+      <Line label="Cartas em inglês e japonês">
         <ExternalLink href={TCGPLAYER_URL} variant="inline" arrow>
           TCGplayer
         </ExternalLink>
-        , pela cópia diária do{' '}
+        {' '}(o produto do idioma da carta), pela cópia diária do{' '}
         <ExternalLink href={TCGCSV_URL} variant="inline" arrow>
           TCGCSV
         </ExternalLink>
@@ -63,7 +64,7 @@ function Credits() {
         <ExternalLink href="https://tcgdex.dev" variant="inline" arrow>
           TCGdex
         </ExternalLink>
-        , TCGCSV, Scrydex, pokemontcg.io e Zukan. Ilustrações dos Pokémon:{' '}
+        , TCGCSV, Scrydex, pokemontcg.io e Zukan. Nomes e ilustrações dos Pokémon:{' '}
         <ExternalLink href="https://pokeapi.co" variant="inline" arrow>
           PokeAPI
         </ExternalLink>
@@ -163,9 +164,10 @@ function Line({ label, children }: { label: string; children: ReactNode }) {
 }
 
 const styles = StyleSheet.create({
-  screen: { padding: space.lg, gap: space.md, maxWidth: widths.reading, width: '100%', alignSelf: 'center', paddingBottom: space.xxxl },
+  // A margem lateral vem do useLayout().gutter.
+  screen: { paddingTop: space.lg, gap: space.md, maxWidth: widths.reading, width: '100%', alignSelf: 'center', paddingBottom: space.xxxl },
   card: { gap: space.md },
-  title: { ...typography.heading, color: colors.text },
+  title: { ...typography.heading, color: colors.heading },
   note: { ...typography.caption, color: colors.textMuted },
   line: { gap: space.xxs },
   lineLabel: { ...typography.label, color: colors.textMuted },

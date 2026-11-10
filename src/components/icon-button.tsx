@@ -10,7 +10,7 @@ export type IconName = ComponentProps<typeof Ionicons>['name'];
 export type PressState = PressableStateCallbackType & { hovered?: boolean; focused?: boolean };
 
 /**
- * Botão só com ícone, com alvo de 44 × 44 px em todas as plataformas (padding, não hitSlop, que a web ignora).
+ * Botão só com ícone, com alvo de 48 × 48 px em todas as plataformas (padding, não hitSlop, que a web ignora).
  * `label` é obrigatório: é o que o leitor de tela diz ("Fechar", "Limpar a busca").
  */
 export function IconButton({
@@ -29,7 +29,7 @@ export function IconButton({
   size?: number;
   color?: string;
   disabled?: boolean;
-  /** 'plain': transparente; 'soft': fundo cinza claro; 'onBrand': fundo translúcido sobre a barra vermelha. */
+  /** 'plain': transparente; 'soft': fundo grafite; 'onBrand': fundo translúcido sobre a barra preta do topo. */
   tone?: 'plain' | 'soft' | 'onBrand';
   style?: StyleProp<ViewStyle>;
 }) {

@@ -1,6 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
-import { useEffect, useState, type Ref } from 'react';
+import { router } from 'expo-router';
+import { useEffect, useState, type RefObject } from 'react';
 import {
   Platform,
   Pressable,
@@ -18,6 +19,8 @@ import {
 import { CardImage } from '@/components/card-image';
 import { IconButton, type IconName } from '@/components/icon-button';
 import { spriteUrl } from '@/data/pokedex';
+import { entryImageUrl } from '@/lib/catalog';
+import { formatInt } from '@/lib/format';
 import { mypPtImage } from '@/lib/myp-api';
 import type { Entry } from '@/lib/types';
 import { CARD_RATIO, colors, elevation, radius, semantic, space, TOUCH, typography } from '@/theme';
@@ -40,6 +43,43 @@ export type Suggestion = {
   icon?: IconName;
   onSelect: () => void;
 };
+
+/** Sugestão que leva o texto para a Consulta, em todas as cartas que existem (não só nas do fichário). */
+export function consultSuggestion(q: string): Suggestion {
+  return {
+    key: 'consulta',
+    section: 'Consulta',
+    title: `Consultar “${q}” em todas as cartas`,
+    icon: 'pricetags-outline',
+    onSelect: () => router.push({ pathname: '/consulta', params: { q } }),
+  };
+}
+
+/**
+ * Altura máxima da lista de sugestões: do topo dela até o que cobre o fim da janela. No iOS a altura do teclado já
+ * conta a área segura; no Android vem sem a barra de navegação, que fica por baixo dele.
+ */
+export function suggestionRoom({
+  windowHeight,
+  top,
+  keyboard,
+  bottomInset,
+  android = Platform.OS === 'android',
+}: {
+  windowHeight: number;
+  top: number;
+  keyboard: number;
+  bottomInset: number;
+  android?: boolean;
+}) {
+  const covered = android ? bottomInset + keyboard : Math.max(bottomInset, keyboard);
+  return Math.max(TOUCH * 2, windowHeight - top - covered - space.lg);
+}
+
+/** Quantas sugestões abriram, para o leitor de tela no celular (com o texto: muda a cada busca, mesmo com a mesma contagem). */
+export function suggestionsSpeech(count: number, query: string) {
+  return `${formatInt(count)} ${count === 1 ? 'sugestão' : 'sugestões'} para ${query}`;
+}
 
 /**
  * Campo da busca da home (combobox): resultados enquanto digita, ↑/↓ e Enter no teclado do computador, Esc fecha a
@@ -72,12 +112,17 @@ export function HomeSearchInput({
   /** Lista de sugestões aberta (para o leitor de tela). */
   expanded: boolean;
   activeIndex: number;
-  inputRef?: Ref<TextInputInstance>;
+  inputRef?: RefObject<TextInputInstance | null>;
   autoFocus?: boolean;
   style?: StyleProp<ViewStyle>;
 }) {
   // Foco visível na borda do campo (o contorno do navegador sai).
   const [focused, setFocused] = useState(false);
+  // O botão some junto com o texto: o foco fica no campo, senão o Tab recomeçaria no topo da página.
+  function clear() {
+    onChangeText('');
+    inputRef?.current?.focus();
+  }
   function onKeyPress(e: TextInputKeyPressEvent) {
     const key = e.nativeEvent.key;
     if (key === 'ArrowDown' || key === 'ArrowUp') {
@@ -131,7 +176,7 @@ export function HomeSearchInput({
         accessibilityLabel="Buscar no fichário"
         {...combobox}
       />
-      {value ? <IconButton icon="close-circle" label="Limpar a busca" onPress={() => onChangeText('')} size={18} color={colors.iconFaint} /> : null}
+      {value ? <IconButton icon="close-circle" label="Limpar a busca" onPress={clear} size={18} color={colors.iconFaint} /> : null}
     </View>
   );
 }
@@ -186,7 +231,7 @@ export function SuggestionList({
                   <View style={styles.thumb}>
                     <CardImage
                       image={s.entry.image}
-                      imageUrl={s.entry.imageUrl}
+                      imageUrl={entryImageUrl(s.entry)}
                       cardId={s.entry.lang === 'ja' ? undefined : s.entry.cardId}
                       localId={s.entry.localId}
                       photo={s.entry.stampPhoto}
@@ -230,14 +275,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRadius: radius.pill,
     borderWidth: 1.5,
-    borderColor: colors.surface,
+    borderColor: colors.borderStrong,
     paddingHorizontal: space.xs,
   },
   fieldFocused: { borderColor: semantic.focus.ring },
   icon: { width: 36, height: TOUCH, alignItems: 'center', justifyContent: 'center' },
   input: { flex: 1, minWidth: 0, color: colors.text, fontSize: 16, paddingVertical: 10 },
   inputEnd: { paddingRight: space.md },
-  list: { backgroundColor: colors.surface, borderRadius: radius.md, overflow: 'hidden', ...elevation[2] },
+  list: { backgroundColor: colors.surface, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, overflow: 'hidden', ...elevation[2] },
   listContent: { paddingVertical: space.xs },
   section: { ...typography.label, color: colors.textMuted, paddingHorizontal: space.lg, paddingTop: space.sm, paddingBottom: space.xxs },
   row: { flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: 52, paddingHorizontal: space.lg, paddingVertical: space.xs },

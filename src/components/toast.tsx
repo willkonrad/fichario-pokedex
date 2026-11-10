@@ -283,6 +283,7 @@ export function ToastHost() {
           <Pressable
             style={styles.body}
             onPress={() => hideToast(toast.id)}
+            role="button"
             accessibilityLabel={toast.message}
             accessibilityHint="Toque para fechar o aviso">
             <Text style={styles.message} numberOfLines={3}>

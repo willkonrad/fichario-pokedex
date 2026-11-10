@@ -1,5 +1,6 @@
 import { PRICE_RULE_SINCE } from './copy';
 import { supabase } from './supabase';
+import { tcgplayerCovers } from './tcgplayer';
 import type { Entry, ValueBasis } from './types';
 import type { SourceId, ValueRange } from './valuation';
 
@@ -45,10 +46,10 @@ function basisOf(s: Record<string, unknown> | null | undefined): ValueBasis {
 
 /**
  * Valor de uma carta numa foto diária, pela mesma regra do app (src/lib/valuation.ts) e do servidor
- * (public.history_value): "Meu valor" (mínimo, média e máximo iguais), senão a TCGplayer — só nas cartas em inglês,
- * já em reais —, senão mínimo/média/máximo do MYP. Fontes antigas gravadas nas fotos (vendas reais, menor anúncio,
- * oferta por estado) não entram. Com `basis`, usa essa escolha no lugar da gravada (para comparar dois dias pela
- * mesma escolha).
+ * (public.collection_history): "Meu valor" (mínimo, média e máximo iguais), senão a TCGplayer — só nas cartas em inglês e
+ * japonês, já em reais —, senão mínimo/média/máximo do MYP. Fontes antigas gravadas nas fotos (vendas reais, menor
+ * anúncio, oferta por estado) não entram. Com `basis`, usa essa escolha no lugar da gravada (para comparar dois dias
+ * pela mesma escolha).
  */
 export function snapshotValue(
   s: Record<string, unknown> | null | undefined,
@@ -58,9 +59,9 @@ export function snapshotValue(
   if (!s) return undefined;
   const manual = num((s.manual as { value?: unknown } | undefined)?.value);
   if (manual != null) return { min: manual, avg: manual, max: manual, pick: manual, source: 'manual' };
-  // TCGplayer (só nas cartas em inglês: uma carta trocada para outro idioma pode ter ficado com o preço antigo), senão
-  // o produto no MYP.
-  const tcg = lang === 'en' ? (s.tcgplayer as Prices) : undefined;
+  // TCGplayer (só nas cartas em inglês e japonês: uma carta trocada para português pode ter ficado com o preço antigo),
+  // senão o produto no MYP.
+  const tcg = tcgplayerCovers(lang) ? (s.tcgplayer as Prices) : undefined;
   const useTcg = num(tcg?.avg) != null;
   const p = useTcg ? tcg : (s.mypApi as Prices);
   const avg = num(p?.avg);

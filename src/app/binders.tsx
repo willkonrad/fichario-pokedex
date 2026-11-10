@@ -4,20 +4,22 @@ import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { HowWeCalculateSheet, SourceCreditsLine } from '@/components/collection-value';
+import { digitsInSystemFont } from '@/components/digits';
 import { type PressState } from '@/components/icon-button';
-import { Badge, Button, IconButton, InfoButton, onCover, PokeballIcon, type IconName } from '@/components/ui';
+import { Badge, Button, IconButton, InfoButton, coverFill, onCover, PokeballIcon, useLayout, type IconName } from '@/components/ui';
 import { TOTAL_SPECIES } from '@/data/pokedex';
 import { customTotalSlots, dexRange, isPlaced, isPlacedCustom } from '@/lib/binder';
 import { collectionTotalText } from '@/lib/copy';
-import { formatBRL, formatBRLTight } from '@/lib/format';
+import { formatBRL, formatBRLTight, formatInt } from '@/lib/format';
 import { collectionTotals } from '@/lib/quotes';
 import { BINDER_PURPOSES, POKEDEX_BINDER } from '@/lib/types';
 import { entriesOf, useCollection } from '@/store/collection';
-import { colors, radius, semantic, shadow, space, typography, widths } from '@/theme';
+import { colors, radius, semantic, space, typography, widths } from '@/theme';
 
 /** Estante: todos os fichários do usuário, para abrir, editar ou criar um novo. */
 export default function BindersScreen() {
   const { settings, entries, binders, activeBinderId, setActiveBinder } = useCollection();
+  const { gutter } = useLayout();
   const [info, setInfo] = useState(false);
 
   const rows = useMemo(() => {
@@ -64,7 +66,7 @@ export default function BindersScreen() {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.screen}>
+    <ScrollView contentContainerStyle={[styles.screen, { paddingHorizontal: gutter }]}>
       {rows.map((r) => {
         const active = r.id === activeBinderId;
         const ink = onCover(r.color);
@@ -79,26 +81,27 @@ export default function BindersScreen() {
                 return [styles.main, hovered && styles.mainHover, pressed && { opacity: 0.85 }];
               }}
               role="button"
-              accessibilityLabel={`Abrir ${r.name}, ${r.filled} de ${r.total} ${r.unit}${value != null ? `, ${formatBRL(value)}` : ''}${active ? ', aberto' : ''}`}>
-              <View style={[styles.spine, { backgroundColor: r.color }]}>
+              accessibilityLabel={`Abrir ${r.name}, ${formatInt(r.filled)} de ${formatInt(r.total)} ${r.unit}${value != null ? `, ${formatBRL(value)}` : ''}${active ? ', aberto' : ''}`}>
+              <View style={[styles.spine, { backgroundColor: coverFill(r.color) }]}>
                 {r.icon ? <Ionicons name={r.icon} size={22} color={ink} /> : <PokeballIcon size={24} color={ink} />}
               </View>
               <View style={styles.body}>
-                <View style={styles.titleRow}>
-                  <Text style={styles.name} numberOfLines={1}>
-                    {r.name}
+                <Text style={styles.name} numberOfLines={1}>
+                  {digitsInSystemFont(r.name)}
+                </Text>
+                {/* O selo fica aqui: ao lado do título em maiúsculas, cortava o nome em quase todo celular. */}
+                <View style={styles.kindRow}>
+                  <Text style={styles.kind} numberOfLines={1}>
+                    {r.kind}
                   </Text>
                   {active ? <Badge label="aberto" tone="selected" /> : null}
                 </View>
-                <Text style={styles.kind} numberOfLines={1}>
-                  {r.kind}
-                </Text>
                 <View style={styles.track}>
-                  <View style={[styles.fill, { width: `${Math.min(100, (r.filled / Math.max(1, r.total)) * 100)}%`, backgroundColor: r.color }]} />
+                  <View style={[styles.fill, { width: `${Math.min(100, (r.filled / Math.max(1, r.total)) * 100)}%` }]} />
                 </View>
                 <View style={styles.statsRow}>
                   <Text style={styles.stat}>
-                    {r.filled}/{r.total} {r.unit}
+                    {formatInt(r.filled)}/{formatInt(r.total)} {r.unit}
                   </Text>
                   {value != null ? <Text style={styles.value}>{formatBRLTight(value)}</Text> : null}
                 </View>
@@ -137,27 +140,28 @@ export default function BindersScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { padding: space.lg, gap: space.md, maxWidth: widths.reading, width: '100%', alignSelf: 'center', paddingBottom: space.xxxl },
+  // A margem lateral vem do useLayout().gutter: 16 no celular, 24 no tablet, 32 no computador.
+  screen: { paddingTop: space.lg, gap: space.md, maxWidth: widths.reading, width: '100%', alignSelf: 'center', paddingBottom: space.xxxl },
   card: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
     borderWidth: 2,
-    borderColor: 'transparent',
+    borderColor: colors.border,
     overflow: 'hidden',
-    ...shadow,
   },
   cardActive: { borderColor: semantic.selected.border },
   main: { flex: 1, flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch' },
   mainHover: { backgroundColor: semantic.hover.onLight },
-  spine: { width: 56, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center' },
+  // A borda separa a capa preta do cartão grafite.
+  spine: { width: 56, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center', borderRightWidth: 1, borderRightColor: colors.border },
   body: { flex: 1, minWidth: 0, padding: space.lg, gap: space.xxs },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  name: { ...typography.heading, color: colors.text, flexShrink: 1 },
-  kind: { ...typography.caption, color: colors.textMuted },
-  track: { height: 6, backgroundColor: colors.surfaceAlt, borderRadius: 3, overflow: 'hidden', marginTop: space.sm },
-  fill: { height: 6, borderRadius: 3 },
+  name: { ...typography.heading, color: colors.heading },
+  kindRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  kind: { ...typography.caption, color: colors.textMuted, flexShrink: 1 },
+  track: { height: 6, backgroundColor: semantic.progress.track, borderRadius: 3, overflow: 'hidden', marginTop: space.sm },
+  fill: { height: 6, borderRadius: 3, backgroundColor: semantic.progress.fill },
   statsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: space.sm, marginTop: space.xs },
   stat: { ...typography.caption, ...typography.tabular, color: colors.textMuted },
   value: { ...typography.numeric, color: semantic.money.fg },

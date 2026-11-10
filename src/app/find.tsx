@@ -4,7 +4,7 @@ import { FlatList, StyleSheet, Text, View } from 'react-native';
 
 import { useIosAnnouncement } from '@/components/add-card-list';
 import { EntryRow } from '@/components/add-entry-row';
-import { Button, EmptyState, Loading, SearchField } from '@/components/ui';
+import { Button, EmptyState, Loading, SearchField, useLayout } from '@/components/ui';
 import { formatDex, searchSpecies } from '@/data/pokedex';
 import { inDexRange } from '@/lib/binder';
 import { formatInt } from '@/lib/format';
@@ -24,6 +24,7 @@ function FindForm() {
   const entries = useEntries();
   const settings = useSettings();
   const binders = useBinders();
+  const { gutter } = useLayout();
   // Vindo da busca da home ("Procurar em toda a coleção"), já começa com o texto digitado lá.
   const { q: initial } = useLocalSearchParams<{ q?: string }>();
   const [query, setQuery] = useState(() => (typeof initial === 'string' ? initial : ''));
@@ -45,7 +46,7 @@ function FindForm() {
   return (
     <View style={styles.screen}>
       <Stack.Screen options={{ title: 'Buscar na coleção' }} />
-      <View style={styles.top}>
+      <View style={[styles.top, { paddingHorizontal: gutter }]}>
         <SearchField value={query} onChangeText={setQuery} placeholder="Nome, coleção ou número" label="Buscar na coleção" autoFocus />
         <Text style={styles.status} role="status" aria-live="polite" accessibilityLiveRegion="polite">
           {status}
@@ -77,7 +78,8 @@ function FindForm() {
           keyExtractor={(e) => e.id}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
-          contentContainerStyle={styles.list}
+          // A linha tem 4 de recuo próprio: a lista fica 4 mais perto da borda, e a miniatura alinha com o campo.
+          contentContainerStyle={[styles.list, { paddingHorizontal: gutter - space.xs }]}
           initialNumToRender={14}
           renderItem={({ item }) => (
             <EntryRow
@@ -94,7 +96,8 @@ function FindForm() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
-  top: { paddingHorizontal: space.lg, paddingTop: space.lg, paddingBottom: space.sm, gap: space.sm, maxWidth: MAX_WIDTH, width: '100%', alignSelf: 'center' },
+  // A margem lateral vem do useLayout().gutter.
+  top: { paddingTop: space.lg, paddingBottom: space.sm, gap: space.sm, maxWidth: MAX_WIDTH, width: '100%', alignSelf: 'center' },
   status: { ...typography.caption, ...typography.tabular, color: colors.textMuted, minHeight: 18 },
-  list: { paddingHorizontal: space.md, paddingBottom: space.xxl, maxWidth: MAX_WIDTH, width: '100%', alignSelf: 'center' },
+  list: { paddingBottom: space.xxl, maxWidth: MAX_WIDTH, width: '100%', alignSelf: 'center' },
 });

@@ -1,19 +1,20 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { CardImage } from '@/components/card-image';
 import type { PressState } from '@/components/icon-button';
-import { Badge, Button, Chip, ChipGroup, InfoSheet, Notice, Segmented, showToast, Skeleton } from '@/components/ui';
+import { Badge, Button, Chip, ChipGroup, InfoSheet, Notice, radioGroupKeys, radioTabIndex, Segmented, showToast, Skeleton, spaceToPress } from '@/components/ui';
 import {
   buildNewEntry,
   cardParams,
   defaultVersion,
   destinationParams,
-  destinationsFor,
+  isCopyOf,
   loadCardFacts,
   placedText,
+  placeOptions,
   speciesOfCard,
   versionKey,
   versionLabel,
@@ -98,11 +99,14 @@ function AddCardForm({
   const versions = facts?.versions ?? [];
   const version = versions.find((o) => versionKey(o) === picked) ?? (facts ? defaultVersion(versions, card) : null);
   const dex = speciesOfCard(card, facts?.detail);
-  const dests = destinationsFor({ dex, settings, binders, entries, activeBinderId: preferredBinderId });
+  // A carta do bolso do Pokémon já é esta (mesmo com o outro id da japonesa): sem "Substituir", como na tela da carta.
+  const pickedVersion = picked ? version : null;
+  const { dests, here } = placeOptions({ dex, settings, binders, entries, activeBinderId: preferredBinderId, card, picked: pickedVersion });
   // "Substituir" tira uma carta do fichário: nunca vem marcado sozinho, nem quando é a única opção.
   const dest = dests.find((d) => d.key === destKey) ?? dests.find((d) => d.kind !== 'replace');
   const name = facts?.detail?.name ?? card.name;
-  const copies = Object.values(entries).filter((e) => e.cardId === card.id && e.lang === card.lang);
+  // Também a mesma carta japonesa salva com outro id (ex.: M5-088 = tcgp-695039; ver isCopyOf).
+  const copies = Object.values(entries).filter((e) => isCopyOf(e, card));
   const copyPlaces = copies.slice(0, 2).map((e) => placeText(entryPlace(e, settings, binders)));
   const copiesText =
     copies.length === 1
@@ -164,14 +168,15 @@ function AddCardForm({
         busy={saving || !facts}
         disabled={!dest}
       />
-      <Button title="Mais detalhes" variant="ghost" onPress={moreDetails} disabled={!dest} label="Mais detalhes: abrir a carta com todos os campos" />
+      <Button title="Mais detalhes" variant="secondary" onPress={moreDetails} disabled={!dest} label="Mais detalhes: abrir a carta com todos os campos" />
     </>
   );
 
   return (
     <InfoSheet visible onClose={onClose} title={name} footer={footer}>
       <View style={styles.head}>
-        <View style={styles.thumb}>
+        {/* Miniatura fora do leitor de tela: o título da folha já diz qual é a carta (na web, sairia sem nome). */}
+        <View style={styles.thumb} aria-hidden>
           <CardImage
             image={card.image}
             imageUrl={card.imageUrl}
@@ -219,15 +224,16 @@ function AddCardForm({
       <Segmented label="Estado da carta" options={CONDITIONS.map((c) => ({ id: c.id, label: c.label, hint: c.desc }))} value={condition} onChange={setCondition} />
 
       <Text style={styles.label}>Onde colocar</Text>
+      {here ? <Notice>Esta carta já está neste bolso: {here.detail}.</Notice> : null}
       {dests.length ? (
-        <View role="radiogroup" aria-label="Onde colocar" style={styles.dests}>
+        <View role="radiogroup" aria-label="Onde colocar" style={styles.dests} {...radioGroupKeys()}>
           {dests.map((d) => (
-            <DestinationOption key={d.key} dest={d} selected={d.key === dest?.key} onPress={() => setDestKey(d.key)} />
+            <DestinationOption key={d.key} dest={d} selected={d.key === dest?.key} anySelected={!!dest} onPress={() => setDestKey(d.key)} />
           ))}
         </View>
       ) : (
         <>
-          <Notice tone="warning">Nenhum bolso livre. Crie um fichário ou aumente as páginas de um.</Notice>
+          <Notice tone="warning">Nenhum bolso vazio. Crie um fichário ou aumente as páginas de um.</Notice>
           <Button title="Novo fichário" variant="secondary" icon="add" onPress={newBinder} />
         </>
       )}
@@ -243,25 +249,16 @@ const DEST_ICON: Record<Destination['kind'], 'albums-outline' | 'folder-outline'
 };
 
 /** Uma opção de bolso (radio): título e onde fica. */
-function DestinationOption({ dest, selected, onPress }: { dest: Destination; selected: boolean; onPress: () => void }) {
-  // Na web, a opção também responde à barra de espaço (como um radio do navegador).
-  const keys =
-    Platform.OS === 'web'
-      ? ({
-          onKeyDown: (e: { key: string; preventDefault: () => void }) => {
-            if (e.key !== ' ' && e.key !== 'Spacebar') return;
-            e.preventDefault();
-            onPress();
-          },
-        } as object)
-      : null;
+function DestinationOption({ dest, selected, anySelected, onPress }: { dest: Destination; selected: boolean; anySelected: boolean; onPress: () => void }) {
   return (
     <Pressable
       onPress={onPress}
       role="radio"
       aria-checked={selected}
       accessibilityLabel={`${dest.title}, ${dest.detail}`}
-      {...keys}
+      // Na web, a barra de espaço marca e as setas andam entre as opções (só a marcada entra no Tab).
+      {...spaceToPress(onPress)}
+      {...radioTabIndex(selected, anySelected)}
       style={(s) => {
         const { pressed, hovered } = s as PressState;
         return [styles.dest, selected && styles.destOn, hovered && !selected && styles.destHover, pressed && { opacity: 0.8 }];
@@ -300,7 +297,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     borderWidth: 1.5,
     borderColor: colors.border,
-    backgroundColor: colors.surface,
+    // Um degrau acima da folha, como os chips.
+    backgroundColor: colors.surfaceAlt,
   },
   destOn: { borderColor: semantic.selected.border, backgroundColor: semantic.selected.soft },
   destHover: { borderColor: colors.borderStrong },

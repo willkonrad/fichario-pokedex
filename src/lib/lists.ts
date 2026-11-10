@@ -4,6 +4,7 @@
 import { formatDex, getSpecies, type Species } from '@/data/pokedex';
 
 import { indexOfEntry, isPlaced, isPlacedCustom, physicalPosition, regionsIn, volumesNeeded } from './binder';
+import { printedNumber } from './card-number';
 import { plainName } from './catalog';
 import { MYP_URL, sourceCredits, TCGPLAYER_URL, valueMark } from './copy';
 import { formatBRL } from './format';
@@ -66,10 +67,9 @@ export function entryParams(e: Entry) {
 
 // ---------- Descrição curta ----------
 
-/** "025/165" (com o total da coleção, quando conhecido, como na tela da carta); sem número, nada. */
-export function cardNumber(e: Pick<Entry, 'localId' | 'setTotal'>) {
-  if (!e.localId) return '';
-  return `${e.localId}${e.setTotal ? `/${String(e.setTotal).padStart(3, '0')}` : ''}`;
+/** "025/165", "1/64", "TG05/TG30", "SWSH020": o número como impresso, igual ao da tela da carta; sem número, nada. */
+export function cardNumber(e: Pick<Entry, 'localId' | 'setTotal'> & Partial<Pick<Entry, 'setId' | 'setName'>>) {
+  return printedNumber({ localId: e.localId, total: e.setTotal, setId: e.setId, setName: e.setName });
 }
 
 /** Versão em texto: "Holo / Foil", "Pokémon Center" (selo), "Holo / Foil · Cosmos Holo"; a normal não aparece. */

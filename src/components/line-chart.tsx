@@ -101,8 +101,9 @@ export function LineChart({
               <Rect x={left} y={top} width={Math.max(0, width - left - right)} height={H - top - bottom} />
             </ClipPath>
           </Defs>
+          {/* Grade pontilhada e discreta: quem aparece é a linha do valor. */}
           {ticks.map((v, i) => (
-            <Line key={`g${i}`} x1={left} x2={width - right} y1={y(v)} y2={y(v)} stroke={colors.border} strokeWidth={1} />
+            <Line key={`g${i}`} x1={left} x2={width - right} y1={y(v)} y2={y(v)} stroke={colors.border} strokeWidth={1} strokeDasharray="2 6" />
           ))}
           {ticks.map((v, i) => (
             <SvgText key={`l${i}`} x={left - 6} y={y(v) + 4} fontSize={AXIS_FONT} fill={AXIS_COLOR} textAnchor="end">

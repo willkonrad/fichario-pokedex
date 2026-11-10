@@ -1,0 +1,1276 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-09T05:43:35.192Z",
+  "title": "Design System: Fichário Pokédex",
+  "extensions": {
+    "colorMeta": {
+      "background": {
+        "role": "neutral",
+        "displayName": "Preto de moldura",
+        "canonical": "#000000",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#A5A5A5",
+          "#C9C9C9",
+          "#EEEEEE"
+        ]
+      },
+      "backgroundTranslucent": {
+        "role": "neutral",
+        "displayName": "Preto translúcido da BottomBar",
+        "canonical": "rgba(0, 0, 0, 0.94)",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#A5A5A5",
+          "#C9C9C9",
+          "#EEEEEE"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Grafite 1",
+        "canonical": "#16181A",
+        "tonalRamp": [
+          "#0A0B0D",
+          "#232527",
+          "#404245",
+          "#5F6164",
+          "#808385",
+          "#A3A5A8",
+          "#C7C9CC",
+          "#ECEFF2"
+        ]
+      },
+      "surfaceAlt": {
+        "role": "neutral",
+        "displayName": "Grafite 2",
+        "canonical": "#232629",
+        "tonalRamp": [
+          "#090B0E",
+          "#222528",
+          "#3F4246",
+          "#5E6265",
+          "#7F8386",
+          "#A2A5A9",
+          "#C6CACE",
+          "#EBEFF3"
+        ]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Divisória grafite",
+        "canonical": "#2E3236",
+        "tonalRamp": [
+          "#080C0F",
+          "#222629",
+          "#3E4247",
+          "#5D6266",
+          "#7E8388",
+          "#A1A6AB",
+          "#C5CACF",
+          "#EAEFF4"
+        ]
+      },
+      "borderStrong": {
+        "role": "neutral",
+        "displayName": "Borda de controle",
+        "canonical": "#7E858F",
+        "tonalRamp": [
+          "#070B12",
+          "#20252E",
+          "#3C424B",
+          "#5B626B",
+          "#7C838D",
+          "#9EA6B0",
+          "#C2CAD5",
+          "#E7EFFA"
+        ]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Branco de texto",
+        "canonical": "#FFFFFF",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#A5A5A5",
+          "#C9C9C9",
+          "#EEEEEE"
+        ]
+      },
+      "textMuted": {
+        "role": "neutral",
+        "displayName": "Cinza de apoio",
+        "canonical": "#C4C9D0",
+        "tonalRamp": [
+          "#080B10",
+          "#22252B",
+          "#3E4248",
+          "#5D6268",
+          "#7E8389",
+          "#A1A5AC",
+          "#C5CAD1",
+          "#EAEFF6"
+        ]
+      },
+      "textFaint": {
+        "role": "neutral",
+        "displayName": "Cinza de legenda",
+        "canonical": "#A0A6AE",
+        "tonalRamp": [
+          "#080B11",
+          "#21252C",
+          "#3D4249",
+          "#5C6269",
+          "#7D838A",
+          "#A0A6AE",
+          "#C3CAD2",
+          "#E9EFF8"
+        ]
+      },
+      "iconFaint": {
+        "role": "neutral",
+        "displayName": "Cinza de enfeite",
+        "canonical": "#6F757E",
+        "tonalRamp": [
+          "#070B12",
+          "#20252D",
+          "#3D424B",
+          "#5C626A",
+          "#7D838C",
+          "#9FA6AF",
+          "#C3CAD4",
+          "#E8EFF9"
+        ]
+      },
+      "heading": {
+        "role": "tertiary",
+        "displayName": "Amarelo-claro de título",
+        "canonical": "#FFF690",
+        "tonalRamp": [
+          "#0D0C01",
+          "#2A2601",
+          "#494401",
+          "#6B6300",
+          "#8F8510",
+          "#B2A941",
+          "#D6CD68",
+          "#FCF38D"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Tinta escura",
+        "canonical": "#16181D",
+        "tonalRamp": [
+          "#090B10",
+          "#23252A",
+          "#404248",
+          "#5F6167",
+          "#808289",
+          "#A2A5AC",
+          "#C6C9D0",
+          "#EBEEF6"
+        ]
+      },
+      "primary": {
+        "role": "primary",
+        "displayName": "Vermelho Pokédex",
+        "canonical": "#E6171E",
+        "tonalRamp": [
+          "#1F0000",
+          "#4D0103",
+          "#80040A",
+          "#B70B13",
+          "#ED2426",
+          "#FE7467",
+          "#FDB4AB",
+          "#FDE9E7"
+        ]
+      },
+      "primaryDark": {
+        "role": "primary",
+        "displayName": "Vermelho escuro",
+        "canonical": "#C40D13",
+        "tonalRamp": [
+          "#1F0000",
+          "#4D0102",
+          "#800407",
+          "#B70A10",
+          "#E43A33",
+          "#FE7466",
+          "#FDB4AA",
+          "#FDE9E6"
+        ]
+      },
+      "primaryAction": {
+        "role": "primary",
+        "displayName": "Vermelho da ação",
+        "canonical": "#E6171E",
+        "tonalRamp": [
+          "#1F0000",
+          "#4D0103",
+          "#80040A",
+          "#B70B13",
+          "#ED2426",
+          "#FE7467",
+          "#FDB4AB",
+          "#FDE9E7"
+        ]
+      },
+      "onPrimary": {
+        "role": "neutral",
+        "displayName": "Branco sobre vermelho",
+        "canonical": "#FFFFFF",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#A5A5A5",
+          "#C9C9C9",
+          "#EEEEEE"
+        ]
+      },
+      "backdrop": {
+        "role": "neutral",
+        "displayName": "Fundo escurecido",
+        "canonical": "rgba(0, 0, 0, 0.72)",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#A5A5A5",
+          "#C9C9C9",
+          "#EEEEEE"
+        ]
+      },
+      "foil-0": {
+        "role": "tertiary",
+        "displayName": "Foil 1, claro",
+        "canonical": "#FDF4BB",
+        "tonalRamp": [
+          "#0E0B01",
+          "#2B2501",
+          "#4B4209",
+          "#6B622D",
+          "#8C844E",
+          "#AFA770",
+          "#D4CB93",
+          "#F9F0B8"
+        ]
+      },
+      "foil-1": {
+        "role": "tertiary",
+        "displayName": "Foil 2, ouro",
+        "canonical": "#E4C154",
+        "tonalRamp": [
+          "#0F0B01",
+          "#2E2401",
+          "#504008",
+          "#765E09",
+          "#9D7F06",
+          "#C4A12E",
+          "#E9C659",
+          "#FEEEBF"
+        ]
+      },
+      "foil-2": {
+        "role": "tertiary",
+        "displayName": "Foil 3, bronze",
+        "canonical": "#B98F57",
+        "tonalRamp": [
+          "#120901",
+          "#352001",
+          "#5B3A02",
+          "#80581E",
+          "#A37A42",
+          "#C79D64",
+          "#EDC187",
+          "#FDECD6"
+        ]
+      },
+      "foil-3": {
+        "role": "tertiary",
+        "displayName": "Foil 4, ouro",
+        "canonical": "#E1BD54",
+        "tonalRamp": [
+          "#100A00",
+          "#2E2404",
+          "#514005",
+          "#775E04",
+          "#9E7E12",
+          "#C4A134",
+          "#E9C55D",
+          "#FEEEC2"
+        ]
+      },
+      "foil-4": {
+        "role": "tertiary",
+        "displayName": "Foil 5, claro",
+        "canonical": "#FDF4BB",
+        "tonalRamp": [
+          "#0E0B01",
+          "#2B2501",
+          "#4B4209",
+          "#6B622D",
+          "#8C844E",
+          "#AFA770",
+          "#D4CB93",
+          "#F9F0B8"
+        ]
+      },
+      "binderColors-page": {
+        "role": "neutral",
+        "displayName": "Folha do fichário",
+        "canonical": "#1E2023",
+        "tonalRamp": [
+          "#090B0E",
+          "#232528",
+          "#404245",
+          "#5F6165",
+          "#808286",
+          "#A3A5A9",
+          "#C7C9CD",
+          "#ECEFF3"
+        ]
+      },
+      "binderColors-pageBorder": {
+        "role": "neutral",
+        "displayName": "Borda da folha",
+        "canonical": "#33373C",
+        "tonalRamp": [
+          "#080B10",
+          "#22252A",
+          "#3E4248",
+          "#5D6267",
+          "#7E8389",
+          "#A1A5AC",
+          "#C5CAD0",
+          "#EAEFF5"
+        ]
+      },
+      "binderColors-pocket": {
+        "role": "neutral",
+        "displayName": "Bolso",
+        "canonical": "#2A2D31",
+        "tonalRamp": [
+          "#090B0F",
+          "#222529",
+          "#3F4246",
+          "#5E6166",
+          "#7F8387",
+          "#A2A5AA",
+          "#C6C9CF",
+          "#EBEFF4"
+        ]
+      },
+      "binderColors-pocketBorder": {
+        "role": "neutral",
+        "displayName": "Borda e boca do bolso",
+        "canonical": "#3D4147",
+        "tonalRamp": [
+          "#080B10",
+          "#22252B",
+          "#3E4248",
+          "#5D6268",
+          "#7E8389",
+          "#A1A5AC",
+          "#C5C9D1",
+          "#EAEFF6"
+        ]
+      },
+      "binderColors-text": {
+        "role": "neutral",
+        "displayName": "Texto na folha",
+        "canonical": "#E9EBF0",
+        "tonalRamp": [
+          "#0A0B0E",
+          "#242529",
+          "#404246",
+          "#5F6165",
+          "#808287",
+          "#A3A5AA",
+          "#C7C9CE",
+          "#ECEEF3"
+        ]
+      },
+      "binderColors-textMuted": {
+        "role": "neutral",
+        "displayName": "Apoio na folha",
+        "canonical": "#A4AAB6",
+        "tonalRamp": [
+          "#070B13",
+          "#21252E",
+          "#3D424C",
+          "#5C616C",
+          "#7D828E",
+          "#9FA5B1",
+          "#C3C9D6",
+          "#E8EFFB"
+        ]
+      },
+      "binderColors-textFaint": {
+        "role": "neutral",
+        "displayName": "Legenda na folha",
+        "canonical": "#9399A5",
+        "tonalRamp": [
+          "#070B13",
+          "#20252E",
+          "#3D424C",
+          "#5C616C",
+          "#7D828E",
+          "#9FA5B1",
+          "#C3C9D6",
+          "#E8EFFC"
+        ]
+      },
+      "binderColors-highlight": {
+        "role": "tertiary",
+        "displayName": "Destaque do bolso",
+        "canonical": "#FFF690",
+        "tonalRamp": [
+          "#0D0C01",
+          "#2A2601",
+          "#494401",
+          "#6B6300",
+          "#8F8510",
+          "#B2A941",
+          "#D6CD68",
+          "#FCF38D"
+        ]
+      },
+      "binderColors-special": {
+        "role": "tertiary",
+        "displayName": "Amarelo do bolso livre",
+        "canonical": "#FFCB05",
+        "tonalRamp": [
+          "#100A00",
+          "#2F2403",
+          "#523F03",
+          "#785E00",
+          "#9F7E0D",
+          "#C99F09",
+          "#F3C31D",
+          "#FEEDC1"
+        ]
+      },
+      "binderColors-priceBg": {
+        "role": "neutral",
+        "displayName": "Cápsula de preço",
+        "canonical": "rgba(255, 255, 255, 0.08)",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#A5A5A5",
+          "#C9C9C9",
+          "#EEEEEE"
+        ]
+      },
+      "binderColors-priceFg": {
+        "role": "neutral",
+        "displayName": "Texto da cápsula",
+        "canonical": "#E9EBF0",
+        "tonalRamp": [
+          "#0A0B0E",
+          "#242529",
+          "#404246",
+          "#5F6165",
+          "#808287",
+          "#A3A5AA",
+          "#C7C9CE",
+          "#ECEEF3"
+        ]
+      },
+      "semantic-shell-rule": {
+        "role": "primary",
+        "displayName": "Fio vermelho",
+        "canonical": "#E6171E",
+        "tonalRamp": [
+          "#1F0000",
+          "#4D0103",
+          "#80040A",
+          "#B70B13",
+          "#ED2426",
+          "#FE7467",
+          "#FDB4AB",
+          "#FDE9E7"
+        ]
+      },
+      "semantic-money-fg": {
+        "role": "neutral",
+        "displayName": "Dinheiro",
+        "canonical": "#FFFFFF",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#A5A5A5",
+          "#C9C9C9",
+          "#EEEEEE"
+        ]
+      },
+      "semantic-money-fgMuted": {
+        "role": "neutral",
+        "displayName": "Dinheiro secundário",
+        "canonical": "#C4C9D0",
+        "tonalRamp": [
+          "#080B10",
+          "#22252B",
+          "#3E4248",
+          "#5D6268",
+          "#7E8389",
+          "#A1A5AC",
+          "#C5CAD1",
+          "#EAEFF6"
+        ]
+      },
+      "semantic-special-fill": {
+        "role": "tertiary",
+        "displayName": "Selo especial",
+        "canonical": "#FFCB05",
+        "tonalRamp": [
+          "#100A00",
+          "#2F2403",
+          "#523F03",
+          "#785E00",
+          "#9F7E0D",
+          "#C99F09",
+          "#F3C31D",
+          "#FEEDC1"
+        ]
+      },
+      "semantic-special-onFill": {
+        "role": "neutral",
+        "displayName": "Texto do selo especial",
+        "canonical": "#16181D",
+        "tonalRamp": [
+          "#090B10",
+          "#23252A",
+          "#404248",
+          "#5F6167",
+          "#808289",
+          "#A2A5AC",
+          "#C6C9D0",
+          "#EBEEF6"
+        ]
+      },
+      "semantic-progress-fill": {
+        "role": "tertiary",
+        "displayName": "Progresso",
+        "canonical": "#FFF690",
+        "tonalRamp": [
+          "#0D0C01",
+          "#2A2601",
+          "#494401",
+          "#6B6300",
+          "#8F8510",
+          "#B2A941",
+          "#D6CD68",
+          "#FCF38D"
+        ]
+      },
+      "semantic-progress-track": {
+        "role": "neutral",
+        "displayName": "Trilho de progresso",
+        "canonical": "rgba(255, 255, 255, 0.14)",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#A5A5A5",
+          "#C9C9C9",
+          "#EEEEEE"
+        ]
+      },
+      "semantic-selected-bg": {
+        "role": "neutral",
+        "displayName": "Selecionado",
+        "canonical": "#FFFFFF",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#A5A5A5",
+          "#C9C9C9",
+          "#EEEEEE"
+        ]
+      },
+      "semantic-selected-fg": {
+        "role": "neutral",
+        "displayName": "Texto do selecionado",
+        "canonical": "#000000",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#A5A5A5",
+          "#C9C9C9",
+          "#EEEEEE"
+        ]
+      },
+      "semantic-selected-soft": {
+        "role": "neutral",
+        "displayName": "Selecionado suave",
+        "canonical": "rgba(255, 255, 255, 0.12)",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#A5A5A5",
+          "#C9C9C9",
+          "#EEEEEE"
+        ]
+      },
+      "semantic-highlight-onSheet": {
+        "role": "tertiary",
+        "displayName": "Destaque na folha",
+        "canonical": "#FFF690",
+        "tonalRamp": [
+          "#0D0C01",
+          "#2A2601",
+          "#494401",
+          "#6B6300",
+          "#8F8510",
+          "#B2A941",
+          "#D6CD68",
+          "#FCF38D"
+        ]
+      },
+      "semantic-highlight-soft": {
+        "role": "tertiary",
+        "displayName": "Destaque suave",
+        "canonical": "rgba(255, 246, 144, 0.14)",
+        "tonalRamp": [
+          "#0D0C01",
+          "#2A2601",
+          "#494401",
+          "#6B6300",
+          "#8F8510",
+          "#B2A941",
+          "#D6CD68",
+          "#FCF38D"
+        ]
+      },
+      "semantic-focus-ring": {
+        "role": "neutral",
+        "displayName": "Anel de foco",
+        "canonical": "#FFFFFF",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#A5A5A5",
+          "#C9C9C9",
+          "#EEEEEE"
+        ]
+      },
+      "semantic-gain-fg": {
+        "role": "secondary",
+        "displayName": "Alta",
+        "canonical": "#6BE0A6",
+        "tonalRamp": [
+          "#010F07",
+          "#042D1B",
+          "#004F31",
+          "#04744A",
+          "#0B9A65",
+          "#46BF87",
+          "#6FE4AA",
+          "#C3FFDD"
+        ]
+      },
+      "semantic-loss-fg": {
+        "role": "secondary",
+        "displayName": "Queda",
+        "canonical": "#FF9B85",
+        "tonalRamp": [
+          "#1D0200",
+          "#490A01",
+          "#761E0D",
+          "#9B412F",
+          "#C1634F",
+          "#E88671",
+          "#FEB4A4",
+          "#FFE9E4"
+        ]
+      },
+      "semantic-success-fg": {
+        "role": "secondary",
+        "displayName": "Confirmação",
+        "canonical": "#6BE0A6",
+        "tonalRamp": [
+          "#010F07",
+          "#042D1B",
+          "#004F31",
+          "#04744A",
+          "#0B9A65",
+          "#46BF87",
+          "#6FE4AA",
+          "#C3FFDD"
+        ]
+      },
+      "semantic-success-bg": {
+        "role": "secondary",
+        "displayName": "Fundo de confirmação",
+        "canonical": "#12291E",
+        "tonalRamp": [
+          "#010F07",
+          "#142B1F",
+          "#30483C",
+          "#4F685B",
+          "#70897C",
+          "#92AC9E",
+          "#B5D1C2",
+          "#DAF7E7"
+        ]
+      },
+      "semantic-warning-fg": {
+        "role": "secondary",
+        "displayName": "Aviso",
+        "canonical": "#FFD27A",
+        "tonalRamp": [
+          "#110A01",
+          "#312201",
+          "#563D00",
+          "#7C5B09",
+          "#A47B17",
+          "#C99E44",
+          "#EFC26A",
+          "#FEECCB"
+        ]
+      },
+      "semantic-warning-bg": {
+        "role": "secondary",
+        "displayName": "Fundo de aviso",
+        "canonical": "#2E2410",
+        "tonalRamp": [
+          "#110A00",
+          "#2D230F",
+          "#4B402C",
+          "#6B604A",
+          "#8D816A",
+          "#B0A48C",
+          "#D5C8AF",
+          "#FAEDD4"
+        ]
+      },
+      "semantic-danger-fg": {
+        "role": "secondary",
+        "displayName": "Erro",
+        "canonical": "#FF8A80",
+        "tonalRamp": [
+          "#1E0101",
+          "#4C0306",
+          "#7D0E13",
+          "#A33733",
+          "#CA5B53",
+          "#F27E75",
+          "#FEB3AB",
+          "#FEE9E6"
+        ]
+      },
+      "semantic-danger-bg": {
+        "role": "secondary",
+        "displayName": "Fundo de erro",
+        "canonical": "#33161A",
+        "tonalRamp": [
+          "#1B0306",
+          "#381B1F",
+          "#58383B",
+          "#79565A",
+          "#9C777B",
+          "#C19A9D",
+          "#E6BDC1",
+          "#FDE9EA"
+        ]
+      },
+      "semantic-danger-border": {
+        "role": "secondary",
+        "displayName": "Borda de erro",
+        "canonical": "rgba(255, 138, 128, 0.45)",
+        "tonalRamp": [
+          "#1E0101",
+          "#4C0306",
+          "#7D0E13",
+          "#A33733",
+          "#CA5B53",
+          "#F27E75",
+          "#FEB3AB",
+          "#FEE9E6"
+        ]
+      },
+      "semantic-danger-solid": {
+        "role": "secondary",
+        "displayName": "Erro sólido",
+        "canonical": "#C5221F",
+        "tonalRamp": [
+          "#1F0000",
+          "#4D0002",
+          "#800307",
+          "#B70910",
+          "#E04138",
+          "#FF7366",
+          "#FDB4AA",
+          "#FDE9E6"
+        ]
+      },
+      "semantic-link-fg": {
+        "role": "secondary",
+        "displayName": "Link",
+        "canonical": "#8AB4FF",
+        "tonalRamp": [
+          "#000827",
+          "#001E5D",
+          "#1C3E7F",
+          "#3A5FA3",
+          "#5A81C8",
+          "#7CA5EF",
+          "#ADCAFC",
+          "#E6EFFE"
+        ]
+      },
+      "semantic-link-soft": {
+        "role": "secondary",
+        "displayName": "Fundo de link",
+        "canonical": "rgba(138, 180, 255, 0.14)",
+        "tonalRamp": [
+          "#000827",
+          "#001E5D",
+          "#1C3E7F",
+          "#3A5FA3",
+          "#5A81C8",
+          "#7CA5EF",
+          "#ADCAFC",
+          "#E6EFFE"
+        ]
+      },
+      "semantic-brand-soft": {
+        "role": "neutral",
+        "displayName": "Botão redondo na barra",
+        "canonical": "rgba(255, 255, 255, 0.12)",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#A5A5A5",
+          "#C9C9C9",
+          "#EEEEEE"
+        ]
+      },
+      "semantic-inverse-bg": {
+        "role": "neutral",
+        "displayName": "Toast",
+        "canonical": "#FFFFFF",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#A5A5A5",
+          "#C9C9C9",
+          "#EEEEEE"
+        ]
+      },
+      "semantic-inverse-fg": {
+        "role": "neutral",
+        "displayName": "Texto do toast",
+        "canonical": "#16181D",
+        "tonalRamp": [
+          "#090B10",
+          "#23252A",
+          "#404248",
+          "#5F6167",
+          "#808289",
+          "#A2A5AC",
+          "#C6C9D0",
+          "#EBEEF6"
+        ]
+      },
+      "semantic-inverse-action": {
+        "role": "secondary",
+        "displayName": "Ação do toast",
+        "canonical": "#B5280A",
+        "tonalRamp": [
+          "#1D0100",
+          "#490901",
+          "#7A1704",
+          "#B12303",
+          "#D94C32",
+          "#FD765B",
+          "#FFB4A3",
+          "#FCEAE6"
+        ]
+      },
+      "semantic-tag-bg": {
+        "role": "neutral",
+        "displayName": "Selo neutro",
+        "canonical": "#2E3236",
+        "tonalRamp": [
+          "#080C0F",
+          "#222629",
+          "#3E4247",
+          "#5D6266",
+          "#7E8388",
+          "#A1A6AB",
+          "#C5CACF",
+          "#EAEFF4"
+        ]
+      },
+      "semantic-tag-fg": {
+        "role": "neutral",
+        "displayName": "Texto do selo neutro",
+        "canonical": "#E9EBF0",
+        "tonalRamp": [
+          "#0A0B0E",
+          "#242529",
+          "#404246",
+          "#5F6165",
+          "#808287",
+          "#A3A5AA",
+          "#C7C9CE",
+          "#ECEEF3"
+        ]
+      },
+      "semantic-hover-onLight": {
+        "role": "neutral",
+        "displayName": "Mouse por cima",
+        "canonical": "rgba(255, 255, 255, 0.08)",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#A5A5A5",
+          "#C9C9C9",
+          "#EEEEEE"
+        ]
+      },
+      "semantic-hover-onBrand": {
+        "role": "neutral",
+        "displayName": "Mouse por cima na barra",
+        "canonical": "rgba(255, 255, 255, 0.22)",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#252525",
+          "#424242",
+          "#616161",
+          "#828282",
+          "#A5A5A5",
+          "#C9C9C9",
+          "#EEEEEE"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Número grande da tela, como o valor da coleção, sempre com type.tabular."
+      },
+      "title": {
+        "displayName": "Título",
+        "purpose": "Título de tela ou de carta, em Kanit."
+      },
+      "heading": {
+        "displayName": "Título de seção",
+        "purpose": "Título de bloco em amarelo-claro, em Kanit maiúscula."
+      },
+      "body": {
+        "displayName": "Corpo",
+        "purpose": "Texto corrido."
+      },
+      "bodyStrong": {
+        "displayName": "Corpo forte",
+        "purpose": "Nome em lista."
+      },
+      "label": {
+        "displayName": "Rótulo",
+        "purpose": "Rótulo de grupo em maiúsculas, nunca logo acima de um título."
+      },
+      "caption": {
+        "displayName": "Legenda",
+        "purpose": "Legenda de uma linha e atribuição."
+      },
+      "numeric": {
+        "displayName": "Numérico",
+        "purpose": "Valores e contagens, com algarismos tabulares."
+      },
+      "figure": {
+        "displayName": "Número em cartão",
+        "purpose": "Número grande dentro de cartão."
+      }
+    },
+    "shadows": [
+      {
+        "name": "elevation-2-web",
+        "value": "0 6px 18px rgba(0,0,0,0.6)",
+        "purpose": "Só o que flutua: toast, folha de baixo, lista de sugestões, seletor de versões e carta levantada. No Android: elevation 8."
+      }
+    ],
+    "motion": [
+      {
+        "name": "pocket-settle",
+        "value": "spring speed 16, bounciness 7, de 0.9 a 1",
+        "purpose": "Carta recém-colocada no bolso."
+      },
+      {
+        "name": "card-lift",
+        "value": "120ms ease-out cubic, escala 1.08",
+        "purpose": "Levantar a carta no arraste."
+      },
+      {
+        "name": "card-return",
+        "value": "160ms ease-out cubic",
+        "purpose": "A carta volta ao bolso de origem."
+      },
+      {
+        "name": "page-slide",
+        "value": "200ms ease-out cubic",
+        "purpose": "Folhear por botão ou teclado."
+      },
+      {
+        "name": "toast-in",
+        "value": "180ms",
+        "purpose": "Entrada do toast."
+      },
+      {
+        "name": "toast-out",
+        "value": "140ms",
+        "purpose": "Saída do toast."
+      },
+      {
+        "name": "sheet-in",
+        "value": "220ms",
+        "purpose": "Entrada da InfoSheet."
+      },
+      {
+        "name": "foil-gleam",
+        "value": "700ms ease-in-out, atraso 200ms, uma passada",
+        "purpose": "Brilho do filete na tela da carta; nunca com reduzir movimento."
+      },
+      {
+        "name": "long-press",
+        "value": "350ms",
+        "purpose": "Segurar para espiar ou levantar a carta."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "tablet",
+        "value": "600px"
+      },
+      {
+        "name": "desktop",
+        "value": "960px"
+      },
+      {
+        "name": "wide",
+        "value": "1280px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Botão principal",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Pílula vermelha em gradiente, só na ação principal da tela.",
+      "html": "<button class=\"ds-btn-primary\">Colocar no fichário</button>",
+      "css": ".ds-btn-primary{min-height:50px;padding:0 20px;border-radius:999px;border:1.5px solid #E6171E;background:linear-gradient(180deg,#E6171E,#C40D13);color:#FFFFFF;font-family:Kanit,system-ui,sans-serif;font-style:italic;font-weight:700;font-size:16px;line-height:20px;letter-spacing:.5px;text-transform:uppercase;cursor:pointer}.ds-btn-primary:hover{background:#C40D13;border-color:#C40D13}.ds-btn-primary:active{transform:scale(.98);opacity:.9}.ds-btn-primary:focus-visible{outline:2px solid #FFFFFF;outline-offset:2px}"
+    },
+    {
+      "name": "Botão secundário",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Contorno claro, para as ações que não são a principal.",
+      "html": "<button class=\"ds-btn-secondary\">Ver versões</button>",
+      "css": ".ds-btn-secondary{min-height:50px;padding:0 20px;border-radius:999px;border:1.5px solid #7E858F;background:transparent;color:#FFFFFF;font-family:Kanit,system-ui,sans-serif;font-style:italic;font-weight:700;font-size:16px;line-height:20px;letter-spacing:.5px;text-transform:uppercase;cursor:pointer}.ds-btn-secondary:hover{background:#232629}.ds-btn-secondary:active{transform:scale(.98);opacity:.9}.ds-btn-secondary:focus-visible{outline:2px solid #FFFFFF;outline-offset:2px}"
+    },
+    {
+      "name": "Pílula + Carta",
+      "kind": "button",
+      "refersTo": "add-card-pill",
+      "description": "Ação principal da home: base fixa no celular, barra do topo no computador.",
+      "html": "<button class=\"ds-add-pill\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\" stroke=\"currentColor\" stroke-width=\"2.4\" stroke-linecap=\"round\"/></svg><span>Carta</span></button>",
+      "css": ".ds-add-pill{display:inline-flex;align-items:center;gap:4px;min-height:48px;padding:0 16px 0 12px;border:0;border-radius:999px;background:linear-gradient(180deg,#E6171E,#C40D13);color:#FFFFFF;font-family:Kanit,system-ui,sans-serif;font-style:italic;font-weight:700;font-size:15px;text-transform:uppercase;cursor:pointer}.ds-add-pill:hover{background:#C40D13}.ds-add-pill:active{opacity:.8}.ds-add-pill:focus-visible{outline:2px solid #FFFFFF;outline-offset:2px}"
+    },
+    {
+      "name": "Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Opção de escolha; selecionado fica branco com texto preto.",
+      "html": "<div class=\"ds-chip-row\"><button class=\"ds-chip ds-chip-on\" aria-checked=\"true\">NM</button><button class=\"ds-chip\">Reverse</button></div>",
+      "css": ".ds-chip-row{display:flex;gap:8px}.ds-chip{min-height:48px;padding:0 14px;border-radius:999px;border:1.5px solid #2E3236;background:#232629;color:#FFFFFF;font:600 14px system-ui,sans-serif;cursor:pointer}.ds-chip:hover{border-color:#7E858F}.ds-chip-on,.ds-chip-on:hover{background:#FFFFFF;border-color:#FFFFFF;color:#000000}.ds-chip:focus-visible{outline:2px solid #FFFFFF;outline-offset:2px}"
+    },
+    {
+      "name": "Campo de texto",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Campo grafite; em foco, a borda fica branca.",
+      "html": "<input class=\"ds-input\" placeholder=\"Nome da carta\" aria-label=\"Nome da carta\" />",
+      "css": ".ds-input{min-height:48px;box-sizing:border-box;padding:12px 14px;border-radius:14px;border:1.5px solid #7E858F;background:#232629;color:#FFFFFF;font:400 16px system-ui,sans-serif;outline:none}.ds-input::placeholder{color:#A0A6AE}.ds-input:hover{border-color:#C4C9D0}.ds-input:focus{border-color:#FFFFFF}"
+    },
+    {
+      "name": "Cartão",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Grafite sobre o preto, sem sombra nem borda.",
+      "html": "<div class=\"ds-card\"><h3 class=\"ds-card-title\">Valor da coleção</h3><p class=\"ds-card-value\">R$ 12.480</p></div>",
+      "css": ".ds-card{background:#16181A;border-radius:20px;padding:16px;max-width:320px}.ds-card-title{font-family:Kanit,system-ui,sans-serif;font-style:italic;font-weight:700;font-size:18px;line-height:24px;letter-spacing:.5px;text-transform:uppercase;color:#FFF690;margin:0 0 4px}.ds-card-value{font:800 26px/32px system-ui,sans-serif;font-variant-numeric:tabular-nums;color:#FFFFFF;margin:0}"
+    },
+    {
+      "name": "Base fixa da home",
+      "kind": "nav",
+      "refersTo": "add-card-pill",
+      "description": "Paginação e pílula no celular, fundo preto opaco, 8 de vão entre alvos de 48.",
+      "html": "<nav class=\"ds-dock\" aria-label=\"Paginação\"><button class=\"ds-dock-round\" aria-label=\"Página anterior\"><svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" aria-hidden=\"true\"><path d=\"M15 5l-7 7 7 7\" stroke=\"currentColor\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg></button><button class=\"ds-dock-mid\">Pág. 1 <span>de 114</span></button><button class=\"ds-dock-round\" aria-label=\"Próxima página\"><svg width=\"22\" height=\"22\" viewBox=\"0 0 24 24\" fill=\"none\" aria-hidden=\"true\"><path d=\"M9 5l7 7-7 7\" stroke=\"currentColor\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg></button><button class=\"ds-dock-add\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" aria-hidden=\"true\"><path d=\"M12 5v14M5 12h14\" stroke=\"currentColor\" stroke-width=\"2.4\" stroke-linecap=\"round\"/></svg><span>Carta</span></button></nav>",
+      "css": ".ds-dock{display:flex;align-items:center;gap:8px;padding:8px;background:#000000;border-top:1px solid #2E3236;max-width:390px}.ds-dock-round{width:48px;height:48px;border-radius:999px;background:#16181A;border:1.5px solid #2E3236;color:#FFFFFF;display:grid;place-items:center;cursor:pointer}.ds-dock-round:hover{background:#232629}.ds-dock-round:focus-visible{outline:2px solid #FFFFFF;outline-offset:2px}.ds-dock-mid{flex:1;height:48px;border:0;background:transparent;border-radius:14px;color:#FFFFFF;font:800 14px/18px system-ui,sans-serif;font-variant-numeric:tabular-nums;cursor:pointer}.ds-dock-mid span{color:#C4C9D0;font-weight:600}.ds-dock-mid:hover{background:rgba(255,255,255,.08)}.ds-dock-mid:focus-visible{outline:2px solid #FFFFFF;outline-offset:2px}.ds-dock-add{display:inline-flex;align-items:center;gap:4px;min-height:48px;padding:0 16px 0 12px;border:0;border-radius:999px;background:linear-gradient(180deg,#E6171E,#C40D13);color:#FFFFFF;font-family:Kanit,system-ui,sans-serif;font-style:italic;font-weight:700;font-size:15px;text-transform:uppercase;cursor:pointer}.ds-dock-add:hover{background:#C40D13}.ds-dock-add:focus-visible{outline:2px solid #FFFFFF;outline-offset:2px}"
+    },
+    {
+      "name": "Bolso do fichário com preço",
+      "kind": "custom",
+      "refersTo": "binder-pocket",
+      "description": "Bolso grafite com cápsula de preço em 11 px; destaque em amarelo-claro e anel de foco branco.",
+      "html": "<div class=\"ds-page\"><button class=\"ds-pocket\" aria-label=\"Carta, valor R$ 41\"><span class=\"ds-pocket-art\"></span></button><span class=\"ds-price\">R$ 41</span></div>",
+      "css": ".ds-page{display:inline-flex;flex-direction:column;gap:3px;width:104px;padding:10px;background:#1E2023;border:1px solid #33373C;border-radius:14px}.ds-pocket{display:block;width:104px;height:145px;box-sizing:border-box;padding:3px;border-radius:8px;border:1px solid #3D4147;background:#2A2D31;cursor:pointer}.ds-pocket:hover{border-color:#9399A5;transform:translateY(-2px)}.ds-pocket:active{opacity:.75}.ds-pocket:focus-visible{outline:2px solid #FFFFFF;outline-offset:2px}.ds-pocket-art{display:block;width:100%;height:100%;border-radius:4px;background:#1E2023}.ds-price{align-self:center;padding:1px 6px;border-radius:999px;background:rgba(255,255,255,.08);color:#E9EBF0;font:700 11px system-ui,sans-serif;font-variant-numeric:tabular-nums}"
+    },
+    {
+      "name": "Filete foil",
+      "kind": "custom",
+      "refersTo": "binder-pocket",
+      "description": "Gradiente metálico em volta da arte, só em carta aprovada por isSpecialCard.",
+      "html": "<div class=\"ds-foil\"><span class=\"ds-foil-art\"></span></div>",
+      "css": ".ds-foil{display:inline-block;padding:2px;border-radius:6px;background:linear-gradient(135deg,#FDF4BB,#E4C154,#B98F57,#E1BD54,#FDF4BB)}.ds-foil-art{display:block;width:96px;height:134px;border-radius:4px;background:#1E2023}"
+    },
+    {
+      "name": "Toast",
+      "kind": "custom",
+      "refersTo": "toast",
+      "description": "Aviso claro sobre o preto, com uma ação no máximo.",
+      "html": "<div class=\"ds-toast\" role=\"status\"><span class=\"ds-toast-msg\">Carta salva no fichário</span><button class=\"ds-toast-action\">Desfazer</button></div>",
+      "css": ".ds-toast{display:flex;align-items:center;gap:4px;min-height:48px;max-width:360px;padding-left:16px;padding-right:4px;background:#FFFFFF;border-radius:14px;box-shadow:0 6px 18px rgba(0,0,0,.6)}.ds-toast-msg{flex:1;color:#16181D;font:500 15px/20px system-ui,sans-serif}.ds-toast-action{min-height:48px;min-width:48px;padding:0 12px;border:0;background:transparent;border-radius:8px;color:#B5280A;font:700 15px system-ui,sans-serif;cursor:pointer}.ds-toast-action:hover{background:rgba(0,0,0,.06)}.ds-toast-action:focus-visible{outline:2px solid #16181D;outline-offset:2px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "A moldura preta",
+    "overview": "O app é o palco escuro da coleção: fundo preto, folha do fichário em grafite e a arte da carta como o que tem cor na tela. Quem abre vê as cartas primeiro, entende o valor de relance e sabe qual é a ação principal da tela. O app recusa o painel claro de cartões brancos.\n\nO fichário continua com cara de fichário físico: folha com furos na lombada, bolso com boca e reflexo de plástico, número do bolso no canto. O ritmo é de ferramenta: cabe uma página inteira na tela, sem rolagem, e tudo responde rápido.\n\nA referência de código é `src/theme.ts`, que guarda todos os tokens, e `src/components/ui.tsx`, que guarda os componentes. Em caso de dúvida, o código vale mais que este documento.",
+    "keyCharacteristics": [
+      "Moldura preta, superfícies grafite em degraus tonais e texto branco.",
+      "Títulos em Kanit 700 itálico; corpo e números na fonte do sistema, com algarismos tabulares.",
+      "Pílula vermelha em gradiente só na ação principal.",
+      "Selecionado em branco com texto preto; foco em branco; destaque em amarelo-claro.",
+      "Filete foil só na carta especial (`isSpecialCard`).",
+      "Nada abaixo de 11 px; alvo de toque de 48 (`TOUCH`)."
+    ],
+    "rules": [
+      {
+        "name": "A Regra da Cor Única",
+        "body": "Uma cor, um significado. Se a cor muda de sentido de tela para tela, não ensina nada.",
+        "section": "colors"
+      },
+      {
+        "name": "A Regra do Vermelho",
+        "body": "O vermelho é da ação principal e do fio da barra. Um botão vermelho por tela, e nenhum chip, borda ou destaque em vermelho.",
+        "section": "colors"
+      },
+      {
+        "name": "A Regra do Dinheiro Branco",
+        "body": "Valor em reais fica sempre em branco, com algarismos tabulares. Confiança, alta e queda não mudam a cor do valor.",
+        "section": "colors"
+      },
+      {
+        "name": "A Regra do Foil",
+        "body": "O filete foil só aparece em carta que `isSpecialCard` aprova. O destaque do bolso é amarelo-claro, outra cor, de propósito.",
+        "section": "colors"
+      },
+      {
+        "name": "A Regra do Piso de 11",
+        "body": "Nada abaixo de 11 px, inclusive nos bolsos do fichário (preço, número do bolso, nome e selo). Sem peso 900.",
+        "section": "typography"
+      },
+      {
+        "name": "A Regra do Número sem Kanit",
+        "body": "Número não vai em Kanit. Um título com número passa por `digitsInSystemFont`, que põe os dígitos na fonte do sistema, tabulares.",
+        "section": "typography"
+      },
+      {
+        "name": "A Regra da Kanit Normal",
+        "body": "A Kanit já é negrito e itálico: `fontWeight` e `fontStyle` ficam em `normal`, senão o Android engrossa de novo.",
+        "section": "typography"
+      },
+      {
+        "name": "A Regra do Degrau",
+        "body": "Cartão e painel ficam sobre o preto sem sombra. Quem precisa destacar um bloco sobe um degrau de superfície.",
+        "section": "elevation"
+      },
+      {
+        "name": "A Regra do Que Flutua",
+        "body": "Sombra só no que fica por cima de outra superfície. Se o elemento está no fluxo da tela, não tem sombra.",
+        "section": "elevation"
+      },
+      {
+        "name": "A Regra do Preço no Bolso",
+        "body": "O preço fica numa cápsula neutra embaixo da carta (`SlotPrice`): sempre 11 px, peso 700, tabular, nunca menor. O número vem de `formatCompact`. Sem espaço, sai o `R$`, e nunca o número: no bolso menor que 80 o `R$` some da cápsula e continua no rótulo do leitor de tela. Sem valor: \"buscando…\" ou \"sem preço\".",
+        "section": "components"
+      }
+    ],
+    "dos": [
+      "**Use** nomes de `src/theme.ts` com significado (`semantic.money.fg`, `type.caption`, `space.lg`) e os componentes de `src/components/ui.tsx`.",
+      "**Mantenha** a moldura preta: fundo `colors.background`, cartões em `surface`, um degrau acima em `surfaceAlt`.",
+      "**Reserve** a pílula vermelha para a única ação principal da tela; o resto é `secondary` ou `ghost`.",
+      "**Mostre** a opção escolhida em branco com texto preto (`semantic.selected`) e o foco em branco (`semantic.focus`).",
+      "**Use** o filete foil só com `isSpecialCard`, depois de a imagem carregar.",
+      "**Passe** por `digitsInSystemFont` qualquer título em Kanit que possa ter número.",
+      "**Dê** alvo de 48 (`TOUCH`) a todo controle, com padding na web, e 8 de vão entre alvos na base fixa.",
+      "**Ponha** a carta e o valor antes de qualquer painel.",
+      "**Passe** valor em reais por `src/lib/format.ts` e textos de valor por `src/lib/copy.ts`.",
+      "**Cite** a fonte com link em toda tela com preço do MYP Cards."
+    ],
+    "donts": [
+      "**Não** use `#hex` nem `rgba(` soltos nas telas. As únicas exceções são dado gravado ou desenho: `COVER_COLORS`, as cores de energia em `card-facts.tsx` e a arte do `version-picker.tsx`.",
+      "**Não** coloque texto abaixo de 11 px nem peso 900, nem dentro do bolso.",
+      "**Não** use número em Kanit nem `fontWeight` diferente de `normal` junto da Kanit.",
+      "**Não** ponha sombra em cartão ou painel no fluxo da tela.",
+      "**Não** use o vermelho em chip, borda, ícone ou destaque.",
+      "**Não** use `foil` nem `semantic.special` para nada além de carta especial e bolso livre.",
+      "**Não** empilhe `label` logo acima de um título.",
+      "**Não** corte o preço do bolso: o que sai é o `R$`, nunca o número.",
+      "**Não** faça a página da home rolar nem deixe a dock cobrir a folha.",
+      "**Não** dependa de `hitSlop` na web, nem de `accessibilityState` para informar estado.",
+      "**Não** use `iconFaint` em texto."
+    ]
+  }
+}

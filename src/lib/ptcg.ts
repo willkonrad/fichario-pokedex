@@ -1,3 +1,4 @@
+import { timedFetch } from './fetch-timeout';
 import { cached, cardDetail } from './tcgdex';
 
 /**
@@ -19,9 +20,10 @@ async function getWithRetry(url: string, tries = 2): Promise<{ data: PtcgCard[] 
   for (let i = 0; i < tries; i++) {
     if (i > 0) await new Promise((r) => setTimeout(r, 800));
     try {
-      const res = await fetch(url);
-      if (res.ok) return (await res.json()) as { data: PtcgCard[] };
-      last = new Error(`pokemontcg.io ${res.status}`);
+      return await timedFetch(url, (res) => {
+        if (!res.ok) throw new Error(`pokemontcg.io ${res.status}`);
+        return res.json() as Promise<{ data: PtcgCard[] }>;
+      });
     } catch (e) {
       last = e;
     }
@@ -74,14 +76,17 @@ function ptcgSetIds(tcgdexSetId: string) {
 
 /** Erro de rede propaga (não entra no cache); 404 ou verso padrão = não existe. */
 async function scrydexExists(url: string) {
-  const res = await fetch(url, { method: 'HEAD' });
-  if (res.status >= 500) throw new Error(`Scrydex ${res.status}`);
-  if (!res.ok) return false;
-  const etag = res.headers.get('etag') ?? '';
-  const bytes = res.headers.get('content-length') ?? '';
+  const head = await timedFetch(
+    url,
+    (res) => ({ status: res.status, ok: res.ok, etag: res.headers.get('etag') ?? '', bytes: res.headers.get('content-length') ?? '' }),
+    { method: 'HEAD' },
+  );
+  if (head.status >= 500) throw new Error(`Scrydex ${head.status}`);
+  if (!head.ok) return false;
+  const { etag, bytes } = head;
   if (etag || bytes) return !etag.includes(SCRYDEX_PLACEHOLDER_ETAG) && bytes !== SCRYDEX_PLACEHOLDER_BYTES;
   // Cabeçalhos escondidos (navegador): baixa a imagem uma vez e mede (o resultado vai para o cache).
-  const body = await fetch(url).then((r) => r.arrayBuffer());
+  const body = await timedFetch(url, (r) => r.arrayBuffer());
   return String(body.byteLength) !== SCRYDEX_PLACEHOLDER_BYTES;
 }
 
@@ -92,11 +97,12 @@ type SetCard = { id: string; name: string; number: string; images: { small: stri
 /** Cartas de uma coleção da pokemontcg.io (null = coleção não existe lá). Erro de rede propaga (não entra no cache). */
 function setCards(ptcgSetId: string) {
   return cached(`ptcg:set:v1:${ptcgSetId}`, async () => {
-    const res = await fetch(`${GITHUB_SET}/${ptcgSetId}.json`);
-    if (res.status === 404) return null;
-    if (!res.ok) throw new Error(`GitHub ${res.status}`);
-    const cards = (await res.json()) as SetCard[];
-    return cards.map(({ id, name, number, images }) => ({ id, name, number, images }));
+    const cards = await timedFetch<SetCard[] | null>(`${GITHUB_SET}/${ptcgSetId}.json`, (res) => {
+      if (res.status === 404) return null;
+      if (!res.ok) throw new Error(`GitHub ${res.status}`);
+      return res.json() as Promise<SetCard[]>;
+    });
+    return cards?.map(({ id, name, number, images }) => ({ id, name, number, images })) ?? null;
   });
 }
 

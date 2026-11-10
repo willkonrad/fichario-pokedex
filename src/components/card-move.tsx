@@ -8,10 +8,10 @@ import { POKEDEX_BINDER, type BinderSettings, type CustomBinder, type Entry } fr
 import { customEntryId, entryId, type MoveTarget } from '@/store/collection';
 import { colors, space, typography } from '@/theme';
 
-/** Um lugar do fichário Pokédex: o espaço do Pokémon ou um bolso extra (dex 0). */
+/** Um lugar do fichário Pokédex: o espaço do Pokémon ou um bolso livre (dex 0). */
 type DexSpot = { key: string; dex: number; slot: number; label: string };
 
-/** Lugares do fichário Pokédex para a carta (fora o atual): os espaços do Pokémon dela e os bolsos extras. */
+/** Lugares do fichário Pokédex para a carta (fora o atual): os espaços do Pokémon dela e os bolsos livres. */
 function dexSpots(settings: BinderSettings, cardDex: number, here: (dex: number, slot: number) => boolean): DexSpot[] {
   const species = cardDex > 0 ? getSpecies(cardDex) : undefined;
   const spots: DexSpot[] = [];
@@ -23,14 +23,14 @@ function dexSpots(settings: BinderSettings, cardDex: number, here: (dex: number,
   }
   for (let k = 0; k < extraSlots(settings); k++) {
     if (here(0, k)) continue;
-    spots.push({ key: entryId(0, k), dex: 0, slot: k, label: `Bolso extra ${k + 1}` });
+    spots.push({ key: entryId(0, k), dex: 0, slot: k, label: `Bolso livre ${k + 1}` });
   }
   return spots;
 }
 
 /**
  * "Mover para…" (F4): escolhe o fichário e o bolso de destino de uma carta. No fichário Pokédex, a carta só vai para o
- * espaço do próprio Pokémon ou para um bolso extra; num fichário livre, para qualquer bolso (o primeiro vazio vem
+ * espaço do próprio Pokémon ou para um bolso livre; num fichário livre, para qualquer bolso (o primeiro vazio vem
  * sugerido). Bolso ocupado: as duas cartas trocam de lugar. Os erros do store (em português) aparecem aqui.
  */
 export function CardMovePanel({
@@ -41,9 +41,10 @@ export function CardMovePanel({
   entries,
   onMove,
   onCancel,
+  quiet = false,
 }: {
   entry: Entry;
-  /** Pokémon da carta (0 = não sei ou não é Pokémon: no Pokédex, só os bolsos extras). */
+  /** Pokémon da carta (0 = não sei ou não é Pokémon: no Pokédex, só os bolsos livres). */
   cardDex: number;
   settings: BinderSettings;
   binders: CustomBinder[];
@@ -51,6 +52,8 @@ export function CardMovePanel({
   /** Move de verdade; `where` é o destino em texto ("Trocas · bolso 12"), para o aviso. Lança erro em português. */
   onMove: (target: MoveTarget, where: string) => Promise<void>;
   onCancel: () => void;
+  /** A tela já tem outra ação principal (o "Substituir" do rodapé): "Mover" fica em contorno. */
+  quiet?: boolean;
 }) {
   const from = entry.binderId && entry.binderId !== POKEDEX_BINDER ? entry.binderId : POKEDEX_BINDER;
   const isHere = (b: string, dex: number, slot: number) => b === from && slot === entry.slot && (b !== POKEDEX_BINDER || dex === entry.dex);
@@ -72,7 +75,7 @@ export function CardMovePanel({
   // Fichário escolhido apagado em outro aparelho: o destino volta a ser o Pokédex (e o chip marcado também).
   const shownBinderId = binder?.id ?? POKEDEX_BINDER;
   // Trocar de lugar traz a outra carta para o espaço desta no Pokédex, que é de um Pokémon só: o store recusa quando a
-  // outra é de outro Pokémon (ou de um bolso extra, sem Pokémon). A carta vinda de um fichário livre ou de um bolso extra
+  // outra é de outro Pokémon (ou de um bolso livre, sem Pokémon). A carta vinda de um fichário livre ou de um bolso livre
   // pode trocar com qualquer uma.
   const swapRefused = (other?: Entry) => !!other && from === POKEDEX_BINDER && entry.dex !== 0 && other.dex !== entry.dex;
   const occupiedText = (other: Entry) =>
@@ -140,7 +143,8 @@ export function CardMovePanel({
       status = other ? occupiedText(other) : 'Bolso vazio.';
       place = {
         title: 'Lugar',
-        hint: 'No Pokédex: o espaço do próprio Pokémon ou um bolso extra.',
+        // Uma linha só (a legenda da seção não quebra).
+        hint: 'O espaço do Pokémon ou um bolso livre',
         controls: (
           <ChipGroup label="Lugar no fichário Pokédex">
             {spots.map((s) => (
@@ -159,10 +163,10 @@ export function CardMovePanel({
       };
     } else {
       blocked = !species
-        ? 'Não sei de qual Pokémon é esta carta, e o fichário Pokédex não tem outro bolso extra.'
+        ? 'Não sei de qual Pokémon é esta carta, e o fichário Pokédex não tem outro bolso livre.'
         : inDexRange(settings, cardDex)
           ? 'No fichário Pokédex, esta carta já está no único lugar dela. Escolha outro fichário.'
-          : `${species.name} está fora da faixa do fichário Pokédex, e não há outro bolso extra.`;
+          : `${species.name} está fora da faixa do fichário Pokédex, e não há outro bolso livre.`;
     }
   }
 
@@ -201,7 +205,8 @@ export function CardMovePanel({
       {place ? (
         <Section title={place.title} hint={place.hint}>
           {place.controls}
-          <View style={styles.summary} aria-live="polite">
+          {/* `collapsable`: a região ao vivo não impede o achatamento da View no Android; sem isto, ela não existe. */}
+          <View style={styles.summary} collapsable={false} aria-live="polite">
             {position ? <Text style={styles.position}>{position}</Text> : null}
             {status ? <Text style={styles.status}>{status}</Text> : null}
           </View>
@@ -214,7 +219,7 @@ export function CardMovePanel({
         </View>
       ) : null}
       <View style={styles.actions}>
-        <Button title="Mover" icon="swap-horizontal" onPress={submit} busy={busy} disabled={!target} style={styles.flex} />
+        <Button title="Mover" variant={quiet ? 'secondary' : 'primary'} icon="swap-horizontal" onPress={submit} busy={busy} disabled={!target} style={styles.flex} />
         <Button title="Cancelar" variant="secondary" onPress={onCancel} />
       </View>
     </Card>

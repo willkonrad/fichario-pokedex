@@ -1,5 +1,131 @@
 # Notas da versão
 
+## 3.4.0 — Consulta de cartas e adicionar pela câmera (09/11/2026)
+
+### Consulta de cartas, para leilões
+- **Tela nova "Consulta de cartas"**: digite o nome e veja todas as cartas daquele Pokémon, em português, inglês, japonês, coreano e chinês, agrupadas por ano. Fica em Minha coleção → Buscar e trocar, na pílula "Consulta" ao lado do valor na tela inicial e, no computador, na barra de cima. A busca da tela inicial também sugere "Consultar “pikachu” em todas as cartas".
+- **Um campo só faz tudo**: nome, depois HP, ano, idioma ou número ("char 120", "umbreon jp", "070/108"). Idioma e HP ficam a um toque; ano, raridade, variação, coleção, tipo e estágio ficam nos filtros. Carta sem o dado nunca some em silêncio: aparece em "Sem ano", "Sem tipo" e assim por diante.
+- **Rápida e sem depender da internet**: o celular baixa uma lista com todas as cartas e preços (cerca de 2 MB) e consulta no aparelho. O servidor refaz a lista duas vezes por dia. As fotos ainda precisam de internet.
+- **Preço na hora**: TCGplayer em reais pela PTAX, marcada como Near Mint; quando só existe anúncio, a carta diz "anúncio", nunca "mercado"; e o MYP Cards no celular, na hora em que você abre a carta. Carta sem preço no idioma dela mostra o da mesma carta em outro idioma, sempre rotulado. Esse valor é só referência e nunca entra na soma da coleção.
+- **Links para os portais**: Liga e MYP Cards sempre primeiro, TCGplayer já filtrada por idioma e estado, depois eBay vendidos, PriceCharting, Cardmarket e, nas cartas asiáticas, SNKRDUNK, Card Rush, Mercari, Bunjang e outros. O app só abre os links, não lê essas páginas.
+- **Coreanas e chinesas são só para consultar**: não entram na coleção. As exclusivas da China sem lista aberta de cartas aparecem só com nome, data, quantidade e links.
+
+### Adicionar pela câmera (só no APK)
+- **"Adicionar pela câmera"**: aponte para a carta e o app lê nome, número e HP no próprio aparelho, sem nuvem e sem chave. Em lote, as cartas certas já vêm marcadas e um toque final coloca todas. Nunca troca a carta de um bolso ocupado, e dá para desfazer.
+- **Foto e print na Consulta**: ler uma carta pela câmera ou por um print da live.
+- Sem o APK (Expo Go e web), o app explica que a câmera não está disponível. A busca digitada funciona em todos.
+
+### Revisão completa antes do APK
+O app foi revisado por várias frentes (desenvolvimento, design, colecionador, leilão, primeiro uso, sinal fraco e tela pequena, acessibilidade, segurança e custo do servidor). Foram 116 defeitos confirmados, todos corrigidos, e uma segunda revisão conferiu as correções.
+
+**Valor das cartas**
+- Carta Jumbo nunca vale pelo preço da carta comum, nem pela TCGplayer nem pelo MYP Cards: usa o produto Jumbo dela ou fica sem preço.
+- Versões Pré-release e "Logo da coleção" acham o produto certo. Cartas já salvas com o nome antigo dessas versões continuam reconhecidas, e o selo da foto não se perde.
+- Carta japonesa Mirror com o marcador antes do número (como "Ampharos (Mirror Holofoil) - 033/070") virou uma versão de verdade, com o preço dela. As já salvas foram convertidas.
+- Carta japonesa só do catálogo já vem com a versão certa (Holo ou 1ª edição) e com preço.
+- Prize Pack com impressão Normal e Holo fica sem preço até você dizer qual é a sua, em vez de pegar uma das duas.
+- A variação "Outra" (erro de impressão etc.) em inglês aparece como "≈ Aproximado".
+- Carta em português Reverse Foil avaliada pelo MYP Cards aparece como "≈ Aproximado": o MYP não tem produto só da reverse, e o preço é o do produto da carta. O valor é o mesmo de antes; muda só a marca. A inglesa continua como estava.
+
+**Conta e sincronização**
+- Uma segunda conta entrando no mesmo aparelho não recebe mais a coleção da primeira.
+- Aberto sem internet e com o login vencido, o app continua na conta e mostra "sem conexão", em vez de parecer deslogado.
+- Carta movida ou tirada logo antes de o app fechar não volta ao lugar antigo.
+- As buscas no MYP Cards desistem depois de 15 s: a fila não trava, e sem internet a tela não fica acesa à toa.
+- A "Evolução do valor" abre rápido mesmo com muitos meses de histórico. Demora do servidor não aparece mais como "Sem conexão".
+
+**Consulta de cartas**
+- Entende nomes colados e com hífen ("リザードンex", "리자몽V", "charizard-gx"), número com espaço ("70 108"), nomes de treinador e siglas de coleção como MEW.
+- Na web, a lista de cartas fica guardada no navegador e só é baixada de novo quando muda.
+- Quando a lista não carrega, a tela diz o motivo e oferece "Tentar de novo".
+- "Adicionar à coleção" já marca a versão que está na tela (1ª edição, Shadowless, Reverse…).
+- As promos japonesas em CD aparecem como 1998–1999 (o catálogo dizia 2025).
+- As coleções coreanas e chinesas sem lista de cartas aparecem uma vez cada (a fonte repetia "Triplet Beat" em 17 coleções).
+- Teclado e leitor de tela: o foco volta à carta ao fechar o painel, Esc fecha só a camada de cima, os filtros prendem o foco e a carta sob o cursor é anunciada.
+
+**Tela da carta e tela inicial**
+- No Android, o teclado não cobre mais "Observações" e "Meu valor", e o que foi digitado logo antes de sair do app é salvo.
+- Número impresso como na carta: "TG05/TG30" nas galerias e promo sem total inventado. Também em Relatórios.
+- O título "Substituir carta" só aparece quando há carta no bolso.
+- A tela inicial não se recalcula a cada preço que chega; o botão voltar do Android fecha a busca; "Cartas fora do fichário" mostra 30 por vez.
+- Na web, carta esperando preço diz "esperando preço" (o preço em português vem do app no celular).
+
+**Câmera (APK)**
+- O lote só é apagado depois que as cartas foram gravadas no aparelho. Se a gravação falhar, nada é colocado e o lote continua, sem risco de duplicar.
+
+**Formulários, acessibilidade e tablet**
+- Números na fonte do sistema em todos os títulos; botões e chips com 48 dp; foco visível nas opções selecionadas; erros de formulário anunciados no Android; margens certas no tablet.
+
+**Para o primeiro APK** (mudam o nativo, já entram no primeiro build)
+- Cópia da coleção no Android: salva num arquivo na pasta que você escolher e importa pelo arquivo, sem o limite de tamanho do compartilhamento.
+- Até 50 MB de armazenamento local para coleções grandes.
+- Sem a permissão de sobrepor a outros apps; ícones no vermelho do app; página "Página não encontrada" em português.
+
+## 3.3.0 — Visual novo, tela inicial sem rolagem e arrastar cartas (09/11/2026)
+
+### Visual
+- **Fundo preto em todas as telas**, com superfícies em grafite e texto branco: a cor fica por conta da arte das cartas. O estilo se inspira nas páginas oficiais do Pokémon TCG, sem usar logos, artes ou textos de lá.
+- **Títulos em Kanit itálico**; números e preços na fonte do sistema, com algarismos alinhados, para ler o valor de relance.
+- **O vermelho marca a ação principal** (a pílula "+ Carta"). Item selecionado fica branco com texto preto, e o destaque do bolso, amarelo-claro.
+- **Filete dourado só nas cartas especiais.** Na tela da carta, a arte grande vem primeiro no celular, com um brilho rápido nas especiais (sem animação com "Reduzir movimento").
+- O app abre direto em tema escuro, também na web, na tela de abertura e na barra do navegador.
+
+### Tela inicial
+- **A página não rola mais**: a folha do fichário se ajusta à janela. No computador, só a lista de regiões rola, dentro do painel lateral.
+- **Base fixa no celular** com a paginação e a pílula "+ Carta", no lugar do botão flutuante. Nada fica por baixo dela, e os avisos aparecem acima.
+- **Furos do lado certo da página**: na frente (págs. 1, 3, 5…) à esquerda e no verso (págs. 2, 4, 6…) à direita, junto da lombada. Em fichário só de frente, sempre à esquerda. No computador, as duas páginas abertas ficam com os furos no meio.
+
+### Arrastar cartas nos fichários livres
+- **Segure uma carta e arraste para mudar de lugar**, no celular e no computador. Soltou em cima de outra carta, as duas trocam; num bolso vazio, a carta vai para lá; fora dos bolsos, nada muda. O aviso traz "Desfazer".
+- **Vire a página arrastando**: com a carta parada na borda da folha, a página vira e dá para soltar na seguinte. No computador, dá para soltar em qualquer uma das duas páginas abertas.
+- Segurar sem mexer continua abrindo a prévia, e o toque curto, a carta. O fichário Pokédex não muda: lá cada Pokémon tem o seu bolso.
+
+### Preço
+- O valor nas telas continua igual. A capa vermelha gravada num fichário aparece no vermelho novo, sem mudar o que está salvo.
+
+## 3.2.0 — Cartas japonesas com foto e valor (07/11/2026)
+
+### Cartas japonesas
+- **Foto e valor das cartas em japonês** pela seção japonesa da TCGplayer (via TCGCSV), em reais pela PTAX, igual às cartas em inglês. A regra do valor passa a ser: "Meu valor" → TCGplayer (cartas em inglês e japonês) → MYP Cards (o MYP não tem japonesas). A carta japonesa só usa o produto japonês, nunca o preço da carta em inglês; na dúvida entre dois produtos, fica sem preço.
+- **Adicionar cartas japonesas sem ler japonês**: no bolso do Pokédex ou no "+ Carta", escolha o idioma japonês e o app mostra todas as impressões japonesas daquele Pokémon, com foto, coleção e ano, das antigas "Pocket Monsters" (1996) às de hoje. Toque na que bate com a carta na mão. As versões vendidas à parte (Mirror, Poké Ball, Master Ball) aparecem como cartas próprias, com foto e preço.
+- **Busca em japonês pelo nome em inglês** ("Pikachu") ou em japonês (ピカチュウ), e **pelo código** da carta ("M5 088").
+- Durante um lote, o idioma escolhido fica lembrado de um Pokémon para o outro.
+- As cartas japonesas que já estavam na coleção ganham foto e preço sozinhas, sem mudar nada nelas: o app acha o produto pela sigla da coleção e o número (ex.: Dhelmise e Mega Zeraora ex de "Abyss Eye").
+
+### Catálogo
+- **Cartas japonesas antigas no catálogo**: as coleções de 1996 a 2003 (Expansion Pack, Jungle, Fossil, Rocket Gang, Leaders' Stadium, Neo…) vinham vazias, porque essas cartas não têm número impresso e o servidor as confundia com produtos lacrados. Agora entram, e a cópia das 461 coleções japonesas é refeita uma vez (as antigas primeiro).
+- **Preços das cartas japonesas** copiados 1×/dia, como os das cartas em inglês.
+- Coleções sem data de lançamento (promos, POP Series, Vending Machine…) deixaram de aparecer como "2026".
+
+### Preço
+- **Nunca o preço de outra versão, também nas cartas em inglês**: quando o produto da TCGplayer só tem uma impressão e ela não é a da carta (ex.: reverse num produto só "Normal"), ou quando há mais de um produto possível, a carta fica sem o preço da TCGplayer e usa a próxima fonte (o MYP Cards, marcado "≈ Aproximado"); sem ela, fica sem valor até a versão ser corrigida ou o "Meu valor" preenchido. Na coleção, só o Scizor 33/53 (Black Star Promo) salvo como "reverse" muda: o produto da TCGplayer só tem a versão normal.
+
+## 3.1.0 — Relatórios e fotos da coleção nova (06/11/2026)
+
+### Relatórios
+- **Tela nova "Relatórios"** (Minha coleção → Buscar e trocar; no computador, também na coluna do fichário). Mostra o que aconteceu na coleção em 7, 30 ou 90 dias:
+  - **Resumo do período**: quantas cartas entraram, foram trocadas, movidas e removidas.
+  - **Últimas adicionadas**, **trocas no fichário Pokédex** (qual carta saiu e qual entrou no bolso) e **movidas e removidas**, com "há 5 min", "ontem"… Tocar numa linha abre a carta. Uma importação grande aparece numa linha só ("32 cartas de uma vez").
+  - **Destaques da coleção**: maiores altas e quedas, mais valiosas, valor por coleção, compras e cartas sem preço (com o motivo: buscando, não encontrada ou sem fonte).
+- **Registro de mudanças no servidor** (tabela `entry_events`): cada carta que entra, sai ou muda de versão num bolso vira um evento, gravado por um gatilho no banco. O "Desfazer", a digitação do selo e o mover (que no app é tirar de um bolso e pôr em outro) são resolvidos na leitura, para a lista mostrar o que você fez, não cada gravação. O histórico começa em **24/10/2026**: o que veio antes foi montado a partir das cópias diárias da coleção. Sem conta, a atividade não aparece; os destaques, sim.
+- Depois de trocar uma carta aberta pelos Relatórios, o app volta para os Relatórios, no mesmo período, e a lista se atualiza assim que a mudança chega à nuvem.
+- Apagar um fichário livre muito grande (milhares de cartas) continua rápido com o registro ligado: a remoção é registrada de uma vez, não carta a carta.
+
+### Fotos e catálogo
+- **Fotos da coleção nova antes da TCGplayer.** Uma carta de coleção que a TCGdex ainda não tem, e cuja foto a TCGplayer ainda não publicou, mostra a foto em português do Zukan. É o caso da "ME06: Delta Reign" na semana do lançamento. Quando a TCGplayer publicar, a foto dela volta sozinha. Na tela da carta, o selo "Foto EN" não aparece mais por engano sobre essa foto.
+- **Ligações do catálogo corrigidas** (regra 7 do catalog-sync). Uma carta numerada só liga numa coleção da TCGdex que cobre boa parte da coleção, e a mesma carta em duas coleções vai para a que cobre mais. Saíram 25 ligações erradas, em 11 coleções. Por exemplo:
+  - o Groudon 111/103 da Delta Reign estava ligado ao Groudon Star de Delta Species;
+  - Dratini e Drowzee de Team Rocket estavam ligados a Team Rocket Returns;
+  - o Bronzor de Triumphant estava ligado a uma coleção do Pokémon TCG Pocket;
+  - cartas do McDonald's 2026 estavam ligadas às de anos anteriores.
+- **Religação de coleções novas.** Quando a TCGdex cadastra uma coleção nova, o servidor religa as coleções do último ano. Antes, elas só eram religadas quando a TCGplayer mudava algo.
+
+## 3.0.3 — Preços do MYP com o app em segundo plano (25/10/2026)
+
+- **A tela não apaga sozinha enquanto o app busca preços do MYP.** Com a tela apagada, o Android pausa o app. A tela volta ao normal quando a fila acaba. Já funciona no Expo Go.
+- **Busca em segundo plano no APK**: com o app minimizado ou a tela travada, o Android roda a busca a cada 15 min ou mais, por até 3 min cada vez, no ritmo de sempre (uma consulta a cada 6,5 s). Quem decide a hora é o Android, conforme bateria, rede e economia de energia. No Expo Go isso não roda, porque ele não tem tarefas em segundo plano no Android. Fechar o app à força pelo sistema para a busca até ele ser aberto de novo.
+- A fila do MYP saiu do `MypRefresher` para `src/lib/myp-queue.ts`. As duas buscas usam essa fila e dividem o limite de 10 consultas por minuto.
+
 ## 3.0.2 — Ano das coleções (25/10/2026)
 
 - **Ano ao lado da coleção** na lista de cartas de um Pokémon e na busca para adicionar ("Realeza Absoluta Galeria de Galar · 2023"). O ano vem da TCGdex (todas as coleções numa consulta só, guardada por 7 dias) e, para as coleções que só existem no catálogo (promos, Battle Academy…), da data de lançamento do TCGCSV, que o servidor passou a guardar.

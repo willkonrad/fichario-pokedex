@@ -8,15 +8,22 @@ import {
   catalogGroupYears,
   catalogNumber,
   catalogProduct,
+  catalogYear,
   ENGLISH,
+  isBoxStamp,
+  isOversize,
+  isPrereleaseStamp,
+  JAPANESE,
   normNumber,
   plainName,
   sameStampVersion,
   stampVariant,
   type CatalogRow,
 } from './catalog';
+import { timedFetch } from './fetch-timeout';
+import { japaneseProducts, nameHasSpecies, type JaCardRef } from './ja-catalog';
 import type { CardLang, Variant } from './types';
-import { versionOptions } from './variants';
+import { logoOnlyLabel, versionOptions } from './variants';
 
 const API = 'https://api.tcgdex.net/v2';
 const CACHE_TTL = 1000 * 60 * 60 * 24 * 7; // 7 dias
@@ -45,6 +52,12 @@ export type CardBrief = {
   stamp?: { variant: Variant; label: string; keys: string[] };
   /** Foto completa da carta (TCGplayer, via catálogo do TCGCSV), quando não há imagem da TCGdex. */
   imageUrl?: string;
+  /** Série da coleção quando ela não sai do id (cartas japonesas: pela época de lançamento). Ver seriesOf. */
+  series?: string;
+  /** Produto da TCGplayer japonesa que é a mesma carta da TCGdex japonesa com este id (para o "tenho" das já salvas). */
+  tcgdexId?: string;
+  /** Versão vista na Consulta (impressão escolhida, 1ª edição, coleção "(Shadowless)"): o "Adicionar" já a marca. */
+  version?: Variant;
 };
 
 export type CardDetail = {
@@ -72,7 +85,15 @@ export type CardDetail = {
    * Impressões que existem da carta (no catálogo em inglês os valores são estáveis):
    * type normal|holo|reverse, foil (pokeball, masterball, cosmos…), stamp (1st-edition, set-logo…), subtype (shadowless…).
    */
-  variants_detailed?: { type: string; subtype?: string; size?: string; foil?: string; stamp?: string[] }[];
+  variants_detailed?: {
+    type: string;
+    subtype?: string;
+    size?: string;
+    foil?: string;
+    stamp?: string[];
+    /** Produto da TCGplayer desta impressão (nas japonesas, da categoria 85). */
+    thirdParty?: { tcgplayer?: number };
+  }[];
   set: { id: string; name: string; cardCount?: { official?: number; total?: number } };
   variants?: Partial<Record<'normal' | 'reverse' | 'holo' | 'firstEdition' | 'wPromo', boolean>>;
   /** Foto completa da carta, para cartas que só existem no catálogo do TCGCSV. */
@@ -101,11 +122,14 @@ export type CardListOptions = {
    * fica guardada para a próxima abertura.
    */
   signal?: AbortSignal;
-  /** Lista base pronta, antes das versões com selo (para a tela mostrar algo enquanto o resto chega). */
-  onProgress?: (cards: CardBrief[]) => void;
+  /**
+   * Lista base pronta (para a tela mostrar algo enquanto o resto chega), com o que ainda falta buscar, para o "buscando
+   * …" da tela: "versões com selo" (PT e EN) ou "mais cartas" (japonês: a reserva da TCGdex japonesa).
+   */
+  onProgress?: (cards: CardBrief[], pending: string) => void;
 };
 
-type SetBrief = { id: string; name: string; logo?: string };
+type SetBrief = { id: string; name: string; logo?: string; cardCount?: { total?: number; official?: number } };
 
 // ---------- Cache (AsyncStorage + memória) ----------
 
@@ -218,10 +242,14 @@ const CACHE_PREFIXES = ['tcgdex:', 'ptcg:', 'scrydex:', 'zukan:'];
 
 /** Chaves de versões antigas do cache, que nunca mais são lidas. */
 const STALE_CACHE = [
-  /^tcgdex:dex:v(?:[1-9]|1[0-2]):/,
-  /^tcgdex:search:v[1-6]:/,
+  /^tcgdex:dex:v(?:[1-9]|1[0-5]):/,
+  /^tcgdex:search:v[1-9]:/,
+  /^tcgdex:set-years:v1$/,
+  /^tcgdex:code-cat:v1:/,
   /^scrydex:(?!v5:)/,
   /^tcgdex:abbr:/,
+  /^tcgdex:groupset:/,
+  /^tcgdex:group-set:v1:/,
   /^tcgdex:stampimg:v1:/,
   /^tcgdex:en-name:/,
   /^tcgdex:digital-sets$/,
@@ -315,10 +343,16 @@ function trackRecent(kind: keyof typeof RECENT, key: string) {
 
 // ---------- Rede ----------
 
-async function getJson<T>(url: string, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(url, { signal });
-  if (!res.ok) throw new Error(`TCGdex ${res.status}`);
-  return res.json() as Promise<T>;
+/** JSON da TCGdex, com tempo máximo até o fim da leitura (uma conexão muda vira erro e o "Tentar de novo" aparece). */
+function getJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  return timedFetch<T>(
+    url,
+    (res) => {
+      if (!res.ok) throw new Error(`TCGdex ${res.status}`);
+      return res.json() as Promise<T>;
+    },
+    { signal },
+  );
 }
 
 const notFound = (e: unknown) => /\b404\b/.test(String(e instanceof Error ? e.message : e));
@@ -365,19 +399,56 @@ const STAMPED_PT_SCANS = new Set(['xy/xy3/44']);
 /**
  * Ano de lançamento de cada coleção, para mostrar ao lado do nome ("Realeza Absoluta Galeria de Galar · 2023"): as da
  * TCGdex numa consulta só (GraphQL, todas as coleções com a data) e as que só existem no catálogo ("tcgp<grupo>", pela
- * data do TCGCSV). Guardado por 7 dias; se a TCGdex não responder, nada é guardado (tenta de novo depois).
+ * data do TCGCSV, em inglês e em japonês, com a correção de GROUP_YEARS). Guardado por 7 dias; se a TCGdex não
+ * responder, nada é guardado (tenta de novo depois). A v2 trouxe as coleções japonesas.
+ *
+ * Lista em japonês (`lang` 'ja'): a consulta da TCGdex só tem as coleções em inglês, e algumas japonesas da reserva
+ * repetem o id delas com outra data (neo1–neo4: Neo Discovery é de 2001, 遺跡をこえて... de 2000). Então ficam só os anos
+ * do catálogo e, para as coleções da reserva em `setIds`, o ano da própria coleção japonesa (ver japaneseSetYear).
  */
-export function setReleaseYears(): Promise<Record<string, number>> {
+export async function setReleaseYears(lang?: CardLang, setIds: string[] = []): Promise<Record<string, number>> {
+  const all = await allSetYears();
+  const out: Record<string, number> = {};
+  for (const [id, year] of Object.entries(all)) if (lang !== 'ja' || id.startsWith('tcgp')) out[id] = year;
+  for (const [group, [from]] of Object.entries(GROUP_YEARS)) if (out[`tcgp${group}`]) out[`tcgp${group}`] = from;
+  if (lang !== 'ja') return out;
+  const reserve = [...new Set(setIds.filter((id) => id && !id.startsWith('tcgp')))];
+  const years = await mapPool(reserve, 4, (id) => japaneseSetYear(id).catch(() => null));
+  reserve.forEach((id, i) => {
+    const year = years[i];
+    if (year) out[id] = year;
+  });
+  return out;
+}
+
+/** Ano de uma coleção da TCGdex japonesa, pela ficha dela (a lista de coleções não traz a data). Guardado por 4 semanas. */
+function japaneseSetYear(setId: string) {
   return cached(
-    'tcgdex:set-years:v1',
+    `tcgdex:ja-set-year:v1:${setId}`,
     async () => {
-      const res = await fetch(`${API}/graphql`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: '{ sets { id releaseDate } }' }),
+      const set = await getJson<{ releaseDate?: string | null }>(`${API}/ja/sets/${encodeURIComponent(setId)}`).catch((e) => {
+        if (notFound(e)) return null;
+        throw e;
       });
-      if (!res.ok) throw new Error(`TCGdex ${res.status}`);
-      const body = (await res.json()) as { data?: { sets?: { id: string; releaseDate?: string | null }[] } };
+      return catalogYear(set?.releaseDate) ?? null;
+    },
+    CACHE_TTL * 4,
+    { ttlFor: (year) => (year ? CACHE_TTL * 4 : LIST_TTL) },
+  );
+}
+
+function allSetYears(): Promise<Record<string, number>> {
+  return cached(
+    'tcgdex:set-years:v2',
+    async () => {
+      const body = await timedFetch(
+        `${API}/graphql`,
+        (res) => {
+          if (!res.ok) throw new Error(`TCGdex ${res.status}`);
+          return res.json() as Promise<{ data?: { sets?: { id: string; releaseDate?: string | null }[] } }>;
+        },
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: '{ sets { id releaseDate } }' }) },
+      );
       const out: Record<string, number> = await catalogGroupYears().catch(() => ({}));
       for (const s of body.data?.sets ?? []) {
         const year = Number(String(s.releaseDate ?? '').slice(0, 4));
@@ -414,13 +485,39 @@ function longerSpecies(species: string) {
  * Sem depender de acento, apóstrofo ou símbolo ("Farfetch'd" = "Farfetch’d", "Nidoran F" = "Nidoran♀").
  */
 function nameMatches(cardName: string, species: string, lang: CardLang, longer: string[] = []) {
-  if (lang === 'ja') {
-    const esc = species.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    // Japonês não tem espaços: evita que ミュウ (Mew) case com ミュウツー (Mewtwo).
-    return new RegExp(`${esc}(?![ァ-ヴー])`).test(cardName);
-  }
+  if (lang === 'ja') return jaNameHas(cardName, species);
   const card = ` ${plainName(cardName)} `;
   return card.includes(` ${plainName(species)} `) && !longer.some((n) => card.includes(` ${n} `));
+}
+
+/** Nomes japoneses mais longos que contêm cada nome ("コイル" → レアコイル, ジバコイル), calculados quando pedidos. */
+const longerJa = new Map<string, string[]>();
+function longerJaNames(ja: string) {
+  let out = longerJa.get(ja);
+  if (!out) {
+    out = POKEDEX.map((s) => s.ja).filter((n) => !!n && n.length > ja.length && n.includes(ja));
+    longerJa.set(ja, out);
+  }
+  return out;
+}
+
+/**
+ * O nome japonês `ja` está no nome da carta como o próprio Pokémon. Japonês não tem espaços: não pode vir seguido de
+ * katakana (ミュウ não é ミュウツー) nem estar dentro do nome de outro Pokémon (コイル não está em レアコイル nem em
+ * ジバコイル; ニューラ não está em マニューラ). A carta de dois Pokémon ("ピカチュウ&ゼクロムGX") vale para os dois.
+ */
+function jaNameHas(cardName: string, ja: string): boolean {
+  if (!ja) return false;
+  const longer = longerJaNames(ja);
+  for (let at = cardName.indexOf(ja); at >= 0; at = cardName.indexOf(ja, at + 1)) {
+    if (/[ァ-ヴー]/.test(cardName[at + ja.length] ?? '')) continue;
+    const inside = longer.some((n) => {
+      for (let k = n.indexOf(ja); k >= 0; k = n.indexOf(ja, k + 1)) if (at >= k && cardName.startsWith(n, at - k)) return true;
+      return false;
+    });
+    if (!inside) return true;
+  }
+  return false;
 }
 
 /**
@@ -491,9 +588,11 @@ const STAMP_ERA = /^(sv|me|30th)/i;
 /**
  * Versões com selo das cartas da lista (uma carta à parte para cada selo), pela ficha em inglês da TCGdex
  * (que lista as impressões). Só nas coleções recentes, para não abrir a ficha de centenas de cartas antigas, e no
- * máximo `max` cartas (as das coleções mais novas). Até 8 fichas baixando ao mesmo tempo.
+ * máximo `max` cartas (as das coleções mais novas). Até 8 fichas baixando ao mesmo tempo. `only`: as cartas cujas
+ * impressões são todas com selo (ex.: as 30 da Coleção Clássica de 30 anos, só com o selo 30th Anniversary): a carta
+ * comum não existe, então a lista mostra só a versão com selo (ver withoutPlain e withCatalog).
  */
-async function stampedVersions(list: CardBrief[], max = Infinity, onFail?: () => void): Promise<CardBrief[]> {
+async function stampedVersions(list: CardBrief[], max = Infinity, onFail?: () => void): Promise<{ cards: CardBrief[]; only: Set<string> }> {
   const todo = list
     .filter((c) => STAMP_ERA.test(c.setId) && !c.stamp)
     .sort((a, b) => b.setOrder - a.setOrder)
@@ -506,13 +605,18 @@ async function stampedVersions(list: CardBrief[], max = Infinity, onFail?: () =>
     }),
   );
   const out: CardBrief[] = [];
+  const only = new Set<string>();
   todo.forEach((c, k) => {
-    for (const o of versionOptions(details[k], details[k])) {
-      if (o.stamp) out.push({ ...c, stamp: { variant: o.variant, label: o.stamp, keys: o.stampKeys ?? [] } });
-    }
+    const options = versionOptions(details[k], details[k]);
+    const stamped = options.filter((o) => o.stamp);
+    for (const o of stamped) out.push({ ...c, stamp: { variant: o.variant, label: o.stamp!, keys: o.stampKeys ?? [] } });
+    if (stamped.length && stamped.length === options.length && details[k]?.variants_detailed?.length) only.add(c.id);
   });
-  return out;
+  return { cards: out, only };
 }
+
+/** Sem a carta comum das que só existem com selo (ver stampedVersions): fica só a versão com selo. */
+const withoutPlain = (list: CardBrief[], only: Set<string>) => (only.size ? list.filter((c) => !!c.stamp || !only.has(c.id)) : list);
 
 type Stamped = CardBrief & { stamp: NonNullable<CardBrief['stamp']> };
 
@@ -521,11 +625,12 @@ const setOfId = (id: string) => id.slice(0, id.lastIndexOf('-'));
 
 /**
  * Coleção da TCGdex de uma coleção do catálogo (todas as cartas ligadas dela são de uma só), guardada por 1 semana; sem
- * resposta (coleção ainda sem cartas ligadas), por 1 dia, para pegar logo a ligação feita pelo catalog-sync.
+ * resposta (coleção ainda sem cartas ligadas), por 1 dia, para pegar logo a ligação feita pelo catalog-sync. A v2 veio
+ * com a regra 7 de ligação do catalog-sync, que tirou ligações erradas (ex.: "ME06: Delta Reign" → Delta Species).
  */
 function groupTcgdexSet(groupId: number) {
   return cached(
-    `tcgdex:group-set:v1:${groupId}`,
+    `tcgdex:group-set:v2:${groupId}`,
     async () => {
       const ids = await catalogGroupSet(groupId);
       const sets = new Set(ids.map(setOfId));
@@ -556,14 +661,30 @@ async function groupSetsFor(rows: CatalogRow[], soft: Soft) {
  *   - carta só do catálogo (ex.: coleção lançada ontem): id "tcgp-<produto>", com a foto da TCGplayer;
  *   - versão com selo do catálogo: carta à parte, com a foto própria;
  *   - da TCGdex entram também as cartas e versões com selo que o catálogo não tem (ex.: selo da Booster Box).
+ * Na japonesa (`category` 85): as cartas só do catálogo têm os dados da própria carta japonesa (`dataLang` vazio), a
+ * ordem e a série pela data de lançamento da coleção, e "Mirror" é o reverse.
  */
 function withCatalog(
   list: CardBrief[],
   rows: CatalogRow[],
   lang: CardLang,
-  opts: { species?: string; groupSets?: Map<number, string> } = {},
+  opts: {
+    species?: string;
+    groupSets?: Map<number, string>;
+    category?: number;
+    /** Idioma dos dados das cartas só do catálogo: 'en' na 3 (padrão); na 85, vazio (são da própria carta). */
+    dataLang?: CardLang;
+    /** Produto → id da mesma carta na TCGdex japonesa (ver CardBrief.tcgdexId). */
+    aliases?: Map<number, string>;
+    /** Cartas que só existem com selo (ver stampedVersions): o produto sem selo delas não vira uma carta comum. */
+    stampOnly?: Set<string>;
+  } = {},
 ): CardBrief[] {
-  if (!rows.length) return list;
+  const only = opts.stampOnly ?? new Set<string>();
+  if (!rows.length) return withoutPlain(list, only);
+  const category = opts.category ?? ENGLISH;
+  const japanese = category === JAPANESE;
+  const rowDataLang = 'dataLang' in opts ? opts.dataLang : 'en';
   const byId = new Map(list.filter((c) => !c.stamp).map((c) => [c.id, c]));
   // Cartas da lista por coleção e número (para as linhas do catálogo ainda sem ligação).
   const byNumber = new Map<string, CardBrief[]>();
@@ -580,15 +701,37 @@ function withCatalog(
     return (byNumber.get(`${setId}|${normNumber(r.number)}`) ?? []).find((c) => sameName(c.name, r.name));
   };
 
-  // Ordem das coleções que só existem no catálogo: logo depois da coleção ligada de id anterior (a TCGplayer
-  // numera as coleções em ordem de lançamento).
+  // Ordem das coleções ligadas: a da coleção da TCGdex das cartas delas.
   const groupOrder = new Map<number, number>();
+  const groupSetIds = new Map<number, Set<string>>();
+  const groupDay = new Map<number, string>();
   for (const r of rows) {
     const b = baseOf(r);
-    if (b) groupOrder.set(r.group_id, Math.max(groupOrder.get(r.group_id) ?? -1, b.setOrder));
+    if (!b) continue;
+    groupOrder.set(r.group_id, Math.max(groupOrder.get(r.group_id) ?? -1, b.setOrder));
+    groupSetIds.set(r.group_id, (groupSetIds.get(r.group_id) ?? new Set<string>()).add(b.setId));
+    const day = isoDay(groupPublishedOn(r));
+    if (day) groupDay.set(r.group_id, day);
   }
-  const known = [...groupOrder.entries()].sort((a, b) => a[0] - b[0]);
-  const orderOf = (g: number) => groupOrder.get(g) ?? known.reduce((o, [id, ord]) => (id <= g ? ord : o), -1) + 0.5;
+  // Coleções ligadas com data e de uma coleção só da TCGdex (as "de tudo um pouco" não dizem nada da época).
+  const anchors = [...groupOrder]
+    .filter(([g]) => groupDay.has(g) && groupSetIds.get(g)!.size === 1)
+    .map(([g, ord]) => ({ day: groupDay.get(g)!, ord }));
+  const byGroupId = [...groupOrder.entries()].sort((a, b) => a[0] - b[0]);
+  // Coleção que só existe no catálogo: logo depois da coleção ligada mais recente lançada até a data dela (a fração da
+  // data põe duas delas na ordem certa entre si). Sem data, depois da ligada de id anterior (a TCGplayer numera mais ou
+  // menos na ordem de lançamento, mas não sempre: EX Battle Stadium, de 2004, é o grupo 1853).
+  const orderOf = (r: CatalogRow) => {
+    const own = groupOrder.get(r.group_id);
+    if (own != null) return own;
+    const day = isoDay(groupPublishedOn(r));
+    if (day && anchors.length) {
+      let best: { day: string; ord: number } | undefined;
+      for (const a of anchors) if (a.day <= day && (!best || a.day > best.day || (a.day === best.day && a.ord > best.ord))) best = a;
+      return (best?.ord ?? -1) + 0.5 + dateOrder(day) / 1e10;
+    }
+    return byGroupId.reduce((o, [id, ord]) => (id <= r.group_id ? ord : o), -1) + 0.5;
+  };
 
   const seen = new Set<string>();
   const out: CardBrief[] = [];
@@ -596,40 +739,70 @@ function withCatalog(
   const tcgdexStamps = new Map<string, Stamped[]>();
   for (const c of list) if (c.stamp) tcgdexStamps.set(c.id, [...(tcgdexStamps.get(c.id) ?? []), c as Stamped]);
   const matched = new Set<CardBrief>();
+  // Foto do produto sem selo de uma carta que só existe com selo: é a da versão com selo (ver stampOnly).
+  const onlyPhoto = new Map<string, string>();
   // Ordem fixa (a API não garante uma): a mesma carta vira sempre o mesmo bolso, com a mesma foto.
   const unique = [...new Map(rows.map((r) => [r.product_id, r])).values()].sort((a, b) => a.product_id - b.product_id);
+  // Selo só do logo, como na lista de versões (withCatalogVersions): sem o "<Coleção> Stamped" no catálogo da carta, o
+  // par dele é o produto "Prerelease" (fora o de Staff), e o nome é o que o catálogo da carta prova (logoOnlyLabel). Assim
+  // o nome na lista é o mesmo do "Qual é a sua versão?" e o "Adicionar" não ganha uma versão repetida.
+  const rowsOfCard = new Map<string, CatalogRow[]>();
   for (const r of unique) {
-    const base = baseOf(r);
+    const id = japanese ? `tcgp-${r.product_id}` : (baseOf(r)?.id ?? r.tcgdex_id ?? `tcgp-${r.product_id}`);
+    rowsOfCard.set(id, [...(rowsOfCard.get(id) ?? []), r]);
+  }
+  const logoOnly = (c: Stamped) => c.stamp.keys.length === 1 && c.stamp.keys[0] === 'set-logo';
+  const hasBox = (c: CardBrief) =>
+    (rowsOfCard.get(c.id) ?? []).some((x) => !!x.stamp && !isOversize(x.stamp) && isBoxStamp(x.stamp, c.setNameEn ?? ''));
+  const logoStamp = (c: Stamped): Stamped['stamp'] =>
+    logoOnly(c) ? { ...c.stamp, label: logoOnlyLabel(c.setId, rowsOfCard.get(c.id) ?? [], c.setNameEn ?? '') } : c.stamp;
+  for (const r of unique) {
+    const base = japanese ? undefined : baseOf(r);
     const group = r.tcg_groups?.name ?? '';
+    const published = groupPublishedOn(r);
     const common: CardBrief = base ?? {
-      id: r.tcgdex_id ?? `tcgp-${r.product_id}`,
+      // Na 85 o id é sempre o do produto (os ids da TCGdex japonesa repetem os ingleses).
+      id: japanese ? `tcgp-${r.product_id}` : (r.tcgdex_id ?? `tcgp-${r.product_id}`),
       localId: catalogNumber(r.number),
       name: r.name,
       lang,
-      dataLang: 'en',
+      dataLang: rowDataLang,
       setId: `tcgp${r.group_id}`,
       setName: group,
       setNameEn: group,
-      setOrder: orderOf(r.group_id),
+      setOrder: japanese ? dateOrder(published) : orderOf(r),
+      ...(japanese ? { series: japaneseSeries(published) } : {}),
     };
     if (r.stamp) {
       // Mesma versão com selo na TCGdex: fica uma só, com a foto do catálogo e o selo da TCGdex (nome em português e
       // a chave do selo, como nas cartas já salvas).
-      const twin = (tcgdexStamps.get(common.id) ?? []).find(
-        (c) => !matched.has(c) && sameStampVersion(c.stamp.keys, c.stamp.label, c.setNameEn ?? '', r.stamp!),
-      );
+      const own = tcgdexStamps.get(common.id) ?? [];
+      const twin =
+        own.find((c) => !matched.has(c) && sameStampVersion(c.stamp.keys, c.stamp.label, c.setNameEn ?? '', r.stamp!)) ??
+        (!isOversize(r.stamp) && isPrereleaseStamp(r.stamp) && !hasBox(common) ? own.find((c) => !matched.has(c) && logoOnly(c)) : undefined);
       if (twin) matched.add(twin);
-      const stamp = twin?.stamp ?? { variant: stampVariant(r.stamp), label: r.stamp, keys: [] };
+      const stamp = twin ? logoStamp(twin) : { variant: stampVariant(r.stamp, category), label: r.stamp, keys: [] };
       out.push({ ...common, image: undefined, imageUrl: r.image, stamp });
     } else if (!seen.has(common.id)) {
       seen.add(common.id);
-      out.push({ ...common, imageUrl: common.image ? undefined : r.image });
+      // Carta só com selo: o produto sem selo dela é a própria versão com selo (a TCGplayer não repete o selo no nome).
+      if (only.has(common.id)) {
+        if (r.image) onlyPhoto.set(common.id, r.image);
+        continue;
+      }
+      const alias = opts.aliases?.get(r.product_id);
+      out.push({ ...common, imageUrl: common.image ? undefined : r.image, ...(alias ? { tcgdexId: alias } : {}) });
     }
   }
   for (const c of list) {
     if (!c.stamp) {
-      if (!seen.has(c.id)) out.push(c);
-    } else if (!matched.has(c)) out.push(c);
+      if (!seen.has(c.id) && !only.has(c.id)) out.push(c);
+    } else if (!matched.has(c)) {
+      // A foto do produto só serve quando a carta tem uma versão com selo só (com duas, não se sabe de qual é).
+      const photo = !c.image && tcgdexStamps.get(c.id)?.length === 1 ? onlyPhoto.get(c.id) : undefined;
+      const stamp = logoStamp(c as Stamped);
+      out.push(photo || stamp !== c.stamp ? { ...c, stamp, ...(photo ? { imageUrl: photo } : {}) } : c);
+    }
   }
   return out;
 }
@@ -683,13 +856,307 @@ function digitalSets() {
 const byNewest = (a: CardBrief, b: CardBrief) =>
   b.setOrder - a.setOrder || a.localId.localeCompare(b.localId, undefined, { numeric: true }) || Number(!!a.stamp) - Number(!!b.stamp);
 
+// ---------- Cartas japonesas: TCGplayer japonesa (catálogo 85) como base, TCGdex japonesa só de reserva ----------
+
+/**
+ * Épocas das cartas japonesas, da mais nova: a partir de qual data de lançamento ("AAAA-MM-DD") cada uma vale. Datas
+ * conferidas nas coleções da 85 (primeiro produto de cada época; o último da anterior entre parênteses).
+ */
+const JA_ERAS: [string, string][] = [
+  ['2025-08-01', 'Megaevolução (2025–)'], // m1L/m1S: 01/08/2025 (SV11B: 06/06/2025)
+  ['2023-01-01', 'Escarlate e Violeta (2023–2025)'], // SV1S/SV1V: 20/01/2023 (S12a: 02/12/2022)
+  ['2019-11-01', 'Espada e Escudo (2019–2022)'], // sA: 29/11/2019, S1W: 06/12/2019 (SM12a: 04/10/2019)
+  ['2016-11-01', 'Sol e Lua (2016–2019)'], // SM-P: 01/11/2016, SM1S: 09/12/2016 (CP6: 16/09/2016)
+  ['2013-08-01', 'XY (2013–2016)'], // XY-P: 01/08/2013, Collection X: 13/12/2013 (EBB: 13/07/2013)
+  ['2010-09-01', 'Preto e Branco (2010–2013)'], // BW1: 18/09/2010 (L3: 08/07/2010)
+  ['2006-10-01', 'Diamante e Pérola (2006–2010)'], // DP1: 27/10/2006, com Pt e LEGEND (PCG: 15/07/2006)
+  ['2001-12-01', 'e-Card, ADV e PCG (2001–2006)'], // Base Expansion Pack: 01/12/2001 (Pokemon Web: 20/10/2001)
+  ['', 'Pocket Monsters (1996–2001)'], // Expansion Pack: 20/10/1996, com neo, VS e web
+];
+const JA_NO_DATE = 'Sem data';
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Dia "AAAA-MM-DD" de uma data do catálogo (undefined sem data). */
+const isoDay = (d?: string | null) => {
+  const day = String(d ?? '').slice(0, 10);
+  return ISO_DAY.test(day) ? day : undefined;
+};
+
+/**
+ * Coleções do catálogo com a data errada no TCGCSV: grupo → anos de lançamento de verdade. A mesma correção do
+ * lookup_overrides (year_range) da Consulta, na migração 20261109c_cd_promo.sql.
+ */
+const GROUP_YEARS: Record<number, [number, number]> = {
+  // Japanese CD Promo (Charizard, Blastoise, Venusaur, Misty's Treatment): o TCGCSV diz 2025-12-01; são de 1998–1999.
+  24568: [1998, 1999],
+};
+
+/** Data de lançamento de uma coleção do catálogo, com a correção de GROUP_YEARS (o começo dos anos de verdade). */
+export function catalogPublishedOn(groupId: number, publishedOn?: string | null): string | null | undefined {
+  const fix = GROUP_YEARS[groupId];
+  return fix ? `${fix[0]}-01-01` : publishedOn;
+}
+
+const groupPublishedOn = (r: Pick<CatalogRow, 'group_id' | 'tcg_groups'>) => catalogPublishedOn(r.group_id, r.tcg_groups?.published_on);
+
+/** Série de uma coleção japonesa pela data de lançamento ("1996-10-20" → "Pocket Monsters (1996–2001)"). */
+export function japaneseSeries(publishedOn?: string | null) {
+  const d = String(publishedOn ?? '').slice(0, 10);
+  if (!ISO_DAY.test(d)) return JA_NO_DATE;
+  return JA_ERAS.find(([from]) => d >= from)![1];
+}
+
+/** Ordem pela data de lançamento ("2025-01-24" → 20250124); sem data, -1 (no fim, nas mais novas primeiro). */
+export function dateOrder(publishedOn?: string | null) {
+  const d = String(publishedOn ?? '').slice(0, 10);
+  return ISO_DAY.test(d) ? Number(d.replace(/-/g, '')) : -1;
+}
+
+/** Série da carta da lista: a da época (japonesas) ou a do id da coleção. */
+export const seriesOf = (c: Pick<CardBrief, 'setId' | 'series'>) => c.series ?? cardSeries(c.setId);
+
+/**
+ * Início aproximado da época de cada coleção da TCGdex japonesa, pelo id (a lista de coleções dela não traz a data). As
+ * CS* (chinesas) e outras sem par ficam sem data.
+ */
+const JA_TCGDEX_ERAS: [RegExp, string][] = [
+  [/^PMCG/i, '1996-10-20'],
+  [/^neo/i, '2000-02-04'],
+  [/^(VS|web)\d/i, '2001-07-01'],
+  [/^E\d/i, '2001-12-01'],
+  [/^ADV/i, '2003-07-18'],
+  [/^PCG/i, '2004-01-01'],
+  [/^(DP|Pt)\d/i, '2006-10-27'],
+  [/^L(\d|L)/i, '2009-07-10'],
+  [/^BW/i, '2010-09-18'],
+  [/^(XY|CP)/i, '2013-12-06'],
+  [/^SM/i, '2016-12-09'],
+  [/^SV/i, '2023-01-20'],
+  [/^S(\d|P|-P|[A-Z]$)/i, '2019-12-06'],
+  [/^(M\d|M-P|MC$)/i, '2025-08-01'],
+];
+
+/** Texto em japonês (kana ou kanji): a busca vai para a TCGdex japonesa; texto latino, para o catálogo 85 pelo nome. */
+export const isJapaneseText = (s: string) => /[\u3040-\u30ff\u3400-\u9fff\uff66-\uff9f]/.test(s);
+
+/**
+ * Dá para buscar este nome: pelo menos 2 letras (o texto em japonês como foi digitado). Em japonês com letras latinas
+ * (o nome em inglês no catálogo 85), pelo menos 3 sem contar os espaços: com 2, a busca traria milhares de cartas.
+ */
+export function canSearchName(text: string, lang: CardLang) {
+  if (lang === 'ja' && isJapaneseText(text)) return text.trim().length >= 2;
+  const plain = plainName(text);
+  return lang === 'ja' ? plain.replace(/ /g, '').length >= 3 : plain.length >= 2;
+}
+
+/** Opções do withCatalog para a TCGplayer japonesa: dados da própria carta (sem "só em inglês"), ordem pela data. */
+const JA_CATALOG = { category: JAPANESE, dataLang: undefined };
+
+/**
+ * Cartas da TCGdex japonesa no formato da lista (reserva: quase todas sem foto), com a ordem e a série estimadas pela
+ * época do id da coleção e pela posição dela na lista de coleções (que é cronológica).
+ */
+function jaTcgdexBriefs(raw: RawCard[], sets: SetBrief[]): CardBrief[] {
+  const info = new Map(sets.map((s, i) => [s.id, { name: s.name, index: i }]));
+  return raw.map((c) => {
+    const setId = setIdOf(c);
+    const s = info.get(setId);
+    const start = JA_TCGDEX_ERAS.find(([re]) => re.test(setId))?.[1];
+    return {
+      ...c,
+      lang: 'ja' as const,
+      setId,
+      setName: s?.name ?? setId,
+      setNameEn: setId,
+      setOrder: start ? dateOrder(start) + ((s?.index ?? 0) + 1) / 1000 : -1,
+      series: start ? japaneseSeries(start) : 'Outras',
+    };
+  });
+}
+
+/** Pokémon de um nome em japonês (o nome mais longo que bate, para "ミュウツー" não ser "ミュウ"). */
+function speciesOfJaName(name: string) {
+  let best: { id: number; ja: string } | undefined;
+  for (const s of POKEDEX) {
+    if (!s.ja || !name.includes(s.ja) || (best && s.ja.length <= best.ja.length)) continue;
+    if (nameMatches(name, s.ja, 'ja')) best = s;
+  }
+  return best?.id;
+}
+
+/** Total impresso de cada coleção da TCGdex japonesa (o "081" de "088/081"). */
+const setTotals = (sets: SetBrief[]) => new Map(sets.map((s) => [s.id, s.cardCount?.official || s.cardCount?.total || undefined]));
+
+/** Cartas da TCGdex japonesa que são um produto da 85 (ver japaneseProducts): id da carta → produto. */
+async function matchJapanese(list: CardBrief[], sets: SetBrief[], dexOf: (c: CardBrief) => number | undefined, soft: Soft, signal?: AbortSignal) {
+  if (!list.length) return new Map<string, CatalogRow>();
+  const totals = setTotals(sets);
+  const refs: JaCardRef[] = list.map((c) => ({ cardId: c.id, setId: c.setId, localId: c.localId, setTotal: totals.get(c.setId), dex: dexOf(c) }));
+  return soft(japaneseProducts(refs, { signal }), new Map<string, CatalogRow>());
+}
+
+/** Sigla comparável: sem caixa nem espaço, "+" = "p" (a TCGdex escreve "SM4p"; a TCGplayer, "SM4+"). */
+const abbrKey = (s?: string | null) => (s ?? '').toLowerCase().replace(/\s+/g, '').replace(/\+/g, 'p');
+
+/**
+ * Pares prováveis da carta da reserva entre os produtos da 85 do mesmo Pokémon (`rows`): mesmo número e coleção
+ * equivalente — a mesma sigla ("SM4+" = "SM4p"), a sigla no lugar do total ("001/SV-P") ou, no grupo sem sigla, o
+ * mesmo total impresso ("060/742" = coleção MC de 742). É a mesma carta que a ligação exata (japaneseProducts) não
+ * achou (promo, sigla escrita de outro jeito, total diferente na TCGdex). Devolve as linhas do par (comum e selos).
+ */
+function probablePairs(c: CardBrief, total: number | undefined, rows: CatalogRow[]): CatalogRow[] {
+  const number = normNumber(c.localId);
+  const set = abbrKey(c.setId);
+  if (!number || !set) return [];
+  return rows.filter((r) => {
+    if (!r.number || normNumber(r.number) !== number) return false;
+    const tail = r.number.split('/')[1]?.trim() ?? '';
+    const abbr = abbrKey(r.tcg_groups?.abbr);
+    if (abbr === set || abbrKey(tail) === set) return true;
+    return !abbr && !!total && /^\d+$/.test(tail) && Number(tail) === total;
+  });
+}
+
+/**
+ * Junta os produtos da 85 (`rows`, os que a lista mostra) com a reserva da TCGdex japonesa:
+ *   - a carta da TCGdex que é um produto da 85 (`matched`) vira esse produto, com o id dela (`tcgdexId`, para o "tenho"
+ *     e a tela da carta acharem as cópias já salvas com ele);
+ *   - a que tem exatamente um par provável sem selo entre os produtos do Pokémon dela (`pool`, ver probablePairs) vira
+ *     esse produto do mesmo jeito (na busca, o produto entra no lugar dela);
+ *   - a que tem outro par provável (só com selo, ou mais de um) sai quando o par já está na lista;
+ *   - as outras entram como estão.
+ * Duas cartas da reserva com o mesmo par: o produto fica sem `tcgdexId` (na dúvida, nenhum). A carta antiga sem número
+ * impresso (`links`, ver tcgplayerLinks) tem como par os produtos que a própria TCGdex liga a ela, e o comum é o da
+ * impressão sem subtipo.
+ */
+function withJapanese(
+  rows: CatalogRow[],
+  reserve: CardBrief[],
+  matched: Map<string, CatalogRow>,
+  sets: SetBrief[],
+  pool: (c: CardBrief) => CatalogRow[] = () => rows,
+  links: Map<string, number[]> = new Map(),
+): CardBrief[] {
+  const aliases = new Map([...matched].map(([id, r]) => [r.product_id, id]));
+  const totals = setTotals(sets);
+  const shown = new Set(rows.map((r) => r.product_id));
+  const paired = new Map<number, { row: CatalogRow; ids: string[] }>();
+  const rest: CardBrief[] = [];
+  for (const c of reserve) {
+    if (matched.has(c.id)) continue;
+    const link = links.get(c.id);
+    const pairs = link ? pool(c).filter((r) => link.includes(r.product_id)) : probablePairs(c, totals.get(c.setId), pool(c));
+    const common = pairs.filter((r) => !r.stamp && (!link || r.product_id === link[0]));
+    if (common.length === 1) {
+      const p = paired.get(common[0].product_id) ?? { row: common[0], ids: [] };
+      p.ids.push(c.id);
+      paired.set(common[0].product_id, p);
+    } else if (!pairs.some((r) => shown.has(r.product_id))) rest.push(c);
+  }
+  for (const [productId, p] of paired) if (!aliases.has(productId) && p.ids.length === 1) aliases.set(productId, p.ids[0]);
+  const extra = [...paired.values()].map((p) => p.row).filter((r) => !shown.has(r.product_id));
+  return withCatalog(rest, [...rows, ...matched.values(), ...extra], 'ja', { ...JA_CATALOG, aliases }).sort(byNewest);
+}
+
+/**
+ * Cartas de um Pokémon em japonês: os produtos da TCGplayer japonesa (85) com o nome em inglês do Pokémon (com foto,
+ * coleção e ano; versões Mirror, Poké Ball… como cartas à parte), mais as da TCGdex japonesa que a 85 não tem.
+ */
+async function loadJaDexCards(dex: number, onProgress?: CardListOptions['onProgress']): Promise<CardListResult> {
+  const track = { partial: false };
+  const soft = softly(track);
+  const speciesEn = getSpecies(dex)?.name;
+  const [rows, raw, sets, digital] = await Promise.all([
+    speciesEn ? jaSpeciesRows(speciesEn, soft) : Promise.resolve([] as CatalogRow[]),
+    soft(rawCardsFor(dex, 'ja', soft), [] as RawCard[]),
+    soft(setsFor('ja'), [] as SetBrief[]),
+    soft(digitalSets(), [] as string[]),
+  ]);
+  // Enquanto liga a reserva da TCGdex japonesa aos produtos (não há versões com selo a buscar no japonês).
+  if (onProgress && rows.length) onProgress(withCatalog([], rows, 'ja', JA_CATALOG).sort(byNewest), 'mais cartas');
+  const reserve = jaTcgdexBriefs(
+    raw.filter((c) => !digital.includes(setIdOf(c))),
+    sets,
+  );
+  const matched = await matchJapanese(reserve, sets, () => dex, soft);
+  const links = await tcgplayerLinks(reserve, matched, sets, () => rows, soft);
+  return { cards: withJapanese(rows, reserve, matched, sets, () => rows, links), partial: track.partial };
+}
+
+/**
+ * Produtos da 85 de um Pokémon pelo nome em inglês, também com as palavras juntas, como o catálogo escreve algumas
+ * ("NidoranM" = "Nidoran♂", "MrMime" = "Mr. Mime"), sem os de um nome mais longo ("Porygon" não pega "Porygon-Z").
+ */
+async function jaSpeciesRows(speciesEn: string, soft: Soft, signal?: AbortSignal): Promise<CatalogRow[]> {
+  const plain = plainName(speciesEn);
+  const glued = plain.replace(/ /g, '');
+  const opts = signal ? { signal } : undefined;
+  const [spaced, joined] = await Promise.all([
+    soft(catalogByName(speciesEn, JAPANESE, opts), [] as CatalogRow[]),
+    glued !== plain ? soft(catalogByName(glued, JAPANESE, opts), [] as CatalogRow[]) : Promise.resolve([] as CatalogRow[]),
+  ]);
+  const longer = longerSpecies(speciesEn);
+  const seen = new Set<number>();
+  return [...spaced, ...joined].filter((r) => {
+    if (seen.has(r.product_id)) return false;
+    seen.add(r.product_id);
+    return nameHasSpecies(r.name, speciesEn) && !longer.some((n) => nameHasSpecies(r.name, n));
+  });
+}
+
+/** Cartas antigas sem número impresso: as da reserva até esta data (Expansion Pack, neo, VS, web…). */
+const NUMBERLESS_UNTIL = dateOrder('2001-12-01');
+/** Fichas da reserva lidas numa lista para achar o produto delas (ver tcgplayerLinks). */
+const LINKS_MAX = 40;
+
+/** Produtos da TCGplayer que a TCGdex liga às impressões da carta, o da impressão sem subtipo nem selo primeiro. */
+function tcgplayerIdsOf(d: CardDetail | null | undefined): number[] {
+  const printings = d?.variants_detailed ?? [];
+  const plain = (p: (typeof printings)[number]) => !p.subtype && !p.stamp?.length && !p.foil;
+  const ids = [...printings.filter(plain), ...printings.filter((p) => !plain(p))].map((p) => p.thirdParty?.tcgplayer);
+  return [...new Set(ids.filter((id): id is number => Number.isInteger(id) && id! > 0))];
+}
+
+/**
+ * Carta antiga da reserva sem par provável (o produto da 85 não tem número impresso e o grupo, sigla: ex.: PMCG1-021
+ * リザードン e o produto 575604 do Expansion Pack): o produto vem da ficha dela na TCGdex japonesa, que liga cada impressão
+ * ao produto da TCGplayer (`thirdParty.tcgplayer`). Só quando o Pokémon tem produto sem número; no máximo LINKS_MAX
+ * fichas, 8 ao mesmo tempo. Ficha que não veio: a carta fica como está (e a lista, incompleta).
+ */
+async function tcgplayerLinks(
+  reserve: CardBrief[],
+  matched: Map<string, CatalogRow>,
+  sets: SetBrief[],
+  pool: (c: CardBrief) => CatalogRow[],
+  soft: Soft,
+): Promise<Map<string, number[]>> {
+  const totals = setTotals(sets);
+  const todo = reserve
+    .filter((c) => {
+      if (matched.has(c.id) || c.setOrder <= 0 || c.setOrder >= NUMBERLESS_UNTIL) return false;
+      const rows = pool(c);
+      return rows.some((r) => !r.number) && !probablePairs(c, totals.get(c.setId), rows).length;
+    })
+    .slice(0, LINKS_MAX);
+  const details = await mapPool(todo, 8, (c) => soft(cardDetail(c.id, 'ja'), null));
+  const out = new Map<string, number[]>();
+  todo.forEach((c, i) => {
+    const ids = tcgplayerIdsOf(details[i]);
+    if (ids.length && pool(c).some((r) => ids.includes(r.product_id))) out.set(c.id, ids);
+  });
+  return out;
+}
+
 /**
  * Todas as cartas de um Pokémon (número da Pokédex nacional) num idioma, da coleção mais nova para a mais antiga, com a
  * situação das fontes. As buscas independentes correm juntas; a lista base vai para `onProgress` antes das versões
  * com selo. Lista completa: guardada por 1 dia; incompleta: por 5 minutos.
  */
 export async function cardsForDexResult(dex: number, lang: CardLang, opts: CardListOptions = {}): Promise<CardListResult> {
-  const key = `tcgdex:dex:v13:${lang}:${dex}`;
+  // v14: a lista japonesa passou a vir da TCGplayer japonesa (85), com a TCGdex japonesa de reserva; v15: o produto
+  // com par provável na reserva guarda o id dela (tcgdexId); v16: carta só com selo numa célula só, coleção só do catálogo
+  // pela data, Nidoran do catálogo com as palavras juntas e a carta antiga sem número ligada pela TCGdex.
+  const key = `tcgdex:dex:v16:${lang}:${dex}`;
   const result = await cached(key, () => loadDexCards(dex, lang, opts.onProgress), LIST_TTL, {
     force: opts.force,
     ttlFor: (r) => (r.partial ? PARTIAL_TTL : LIST_TTL),
@@ -703,10 +1170,10 @@ export async function cardsForDex(dex: number, lang: CardLang): Promise<CardBrie
   return (await cardsForDexResult(dex, lang)).cards;
 }
 
-async function loadDexCards(dex: number, lang: CardLang, onProgress?: (cards: CardBrief[]) => void): Promise<CardListResult> {
+async function loadDexCards(dex: number, lang: CardLang, onProgress?: CardListOptions['onProgress']): Promise<CardListResult> {
+  if (lang === 'ja') return loadJaDexCards(dex, onProgress);
   const track = { partial: false };
   const soft = softly(track);
-  const latin = lang !== 'ja';
   const speciesEn = getSpecies(dex)?.name;
   // Tudo que não depende de outra resposta, junto: cartas no idioma e em inglês, coleções, Zukan e catálogo.
   const [raw, sets, enSets, digital, enRaw, zukan, nameRows] = await Promise.all([
@@ -715,8 +1182,8 @@ async function loadDexCards(dex: number, lang: CardLang, onProgress?: (cards: Ca
     setsFor('en'),
     soft(digitalSets(), [] as string[]),
     lang === 'pt' ? soft(rawCardsFor(dex, 'en', soft), [] as RawCard[]) : Promise.resolve([] as RawCard[]),
-    latin ? soft(zukanCardsFor(dex, lang), [] as ZukanBrief[]) : Promise.resolve([] as ZukanBrief[]),
-    latin && speciesEn ? soft(catalogByName(speciesEn), [] as CatalogRow[]) : Promise.resolve([] as CatalogRow[]),
+    soft(zukanCardsFor(dex, lang), [] as ZukanBrief[]),
+    speciesEn ? soft(catalogByName(speciesEn), [] as CatalogRow[]) : Promise.resolve([] as CatalogRow[]),
   ]);
   const isPhysical = (c: RawCard) => !digital.includes(setIdOf(c));
   const cards = raw.filter(isPhysical);
@@ -748,14 +1215,13 @@ async function loadDexCards(dex: number, lang: CardLang, onProgress?: (cards: Ca
   }
 
   // Cartas que a TCGdex ainda não tem (ex.: promos novas como a Nidorina MEP 101): completa com o catálogo do Zukan.
-  if (latin) list.push(...zukanBriefs(zukan, list, lang, digital, { names, enNames, order }));
+  list.push(...zukanBriefs(zukan, list, lang, digital, { names, enNames, order }));
 
   // Catálogo pelo nome do Pokémon (base principal), sem "Porygon" pegar "Porygon-Z".
   const longer = speciesEn ? longerSpecies(speciesEn) : [];
   const byName = speciesEn ? nameRows.filter((r) => nameMatches(r.name, speciesEn, 'en', longer)) : [];
   // Lista base para a tela: só com as cartas do catálogo já ligadas (as sem ligação podem ser do Zukan, ver withCatalog).
-  if (onProgress) onProgress([...withCatalog(list, byName.filter((r) => r.tcgdex_id), lang, { species: speciesEn })].sort(byNewest));
-  if (!latin) return { cards: list.sort(byNewest), partial: track.partial };
+  if (onProgress) onProgress([...withCatalog(list, byName.filter((r) => r.tcgdex_id), lang, { species: speciesEn })].sort(byNewest), 'versões com selo');
 
   // Versões com selo da TCGdex e as cartas do catálogo ligadas às da lista, juntas.
   const [stamped, byId] = await Promise.all([
@@ -764,11 +1230,14 @@ async function loadDexCards(dex: number, lang: CardLang, onProgress?: (cards: Ca
     }),
     speciesEn ? soft(catalogByTcgdexIds(list.map((c) => c.id)), [] as CatalogRow[]) : Promise.resolve([] as CatalogRow[]),
   ]);
-  list.push(...stamped);
-  if (!speciesEn) return { cards: list.sort(byNewest), partial: track.partial };
+  list.push(...stamped.cards);
+  if (!speciesEn) return { cards: withoutPlain(list, stamped.only).sort(byNewest), partial: track.partial };
   const rows = [...byName, ...byId];
   const groupSets = await groupSetsFor(rows, soft);
-  return { cards: withCatalog(list, rows, lang, { species: speciesEn, groupSets }).sort(byNewest), partial: track.partial };
+  return {
+    cards: withCatalog(list, rows, lang, { species: speciesEn, groupSets, stampOnly: stamped.only }).sort(byNewest),
+    partial: track.partial,
+  };
 }
 
 // ---------- Busca por nome (fichários livres e "+ Carta") ----------
@@ -822,9 +1291,11 @@ export const CARD_ORDER_LABEL: Record<CardOrder, string> = { newest: 'Mais novas
 export function sortCards(cards: CardBrief[], order: CardOrder = 'newest') {
   const num = (a: CardBrief, b: CardBrief) => a.localId.localeCompare(b.localId, undefined, { numeric: true });
   const stampLast = (a: CardBrief, b: CardBrief) => Number(!!a.stamp) - Number(!!b.stamp);
+  // Coleção sem ordem conhecida (-1, ex.: japonesa sem data de lançamento) fica no fim também nas mais antigas.
+  const unknownLast = (a: CardBrief, b: CardBrief) => Number(a.setOrder === -1) - Number(b.setOrder === -1);
   const cmp =
     order === 'oldest'
-      ? (a: CardBrief, b: CardBrief) => a.setOrder - b.setOrder || num(a, b) || stampLast(a, b)
+      ? (a: CardBrief, b: CardBrief) => unknownLast(a, b) || a.setOrder - b.setOrder || num(a, b) || stampLast(a, b)
       : order === 'number'
         ? (a: CardBrief, b: CardBrief) => num(a, b) || b.setOrder - a.setOrder || stampLast(a, b)
         : byNewest;
@@ -869,11 +1340,13 @@ export function cardSeries(setId: string) {
  */
 export async function searchCardsResult(query: string, lang: CardLang, opts: CardListOptions = {}): Promise<CardListResult> {
   const { name, number } = parseCardQuery(query);
-  const plain = lang === 'ja' ? name.trim() : plainName(name);
+  // Japonês com letras latinas ("Pikachu") é buscado como o inglês, pelo nome no catálogo 85.
+  const plain = lang === 'ja' && isJapaneseText(name) ? name.trim() : plainName(name);
   if (plain.length < 2) return { cards: [], partial: false };
   // A chave leva também as buscas que vão para a TCGdex, que só acha a grafia exata: "mr mime" (0 cartas) e "Mr. Mime"
-  // (40) têm o mesmo nome sem pontuação, mas não podem dividir a mesma lista guardada.
-  const key = `tcgdex:search:v7:${lang}:${plain.toLowerCase()}|${tcgdexQueries(name, lang).join('|').toLowerCase()}`;
+  // (40) têm o mesmo nome sem pontuação, mas não podem dividir a mesma lista guardada. v8: japonês pela TCGplayer (85);
+  // v9: a reserva com par provável vira o produto; v10: carta só com selo numa célula só, e a reserva sem outro Pokémon.
+  const key = `tcgdex:search:v10:${lang}:${plain.toLowerCase()}|${tcgdexQueries(name, lang).join('|').toLowerCase()}`;
   const result = await cached(key, () => loadSearch(name, lang, opts.signal), LIST_TTL, {
     force: opts.force,
     signal: opts.signal,
@@ -891,6 +1364,7 @@ export async function searchCards(query: string, lang: CardLang): Promise<CardBr
 }
 
 async function loadSearch(name: string, lang: CardLang, signal?: AbortSignal): Promise<CardListResult> {
+  if (lang === 'ja') return loadJaSearch(name, signal);
   const track = { partial: false };
   const soft = softly(track, signal);
   const plain = plainName(name);
@@ -904,10 +1378,10 @@ async function loadSearch(name: string, lang: CardLang, signal?: AbortSignal): P
     );
     const all = new Map(lists.flat().map((c) => [c.id, c]));
     // O trecho buscado pode ser mais amplo que o digitado ("Farfetch" por "Farfetch’d"): confere o nome inteiro.
-    return [...all.values()].filter((c) => l === 'ja' || plainName(c.name).includes(plain));
+    return [...all.values()].filter((c) => plainName(c.name).includes(plain));
   };
   // Com 2 letras a busca no catálogo traria milhares de cartas: fica só a da TCGdex.
-  const useCatalog = lang !== 'ja' && plain.replace(/ /g, '').length >= 3;
+  const useCatalog = plain.replace(/ /g, '').length >= 3;
   const [raw, sets, enSets, digital, en, rows] = await Promise.all([
     byName(lang),
     setsFor(lang),
@@ -941,38 +1415,99 @@ async function loadSearch(name: string, lang: CardLang, signal?: AbortSignal): P
   // Versões com selo da TCGdex (ex.: logo da coleção na Booster Box), como no fichário Pokédex; numa busca ampla,
   // só as das coleções mais novas. Junto, as coleções das cartas do catálogo ainda sem ligação.
   const [stamped, groupSets] = await Promise.all([
-    lang !== 'ja'
-      ? stampedVersions(list, 60, () => {
-          track.partial = true;
-        })
-      : Promise.resolve([]),
+    stampedVersions(list, 60, () => {
+      track.partial = true;
+    }),
     groupSetsFor(rows, soft),
   ]);
-  list.push(...stamped);
+  list.push(...stamped.cards);
   // Cartas do catálogo ainda sem ligação, de uma coleção conhecida, sem a carta na lista (ex.: Nidorina MEP 101, que a
   // TCGdex ainda não tem): completa com as cartas do Pokémon no Zukan, como no fichário Pokédex, para a carta ficar com
   // o mesmo id da lista do Pokémon (e o "tenho" bater). No máximo SEARCH_ZUKAN_MAX Pokémon.
-  if (lang !== 'ja') {
-    const slots = new Set(list.map((c) => `${c.setId}|${normNumber(c.localId)}`));
-    const missing = new Set(
-      rows
-        .filter((r) => !r.tcgdex_id && r.number && groupSets.has(r.group_id) && !slots.has(`${groupSets.get(r.group_id)}|${normNumber(r.number)}`))
-        .map((r) => r.name),
-    );
-    const dexes = [...new Set([...missing].map((n) => speciesInCardName(n)?.id).filter((d): d is number => !!d))].slice(0, SEARCH_ZUKAN_MAX);
-    const zukan = (await Promise.all(dexes.map((d) => soft(zukanCardsFor(d, lang), [] as ZukanBrief[])))).flat();
-    // Só as que batem com o nome buscado, como as da TCGdex.
-    const named = zukan.filter((z) => plainName(z.name).includes(plain));
-    list.push(...zukanBriefs(named, list, lang, digital, { names, enNames, order }));
-  }
+  const slots = new Set(list.map((c) => `${c.setId}|${normNumber(c.localId)}`));
+  const missing = new Set(
+    rows
+      .filter((r) => !r.tcgdex_id && r.number && groupSets.has(r.group_id) && !slots.has(`${groupSets.get(r.group_id)}|${normNumber(r.number)}`))
+      .map((r) => r.name),
+  );
+  const dexes = [...new Set([...missing].map((n) => speciesInCardName(n)?.id).filter((d): d is number => !!d))].slice(0, SEARCH_ZUKAN_MAX);
+  const zukan = (await Promise.all(dexes.map((d) => soft(zukanCardsFor(d, lang), [] as ZukanBrief[])))).flat();
+  // Só as que batem com o nome buscado, como as da TCGdex.
+  const named = zukan.filter((z) => plainName(z.name).includes(plain));
+  list.push(...zukanBriefs(named, list, lang, digital, { names, enNames, order }));
   // Cancelada no meio: a lista pode ter perdido partes por causa do cancelamento, então não é devolvida nem guardada.
   if (signal?.aborted) throw abortError();
-  const all = withCatalog(list, rows, lang, { groupSets }).sort(byNewest);
+  const all = withCatalog(list, rows, lang, { groupSets, stampOnly: stamped.only }).sort(byNewest);
   return {
     cards: all.slice(0, CARD_SEARCH_MAX),
     partial: track.partial,
     truncated: all.length > CARD_SEARCH_MAX || undefined,
   };
+}
+
+/** Pokémon cujos produtos da 85 são lidos numa busca em japonês, para os pares prováveis da reserva. */
+const SEARCH_PAIR_MAX = 3;
+
+/**
+ * Produtos da 85 de cada Pokémon (os de mais cartas primeiro, no máximo SEARCH_PAIR_MAX), pelo nome em inglês, como na
+ * lista do Pokémon (ver jaSpeciesRows). Os Pokémon em paralelo.
+ */
+async function speciesPools(dexes: (number | undefined)[], soft: Soft, signal?: AbortSignal) {
+  const count = new Map<number, number>();
+  for (const d of dexes) if (d) count.set(d, (count.get(d) ?? 0) + 1);
+  const top = [...count.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0] - b[0])
+    .slice(0, SEARCH_PAIR_MAX)
+    .map(([d]) => d);
+  const out = new Map<number, CatalogRow[]>();
+  await Promise.all(
+    top.map(async (d) => {
+      const name = getSpecies(d)?.name;
+      if (name) out.set(d, await jaSpeciesRows(name, soft, signal));
+    }),
+  );
+  return out;
+}
+
+/**
+ * Busca em japonês. Texto latino ("Pikachu", "Charizard ex"): pelo nome em inglês no catálogo da TCGplayer japonesa
+ * (85), como no inglês. Texto em japonês ("ピカチュウ"): pela TCGdex japonesa, e as cartas dela que são um produto da 85
+ * (ligação exata ou par provável sem selo, ver withJapanese) viram esse produto (com foto).
+ */
+async function loadJaSearch(name: string, signal?: AbortSignal): Promise<CardListResult> {
+  const track = { partial: false };
+  const soft = softly(track, signal);
+  let all: CardBrief[];
+  if (!isJapaneseText(name)) {
+    // Com 2 letras a busca no catálogo traria milhares de cartas (a tela pede 3: ver canSearchName).
+    const rows = canSearchName(name, 'ja') ? await catalogByName(name, JAPANESE, { max: SEARCH_CATALOG_MAX, signal }) : [];
+    if (signal?.aborted) throw abortError();
+    all = withCatalog([], rows, 'ja', JA_CATALOG).sort(byNewest);
+  } else {
+    const [raw, sets, digital] = await Promise.all([
+      getJson<RawCard[]>(`${API}/ja/cards?name=like:${encodeURIComponent(name.trim())}`, signal),
+      soft(setsFor('ja'), [] as SetBrief[]),
+      soft(digitalSets(), [] as string[]),
+    ]);
+    const reserve = jaTcgdexBriefs(
+      raw.filter((c) => !digital.includes(setIdOf(c))),
+      sets,
+    );
+    const dexOf = new Map(reserve.map((c) => [c.id, speciesOfJaName(c.name)]));
+    const matched = await matchJapanese(reserve, sets, (c) => dexOf.get(c.id), soft, signal);
+    // Produtos da 85 dos Pokémon das cartas que a ligação exata não achou: para trocar a carta da reserva pelo par
+    // provável dela (ver withJapanese).
+    const pools = await speciesPools(
+      reserve.filter((c) => !matched.has(c.id) && normNumber(c.localId)).map((c) => dexOf.get(c.id)),
+      soft,
+      signal,
+    );
+    const poolOf = (c: CardBrief) => pools.get(dexOf.get(c.id) ?? 0) ?? [];
+    const links = await tcgplayerLinks(reserve, matched, sets, poolOf, soft);
+    if (signal?.aborted) throw abortError();
+    all = withJapanese([], reserve, matched, sets, poolOf, links);
+  }
+  return { cards: all.slice(0, CARD_SEARCH_MAX), partial: track.partial, truncated: all.length > CARD_SEARCH_MAX || undefined };
 }
 
 // ---------- Ficha da carta ----------
@@ -1007,14 +1542,15 @@ export function cardDetail(id: string, lang: CardLang) {
 /**
  * Foto da TCGplayer da versão comum da carta, pelo id da TCGdex (null = o catálogo não tem a carta; guardado por 1 dia,
  * para a carta ligada depois pelo catalog-sync ganhar a foto logo). Primeira reserva da imagem: é a foto oficial da
- * carta, em inglês (quem mostra reduz para o tamanho do fichário com catalogImage).
+ * carta, em inglês (quem mostra reduz para o tamanho do fichário com catalogImage). Só da categoria pedida: os ids da
+ * TCGdex japonesa repetem os ingleses (a 3 mantém a chave antiga do cache).
  */
-export function catalogPhoto(cardId: string) {
+export function catalogPhoto(cardId: string, category = ENGLISH) {
   return cached(
-    `tcgdex:catalog-photo:v1:${cardId}`,
+    category === ENGLISH ? `tcgdex:catalog-photo:v1:${cardId}` : `tcgdex:catalog-photo:v1:c${category}:${cardId}`,
     async () => {
       if (cardId.startsWith('tcgp-')) return null;
-      const rows = await catalogByTcgdexIds([cardId]);
+      const rows = await catalogByTcgdexIds([cardId], category);
       const common = rows.filter((r) => !r.stamp).sort((a, b) => a.product_id - b.product_id)[0];
       return common?.image ?? null;
     },
@@ -1029,13 +1565,18 @@ const ZUKAN_MCP = 'https://www.zukan.com.br/mcp';
 type ZukanBrief = { id: string; localId: string; name: string; setNamePt?: string };
 
 async function zukan<T>(tool: string, args: Record<string, unknown>): Promise<T | undefined> {
-  const res = await fetch(ZUKAN_MCP, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: tool, arguments: args } }),
-  });
-  if (!res.ok) throw new Error(`Zukan ${res.status}`);
-  const body = await res.json();
+  const body = await timedFetch(
+    ZUKAN_MCP,
+    (res) => {
+      if (!res.ok) throw new Error(`Zukan ${res.status}`);
+      return res.json();
+    },
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: tool, arguments: args } }),
+    },
+  );
   if (body?.result?.isError) return undefined;
   return body?.result?.structuredContent ?? JSON.parse(body?.result?.content?.[0]?.text ?? 'null') ?? undefined;
 }
@@ -1056,6 +1597,35 @@ export function zukanImage(cardId: string) {
     const z = await zukan<{ image?: string }>('get_card', { id: cardId, lang: 'pt' });
     return z?.image ? { small: z.image, large: z.image } : null;
   });
+}
+
+/**
+ * Imagem no Zukan de uma carta só do catálogo ("tcgp-<produto>") de uma coleção que a TCGdex ainda não tem e cuja foto a
+ * TCGplayer ainda não publicou (ex.: "ME06: Delta Reign" na semana do lançamento). O id do Zukan (o mesmo da TCGdex) sai
+ * do prefixo da coleção do TCGCSV e do número ("ME06: Delta Reign" 003/103 → "me06-003"), conferido pelo nome: em
+ * português e, se for outro (treinadores, energias), em inglês. Sem a carta, null guardado por 1 dia (o Zukan pode
+ * publicar depois); com ela, guardada por 7 dias.
+ */
+export function zukanCatalogImage(cardId: string) {
+  return cached(
+    `zukan:catalog-image:v1:${cardId}`,
+    async () => {
+      const productId = Number(cardId.slice(5));
+      if (!cardId.startsWith('tcgp-') || !productId) return null;
+      const row = await catalogProduct(productId);
+      const set = /^([a-z]{1,4}\d{1,3}(?:\.\d)?):/i.exec(row?.tcg_groups?.name ?? '')?.[1]?.toLowerCase();
+      const localId = catalogNumber(row?.number);
+      if (!row || !set || !localId) return null;
+      const id = `${set}-${localId}`;
+      const same = (name?: string) => !!name && plainName(name) === plainName(row.name);
+      const pt = await zukan<{ name?: string; image?: string }>('get_card', { id, lang: 'pt' });
+      if (!pt?.image) return null;
+      if (!same(pt.name) && !same((await zukan<{ name?: string }>('get_card', { id, lang: 'en' }))?.name)) return null;
+      return { small: pt.image, large: pt.image };
+    },
+    CACHE_TTL,
+    { ttlFor: (img) => (img ? CACHE_TTL : LIST_TTL) },
+  );
 }
 
 /** Ficha básica de uma carta pelo Zukan, no formato da TCGdex. */

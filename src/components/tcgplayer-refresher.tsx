@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { supabase } from '@/lib/supabase';
-import { fetchTcgplayerPrices, latestPriceBuild, sameTcgplayerPrice, tcgplayerDue, tcgplayerFor, tcgplayerNote } from '@/lib/tcgplayer';
+import { fetchTcgplayerPrices, hasTcgplayerCards, latestPriceBuild, sameTcgplayerPrice, tcgplayerDue, tcgplayerFor, tcgplayerNote } from '@/lib/tcgplayer';
 import type { Entry } from '@/lib/types';
 import { useCollection } from '@/store/collection';
 
@@ -19,15 +19,18 @@ const RETRY_MS = 3_600_000;
 const tryKey = (e: Entry) => `${e.id}|${e.cardId}|${e.variant}|${tcgplayerNote(e)}`;
 
 /**
- * Grava, em segundo plano, o preço da TCGplayer (EUA) das cartas em inglês: produto e impressão pelo catálogo, preço
- * da cópia diária do TCGCSV e câmbio da PTAX, tudo lido do banco (lib/tcgplayer.ts). Roda no celular e na web (não
- * chama o TCGCSV). Busca cartas novas ou alteradas e renova quando o servidor copia preços novos; preço igual ao
- * guardado não é gravado de novo (nem muda a data da carta nos outros aparelhos).
+ * Grava, em segundo plano, o preço da TCGplayer (EUA) das cartas em inglês e japonês: produto e impressão pelo
+ * catálogo (a japonesa, pelo produto japonês), preço da cópia diária do TCGCSV e câmbio da PTAX, tudo lido do banco
+ * (lib/tcgplayer.ts). Roda no celular e na web (não chama o TCGCSV). Busca cartas novas ou alteradas e renova quando o
+ * servidor copia preços novos; preço igual ao guardado não é gravado de novo (nem muda a data da carta nos outros
+ * aparelhos). O produto gravado também dá a foto da carta japonesa da TCGdex, que não tem foto (entryImageUrl).
  */
 export function TcgplayerRefresher() {
   const { ready, session, lastSyncAt, entries, applyTcgplayerPrice } = useCollection();
   const [tick, setTick] = useState(0);
   const busy = useRef(false);
+  // A coleção mudou durante uma busca: olha de novo quando ela terminar.
+  const rerun = useRef(false);
   const build = useRef<{ at: number; value?: string }>({ at: 0 });
   // Última busca de cada carta (versão e selo) neste aparelho.
   const tried = useRef(new Map<string, number>());
@@ -46,10 +49,14 @@ export function TcgplayerRefresher() {
   }, []);
 
   useEffect(() => {
-    if (!canRun || busy.current) return;
+    if (!canRun) return;
+    if (busy.current) {
+      rerun.current = true;
+      return;
+    }
     const now = Date.now();
-    // Só cartas em inglês; sem nenhuma, nem consulta o banco.
-    if (!Object.values(entries).some((e) => e.lang === 'en')) return;
+    // Só cartas em inglês e japonês; sem nenhuma, nem consulta o banco.
+    if (!hasTcgplayerCards(Object.values(entries))) return;
     busy.current = true;
     (async () => {
       try {
@@ -69,6 +76,10 @@ export function TcgplayerRefresher() {
         // Sem internet ou erro do banco: tenta de novo na próxima mudança da coleção ou em 3 horas.
       } finally {
         busy.current = false;
+        if (rerun.current) {
+          rerun.current = false;
+          setTick((n) => n + 1);
+        }
       }
     })();
   }, [canRun, entries, tick]);

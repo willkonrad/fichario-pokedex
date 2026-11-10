@@ -1,3 +1,4 @@
+import { Directory, File, Paths } from 'expo-file-system';
 import { Platform, Share } from 'react-native';
 
 import {
@@ -15,6 +16,8 @@ import {
   type Entry,
   type Variant,
 } from '@/lib/types';
+
+import { upgradeEntry } from './entry-upgrade';
 
 /** Formato do arquivo da cópia (sobe quando mudar de um jeito que versões antigas do app não saibam ler). */
 export const BACKUP_VERSION = 1;
@@ -149,7 +152,7 @@ function toEntry(raw: unknown): Entry | null {
     updatedAt: isoDate(raw.updatedAt),
   };
   for (const k of badFields(raw)) delete out[k];
-  return stripLegacyFields(out as unknown as Entry);
+  return upgradeEntry(stripLegacyFields(out as unknown as Entry));
 }
 
 function isSettings(v: unknown): v is BinderSettings {
@@ -295,11 +298,44 @@ export function backupToCsv(backup: CollectionBackup): string {
   return `\uFEFF${[header, ...rows].map((r) => r.map(csvCell).join(';')).join('\r\n')}\r\n`;
 }
 
+const SAVE_FAILED = 'Não consegui salvar o arquivo. Tente de novo ou escolha outra pasta.';
+const READ_FAILED = 'Não consegui ler o arquivo.';
+/** Código do seletor de pasta do Android quando o usuário volta sem escolher. */
+const PICKER_CANCELLED = 'ERR_PICKER_CANCELLED';
+/** Bem acima de qualquer cópia real: o seletor aceita todo tipo de arquivo, e ler um vídeo inteiro derruba o app. */
+const MAX_BACKUP_BYTES = 64 * 1024 * 1024;
+
 /**
- * Entrega o arquivo: na web, baixa; no celular, abre o menu de compartilhar do sistema (salvar no Drive, mandar no
- * WhatsApp…) com o conteúdo como texto.
+ * Android: grava na pasta que o usuário escolher e devolve false se ele voltar sem escolher. O conteúdo não passa por
+ * Intent: o texto no menu de compartilhar estoura o limite de cerca de 1 MB a partir de umas 650 cartas.
  */
-export async function shareBackupFile(content: string, fileName: string, mimeType = 'application/json'): Promise<void> {
+async function saveToPickedFolder(content: string, fileName: string, mimeType: string): Promise<boolean> {
+  let folder: Directory;
+  try {
+    folder = await Directory.pickDirectoryAsync();
+  } catch (e) {
+    if ((e as { code?: string }).code === PICKER_CANCELLED) return false;
+    throw e;
+  }
+  const file = folder.createFile(fileName, mimeType);
+  try {
+    await file.write(content);
+  } catch (e) {
+    // Arquivo pela metade parece uma cópia boa: não fica.
+    try {
+      file.delete();
+    } catch {}
+    throw e;
+  }
+  return true;
+}
+
+/**
+ * Entrega o arquivo: na web, baixa; no Android, grava numa pasta escolhida; no iPhone, abre o menu de compartilhar com
+ * o arquivo. Devolve o aviso para a tela, ou null quando não há o que avisar (cancelou, ou o menu do sistema já mostrou).
+ * Erros saem em português.
+ */
+export async function saveBackupFile(content: string, fileName: string, mimeType = 'application/json'): Promise<string | null> {
   if (Platform.OS === 'web') {
     if (typeof document === 'undefined') throw new Error('Não dá para baixar o arquivo aqui.');
     const blob = new Blob([content], { type: `${mimeType};charset=utf-8` });
@@ -312,17 +348,38 @@ export async function shareBackupFile(content: string, fileName: string, mimeTyp
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(href), 10_000);
-    return;
+    return `${fileName} baixado`;
   }
-  await Share.share({ title: fileName, message: content });
+  try {
+    if (Platform.OS === 'ios') {
+      const file = new File(Paths.cache, fileName);
+      file.create({ overwrite: true });
+      await file.write(content);
+      await Share.share({ url: file.uri });
+      return null;
+    }
+    return (await saveToPickedFolder(content, fileName, mimeType)) ? `${fileName} salvo` : null;
+  } catch {
+    throw new Error(SAVE_FAILED);
+  }
 }
 
-/**
- * Na web, abre a escolha de arquivo e devolve o texto dele (null se cancelar). No celular devolve null: a tela pede
- * para colar o conteúdo da cópia.
- */
+/** Celular: seletor de arquivos do sistema, sem filtro de tipo (há aparelhos que não marcam o .json como JSON). */
+async function pickNativeFile(): Promise<string | null> {
+  const picked = await File.pickFileAsync();
+  if (picked.canceled) return null;
+  if (picked.result.size > MAX_BACKUP_BYTES) throw new Error('Este arquivo é grande demais para ser uma cópia da coleção.');
+  try {
+    return await picked.result.text();
+  } catch {
+    throw new Error(READ_FAILED);
+  }
+}
+
+/** Abre a escolha de arquivo e devolve o texto dele (null se cancelar). */
 export function pickBackupFile(): Promise<string | null> {
-  if (Platform.OS !== 'web' || typeof document === 'undefined') return Promise.resolve(null);
+  if (Platform.OS !== 'web') return pickNativeFile();
+  if (typeof document === 'undefined') return Promise.resolve(null);
   return new Promise((resolve, reject) => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -330,7 +387,7 @@ export function pickBackupFile(): Promise<string | null> {
     input.onchange = () => {
       const file = input.files?.[0];
       if (!file) return resolve(null);
-      file.text().then(resolve, () => reject(new Error('Não consegui ler o arquivo.')));
+      file.text().then(resolve, () => reject(new Error(READ_FAILED)));
     };
     input.addEventListener('cancel', () => resolve(null));
     input.click();

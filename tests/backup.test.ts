@@ -1,7 +1,30 @@
-import { backupFileName, backupToCsv, buildBackup, parseBackup, stripLegacyFields } from '@/lib/backup';
+import { Directory, File as NativeFile } from 'expo-file-system';
+import { Platform, Share } from 'react-native';
+
+import { backupFileName, backupToCsv, buildBackup, parseBackup, pickBackupFile, saveBackupFile, stripLegacyFields } from '@/lib/backup';
 import { mergeEntry } from '@/store/collection';
 
 import { AT, entry, LATER, myp, settings, tcg } from './fixtures';
+
+const mockCache = new Map<string, string>();
+
+jest.mock('expo-file-system', () => {
+  class File {
+    static pickFileAsync = jest.fn();
+    uri: string;
+    constructor(dir: string, name: string) {
+      this.uri = `${dir}${name}`;
+    }
+    create() {}
+    async write(text: string) {
+      mockCache.set(this.uri, text);
+    }
+  }
+  class Directory {
+    static pickDirectoryAsync = jest.fn();
+  }
+  return { File, Directory, Paths: { cache: 'file:///cache/' } };
+});
 
 describe('parseBackup (ler uma cópia da coleção)', () => {
   it('lê a cópia do app, com as cartas e a configuração', () => {
@@ -125,6 +148,96 @@ describe('buildBackup e arquivos', () => {
   it('nome do arquivo com o dia', () => {
     expect(backupFileName('json', new Date(2026, 9, 24))).toBe('fichario-pokedex-2026-10-24.json');
     expect(backupFileName('csv', new Date(2026, 0, 5))).toBe('fichario-pokedex-2026-01-05.csv');
+  });
+});
+
+describe('saveBackupFile e pickBackupFile (arquivo no celular)', () => {
+  const NAME = 'fichario-pokedex-2026-11-09.json';
+  const pickFolder = Directory.pickDirectoryAsync as jest.Mock;
+  const pickFile = NativeFile.pickFileAsync as unknown as jest.Mock;
+  const cancelled = () => Object.assign(new Error('The file picker was cancelled by the user'), { code: 'ERR_PICKER_CANCELLED' });
+  let share: jest.SpyInstance;
+
+  /** Pasta escolhida no seletor, com o arquivo que ela cria. */
+  function folderWith(write: (text: string) => Promise<void> = async () => {}) {
+    const file = { write: jest.fn(write), delete: jest.fn() };
+    const folder = { createFile: jest.fn(() => file) };
+    pickFolder.mockResolvedValue(folder);
+    return { file, folder };
+  }
+
+  beforeEach(() => {
+    jest.replaceProperty(Platform, 'OS', 'android');
+    share = jest.spyOn(Share, 'share').mockResolvedValue({ action: Share.sharedAction, activityType: undefined });
+    pickFolder.mockReset();
+    pickFile.mockReset();
+    mockCache.clear();
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('Android: cópia grande vai inteira para a pasta escolhida, sem passar pelo limite do Intent', async () => {
+    const { file, folder } = folderWith();
+    // Bem mais que o limite de cerca de 1 MB do menu de compartilhar do Android.
+    const content = 'x'.repeat(3_000_000);
+    await expect(saveBackupFile(content, NAME)).resolves.toBe(`${NAME} salvo`);
+    expect(folder.createFile).toHaveBeenCalledWith(NAME, 'application/json');
+    expect(file.write).toHaveBeenCalledWith(content);
+    expect(share).not.toHaveBeenCalled();
+  });
+
+  it('Android: planilha sai com o tipo CSV', async () => {
+    const { folder } = folderWith();
+    await saveBackupFile('a;b', 'x.csv', 'text/csv');
+    expect(folder.createFile).toHaveBeenCalledWith('x.csv', 'text/csv');
+  });
+
+  it('Android: voltar sem escolher a pasta não é erro', async () => {
+    pickFolder.mockRejectedValue(cancelled());
+    await expect(saveBackupFile('{}', NAME)).resolves.toBeNull();
+  });
+
+  it('Android: falha na pasta sai em português', async () => {
+    pickFolder.mockRejectedValue(new Error('No Activity found to handle Intent'));
+    await expect(saveBackupFile('{}', NAME)).rejects.toThrow('Não consegui salvar o arquivo');
+  });
+
+  it('Android: gravação que falha sai em português e não deixa arquivo pela metade', async () => {
+    const { file } = folderWith(async () => {
+      throw new Error('ENOSPC: no space left on device');
+    });
+    await expect(saveBackupFile('{}', NAME)).rejects.toThrow('Não consegui salvar o arquivo');
+    expect(file.delete).toHaveBeenCalled();
+  });
+
+  it('iPhone: o menu de compartilhar recebe o arquivo, não o texto', async () => {
+    jest.replaceProperty(Platform, 'OS', 'ios');
+    await expect(saveBackupFile('{"a":1}', NAME)).resolves.toBeNull();
+    expect(mockCache.get(`file:///cache/${NAME}`)).toBe('{"a":1}');
+    expect(share).toHaveBeenCalledWith({ url: `file:///cache/${NAME}` });
+    expect(pickFolder).not.toHaveBeenCalled();
+  });
+
+  it('importar: lê o texto do arquivo escolhido', async () => {
+    const file = JSON.stringify(buildBackup(null, [entry()]));
+    pickFile.mockResolvedValue({ canceled: false, result: { size: file.length, text: async () => file } });
+    const text = await pickBackupFile();
+    expect(text).toBe(file);
+    expect(parseBackup(text).entries).toHaveLength(1);
+  });
+
+  it('importar: cancelar devolve null', async () => {
+    pickFile.mockResolvedValue({ canceled: true, result: null });
+    await expect(pickBackupFile()).resolves.toBeNull();
+  });
+
+  it('importar: arquivo enorme nem é lido, e falha de leitura sai em português', async () => {
+    const text = jest.fn(async () => '');
+    pickFile.mockResolvedValue({ canceled: false, result: { size: 2_000_000_000, text } });
+    await expect(pickBackupFile()).rejects.toThrow('grande demais');
+    expect(text).not.toHaveBeenCalled();
+    pickFile.mockResolvedValue({ canceled: false, result: { size: 10, text: () => Promise.reject(new Error('Permission denied')) } });
+    await expect(pickBackupFile()).rejects.toThrow('Não consegui ler o arquivo.');
   });
 });
 

@@ -1,19 +1,21 @@
-import { APPROX_REASON, offersText, RANGE_LABELS, rangeLabelsOf, SOURCE_NAME } from './copy';
+import { APPROX_REASON, MYP_NO_JAPANESE, offersText, RANGE_LABELS, rangeLabelsOf, SOURCE_NAME, TCGPLAYER_SEARCHING, tcgplayerNoPriceText } from './copy';
 import { formatBRL, formatUSD } from './format';
-import { tcgplayerColumns, tcgplayerFor } from './tcgplayer';
-import type { Entry, MypApiPrice, ValueBasis } from './types';
+import { tcgplayerColumns, tcgplayerCovers, tcgplayerFor, tcgplayerReason } from './tcgplayer';
+import type { Entry, MypApiPrice, TcgplayerPrice, ValueBasis } from './types';
 
 /**
  * Valor da carta (em reais), na ordem:
  *
  *   1. "Meu valor" digitado pelo usuário: o único valor fixo (mínimo, média e máximo iguais a ele). Quando a média da
  *      fonte da carta passa dele, ele é apagado e a carta volta a usar a fonte (ver myValuePatch);
- *   2. carta em INGLÊS: a TCGplayer (EUA), em reais pela PTAX — mínimo = menor anúncio, média = valor de mercado
- *      (vendas recentes), máximo = mediana dos anúncios (lib/tcgplayer.ts); o MYP aparece só como referência;
+ *   2. carta em INGLÊS ou JAPONÊS: a TCGplayer (EUA), em reais pela PTAX — mínimo = menor anúncio, média = valor de
+ *      mercado (vendas recentes), máximo = mediana dos anúncios (lib/tcgplayer.ts; na japonesa, o produto japonês);
+ *      o MYP aparece só como referência (e não tem cartas japonesas);
  *   3. o MÍNIMO, a MÉDIA e o MÁXIMO dos anúncios do produto no MYP Cards (API pública do MYP), como a API informa —
  *      confiança média, porque juntam todos os estados e idiomas. Versão especial (selo, Poké Ball…) sem produto
- *      próprio usa o da carta base, que tem valor parecido — confiança baixa ("aproximado"). Carta em inglês sem preço
- *      na TCGplayer também usa o MYP, com confiança baixa.
+ *      próprio usa o da carta base, que tem valor parecido — confiança baixa ("aproximado"); a Reverse Foil em
+ *      português também (o produto do MYP é o da carta, não um só da reverse). Carta em inglês sem preço na TCGplayer
+ *      também usa o MYP, com confiança baixa. A confiança muda só a marca: o número é o mesmo.
  *
  * O VALOR da carta (o da soma, dos bolsos, das mais valiosas e do gráfico) é um dos três, escolhido na carta
  * (`valueBasis`, "Usar na soma"): a média por padrão; o mínimo costuma ser o valor real de cartas novas. Sem nenhuma
@@ -37,9 +39,39 @@ export function mypCovers(lang: string) {
   return lang === 'pt' || lang === 'en';
 }
 
-/** O app ainda não buscou o preço desta carta (nesta versão e selo): na TCGplayer (em inglês) ou no MYP. */
+/**
+ * Carta sem valor ainda: por quê, em uma frase (quadro de preço). `api`/`tcg`: as buscas desta carta, versão e selo
+ * (mypApiFor/tcgplayerFor); `web`: na web o MYP Cards não é consultado (só o app no celular).
+ */
+export function cardNoPriceText(e: Pick<Entry, 'lang'>, api: MypApiPrice | undefined, tcg: TcgplayerPrice | undefined, web: boolean) {
+  if (e.lang === 'en') {
+    if (!tcg) return TCGPLAYER_SEARCHING;
+    if (tcg.notFound && api?.avg == null) {
+      const why = tcgplayerNoPriceText(tcgplayerReason(tcg.notFound));
+      if (api) return `${why} nem no MYP Cards.`;
+      return web ? `${why}. O MYP Cards é consultado pelo app no celular.` : `${why}. Buscando no MYP Cards…`;
+    }
+  }
+  // Japonesa: só a TCGplayer (o produto japonês); o MYP não tem cartas japonesas.
+  if (e.lang === 'ja') {
+    if (!tcg) return TCGPLAYER_SEARCHING;
+    return `${tcgplayerNoPriceText(tcgplayerReason(tcg.notFound))}. ${MYP_NO_JAPANESE}`;
+  }
+  if (!mypCovers(e.lang)) return MYP_NO_JAPANESE;
+  if (!api) return web ? 'O MYP Cards é consultado pelo app no celular.' : 'Buscando o preço no MYP Cards…';
+  if (api.notFound) return `Não achei esta carta no MYP Cards (${api.notFound}).`;
+  return 'Sem anúncios desta carta no MYP Cards agora.';
+}
+
+/**
+ * O app ainda não buscou o preço desta carta (nesta versão e selo): na TCGplayer (inglês e japonês) ou no MYP. Carta em
+ * inglês sem preço na TCGplayer ainda espera o MYP (a japonesa não: o MYP não tem japonesas).
+ */
 export function pricePending(e: Entry) {
-  if (e.lang === 'en') return !tcgplayerFor(e);
+  if (tcgplayerCovers(e.lang)) {
+    const t = tcgplayerFor(e);
+    return !t || (e.lang === 'en' && t.avg == null && !mypApiFor(e));
+  }
   return mypCovers(e.lang) && !mypApiFor(e);
 }
 
@@ -52,15 +84,26 @@ export function mypApiFor(e: Entry): MypApiPrice | undefined {
 }
 
 /**
- * Os preços do produto no MYP são exatamente desta versão (produto próprio, ou versão comum)? Senão, são da carta base
- * (versão especial que o MYP não vende à parte): valem como valor, com confiança baixa.
+ * Versões comuns que o MYP não vende como produto à parte: o produto achado é o da carta (Reverse Foil). Ficam fora de
+ * SPECIAL_VARIANTS de propósito, porque a Consulta mostra o preço desse produto e a busca no MYP é a da carta comum;
+ * só o valor da carta em português fica "≈ Aproximado" (carta base), com o mesmo número. A inglesa fica como antes: a
+ * TCGplayer tem a impressão própria da reverse e, sem ela, o MYP já é aproximado (anúncios de todos os idiomas).
  */
-export function mypApiFitsVariant(e: Entry, s: MypApiPrice) {
-  return !!s.ownVersion || mypFitsVariant(e.variant);
+const MYP_CARD_PRODUCT_VARIANTS = ['reverse'];
+
+/**
+ * Os preços do produto no MYP são exatamente desta versão (produto próprio, ou versão comum)? Senão, são da carta base
+ * (versão especial que o MYP não vende à parte, ou a Reverse Foil em português pelo produto da carta): valem como
+ * valor, com confiança baixa.
+ */
+export function mypApiFitsVariant(e: Pick<Entry, 'lang' | 'variant'>, s: MypApiPrice) {
+  if (s.ownVersion) return true;
+  if (!mypFitsVariant(e.variant)) return false;
+  return !(e.lang === 'pt' && MYP_CARD_PRODUCT_VARIANTS.includes(e.variant));
 }
 
 /**
- * "Meu valor" é fixo até a média da fonte passar dele (a do MYP; nas cartas em inglês, o valor de mercado da
+ * "Meu valor" é fixo até a média da fonte passar dele (a do MYP; nas cartas em inglês e japonês, o valor de mercado da
  * TCGplayer): aí ele é apagado (fica o registro da troca, mostrado na tela da carta) e a carta volta a usar mínimo,
  * média e máximo da fonte, com a escolha de "Usar na soma" (que pode ficar abaixo do valor digitado, ex.: o mínimo).
  */
@@ -72,11 +115,12 @@ export function myValuePatch(e: Entry, s: { avg?: number; checkedAt: string }, s
 
 /**
  * A média que apaga o "Meu valor" desta carta (a mesma regra de myValuePatch e das funções patch_entry_*): nas cartas
- * em inglês, o mercado da TCGplayer; nas outras, a média do MYP. Sem preço da fonte, undefined.
+ * em inglês e japonês, o mercado da TCGplayer; nas outras, a média do MYP. Sem preço da fonte, undefined.
  */
 export function myValueTrigger(e: Entry): { avg: number; source: 'myp' | 'tcgplayer' } | undefined {
-  const avg = e.lang === 'en' ? tcgplayerFor(e)?.avg : mypApiFor(e)?.avg;
-  return avg != null ? { avg, source: e.lang === 'en' ? 'tcgplayer' : 'myp' } : undefined;
+  const tcg = tcgplayerCovers(e.lang);
+  const avg = tcg ? tcgplayerFor(e)?.avg : mypApiFor(e)?.avg;
+  return avg != null ? { avg, source: tcg ? 'tcgplayer' : 'myp' } : undefined;
 }
 
 /** "Meu valor" abaixo da média da fonte: é apagado na próxima atualização do preço (a tela avisa antes). */
@@ -89,8 +133,9 @@ export function myValueBelowSource(e: Entry) {
 export type Confidence = 'alta' | 'media' | 'baixa';
 
 /**
- * Por que o valor é aproximado (confiança baixa): preço da carta base (versão especial que a fonte não vende à parte)
- * ou, numa carta em inglês sem preço na TCGplayer, os anúncios do MYP de todos os idiomas.
+ * Por que o valor é aproximado (confiança baixa): preço da carta base (versão especial que a fonte não vende à parte, ou
+ * a Reverse Foil em português pelo produto da carta no MYP) ou, numa carta em inglês sem preço na TCGplayer, os
+ * anúncios do MYP de todos os idiomas. A carta base vem antes: uma inglesa com a versão fora do produto do MYP é 'base'.
  */
 export type ApproxReason = 'base' | 'otherLanguages';
 
@@ -137,11 +182,11 @@ export function priceSources(e: Entry): Omit<SourceRow, 'used'>[] {
   if (e.myValue?.value != null) {
     rows.push({ id: 'manual', label: SOURCE_NAME.manual, brl: e.myValue.value, detail: 'digitado por você' });
   }
-  // Carta em inglês: TCGplayer (EUA), em reais pela PTAX.
-  const tcg = e.lang === 'en' ? tcgplayerFor(e) : undefined;
+  // Carta em inglês ou japonês: TCGplayer (EUA), em reais pela PTAX (na japonesa, o produto japonês).
+  const tcg = tcgplayerCovers(e.lang) ? tcgplayerFor(e) : undefined;
   if (tcg?.avg != null) {
     const usd = tcg.usdMarket != null ? ` ${formatUSD(tcg.usdMarket)}` : '';
-    rows.push({ id: 'tcgplayer', label: SOURCE_NAME.tcgplayer, brl: tcg.avg, detail: `mercado${usd} · todos os estados${tcg.base ? ' · carta base' : ''}` });
+    rows.push({ id: 'tcgplayer', label: SOURCE_NAME.tcgplayer, brl: tcg.avg, detail: `mercado${usd} · Near Mint${tcg.base ? ' · carta base' : ''}` });
   }
   // Média dos anúncios do produto no MYP (API pública), com mínimo e máximo (de versão especial sem produto próprio,
   // os da carta base).
@@ -158,7 +203,7 @@ export function priceSources(e: Entry): Omit<SourceRow, 'used'>[] {
   return rows;
 }
 
-/** Valor da carta (ver comentário do módulo): "Meu valor", senão a TCGplayer (cartas em inglês), senão o MYP. */
+/** Valor da carta (ver comentário do módulo): "Meu valor", senão a TCGplayer (inglês e japonês), senão o MYP. */
 export function valuation(e: Entry): Valuation {
   const all = priceSources(e);
   const best = all[0];
@@ -171,7 +216,9 @@ export function valuation(e: Entry): Valuation {
   // soma o mercado e é chamada por ele (o valor é o mesmo; muda só o nome).
   const chosen = e.valueBasis ?? 'avg';
   const pick: ValueBasis = tcg && !tcgplayerColumns(tcg).includes(chosen) ? 'avg' : chosen;
-  // Preço da carta base para uma versão especial, ou MYP numa carta em inglês sem preço na TCGplayer: aproximado.
+  // Preço da carta base para uma versão especial ou a Reverse Foil em português (mypApiFitsVariant), ou MYP numa carta
+  // em inglês sem preço na TCGplayer: aproximado (só a inglesa: o MYP não tem cartas japonesas). Só a marca; o valor é
+  // o mesmo.
   const approx: ApproxReason | undefined = tcg
     ? tcg.base
       ? 'base'
