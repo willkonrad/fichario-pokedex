@@ -383,6 +383,7 @@ Controles curtos, cheios e diretos, sempre com alvo de 48.
 ### Cartões
 - **`Card`:** `surface`, canto `lg`, 16 de margem interna, sem sombra e sem borda.
 - **`Section`:** título em `heading` amarelo-claro e no máximo uma linha de legenda. Mais explicação vai para `InfoSheet`.
+- **"Para colecionador" (`CollectorFacts`, tela da carta):** rótulo `label` em cima do valor `bodyStrong` (tabular nos números), em duas colunas; sem valor, a linha some (nunca "—"); com nota, e a data sempre (o rótulo dela não cabe em meia coluna), ocupa a largura toda. No Android, cada informação é uma parada só do leitor de tela (o valor selecionável fica fora da árvore de acessibilidade). Enquanto as fontes chegam, o esboço tem uma célula por linha já conhecida mais a da data, para o bloco quase não crescer. O ano ao lado da raridade é um `Badge` neutro, só para um dia desta carta, reimpressão ou versão, ou para o mês quando a fonte não dá o dia ("05/2007", com a nota "A fonte não dá o dia."; nunca um período); na carta em português, a data é a do lançamento em inglês e o selo diz isso ("2023 · EN"). "Fora do fichário" fica numa linha de selos só dele, para o ano, que chega depois, não quebrar a linha.
 
 ### Campos
 - **`Input`:** `surfaceAlt`, borda 1,5 `borderStrong`, canto `md`, altura 48, texto 16. Em foco, a borda fica branca; `invalid`, borda `semantic.danger.fg`, com o erro em texto.

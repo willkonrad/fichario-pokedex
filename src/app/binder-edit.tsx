@@ -25,7 +25,7 @@ import {
   Toggle,
   useLayout,
 } from '@/components/ui';
-import { customPhysicalMoves, customSheets, customTotalSlots, isPlacedCustom, newBinderId, pageSize } from '@/lib/binder';
+import { customPhysicalMoves, customSheets, customTotalSlots, isPlacedCustom, MAX_COLS, MAX_PAGES, MAX_ROWS, newBinderId, pageSize } from '@/lib/binder';
 import { formatInt } from '@/lib/format';
 import { BINDER_PURPOSES, DEFAULT_CUSTOM_BINDER, LANG_LABEL, type BinderPurpose, type CardLang, type CustomBinder } from '@/lib/types';
 import { entriesOf, useCollection } from '@/store/collection';
@@ -210,10 +210,10 @@ function BinderForm() {
               ))}
             </ChipGroup>
             <Row label="Linhas">
-              <Stepper value={b.rows} onChange={(rows) => update({ rows })} max={8} label="linhas" />
+              <Stepper value={b.rows} onChange={(rows) => update({ rows })} max={MAX_ROWS} label="linhas" />
             </Row>
             <Row label="Colunas">
-              <Stepper value={b.cols} onChange={(cols) => update({ cols })} max={6} label="colunas" />
+              <Stepper value={b.cols} onChange={(cols) => update({ cols })} max={MAX_COLS} label="colunas" />
             </Row>
           </Section>
           <Section title="Páginas" hint={`${formatInt(customSheets(b))} folhas ${b.doubleSided ? '(frente e verso)' : '(só frente)'} · ${formatInt(total)} bolsos`}>
@@ -223,7 +223,7 @@ function BinderForm() {
               ))}
             </ChipGroup>
             <Row label="Páginas">
-              <Stepper value={b.pages} onChange={(pages) => update({ pages })} max={500} label="páginas" />
+              <Stepper value={b.pages} onChange={(pages) => update({ pages })} max={MAX_PAGES} label="páginas" />
             </Row>
             <ChipGroup label="Folhas">
               <Chip label="Frente e verso" selected={b.doubleSided} onPress={() => update({ doubleSided: true })} />

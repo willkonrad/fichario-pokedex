@@ -137,6 +137,15 @@ async function japaneseGroups(): Promise<JaGroup[]> {
   return groups;
 }
 
+/**
+ * Grupo da 85 de uma coleção da TCGdex japonesa (sigla = setId), para mostrar o nome dela na TCGplayer ("M5: Abyss
+ * Eye"). Só com exatamente um grupo: sigla repetida ou ausente, undefined.
+ */
+export async function japaneseGroupFor(setId: string): Promise<JaGroup | undefined> {
+  const list = groupsForSet(await japaneseGroups(), setId);
+  return list.length === 1 ? list[0] : undefined;
+}
+
 /** Esquece os grupos guardados (testes, ou depois de o catálogo mudar). */
 export function clearJapaneseCatalogCache() {
   groupsCache = undefined;

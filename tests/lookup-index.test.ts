@@ -55,6 +55,23 @@ jest.mock('@/lib/lookup-store', () => ({
   },
 }));
 
+// Quantas linhas viraram chave de número e quantas foram lidas como carta: mostra quando o índice é varrido.
+const mockCalls = { numberKeys: 0, parseRow: 0 };
+jest.mock('@/lib/lookup-format', () => {
+  const actual = jest.requireActual<typeof import('@/lib/lookup-format')>('@/lib/lookup-format');
+  return {
+    ...actual,
+    numberKeys: (...args: Parameters<typeof actual.numberKeys>) => {
+      mockCalls.numberKeys += 1;
+      return actual.numberKeys(...args);
+    },
+    parseRow: (...args: Parameters<typeof actual.parseRow>) => {
+      mockCalls.parseRow += 1;
+      return actual.parseRow(...args);
+    },
+  };
+});
+
 type Index = typeof import('@/lib/lookup-index');
 
 // O Platform que o módulo isolado lê na hora de cada chamada é o de fora (o react-native o carrega sob demanda).
@@ -561,5 +578,190 @@ describe('leitura', () => {
     idx.lookupByNumber('4/102');
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
+  });
+});
+
+/**
+ * Mapas de número e treinadores montados em fatias logo depois de abrir: a primeira busca por número, sigla ou
+ * treinador (e a primeira leitura da câmera) não varre as 67 mil linhas na tecla.
+ */
+describe('montagem em fatias', () => {
+  const NUMBERED = 6000;
+  const TRAINERS = 3000;
+
+  /** Seis espécies com 1000 cartas de números diferentes cada e 3000 treinadores sem número. */
+  function bigBody() {
+    const rows = [HEAD];
+    for (let dex = 1; dex <= 6; dex++) {
+      rows.push(`@${dex}`);
+      for (let i = 1; i <= 1000; i++) {
+        const n = (dex - 1) * 1000 + i;
+        rows.push(line(`p${n}`, '604', `Card ${n}`, `${n}/9999`));
+      }
+    }
+    rows.push('@0');
+    for (let n = 1; n <= TRAINERS; n++) rows.push(line(`t${n}`, '604', `Trainer ${n}`));
+    rows.push('');
+    return rows.join('\n');
+  }
+
+  beforeEach(async () => {
+    // Fatias de módulos de outros testes (relógio de verdade) terminam antes de contar.
+    await new Promise((r) => setTimeout(r, 20));
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'queueMicrotask'] });
+    mockCalls.numberKeys = 0;
+    mockCalls.parseRow = 0;
+  });
+  afterEach(() => jest.useRealTimers());
+
+  async function opened(body = BODY) {
+    mockDisk.saved = { md5: 'v1', body };
+    const idx = load();
+    await idx.ensureLookupLoaded();
+    return idx;
+  }
+
+  it('depois de abrir, a primeira busca por número, sigla ou treinador não varre o índice', async () => {
+    const idx = await opened();
+    jest.runAllTimers();
+    mockCalls.numberKeys = 0;
+    expect(idx.lookupByCode('BS', '4')[0].key).toBe('42382');
+    expect(idx.lookupByNumber('70/108')).toHaveLength(2);
+    expect(idx.lookupByNumber('TG05')[0].key).toBe('700000');
+    expect(mockCalls.numberKeys).toBe(0);
+    mockCalls.parseRow = 0;
+    expect(idx.searchTrainers('professor carvalho').map((c) => c.key)).toEqual(['900']);
+    expect(idx.sectionCards(0).map((c) => c.key)).toEqual(['900']);
+    expect(mockCalls.parseRow).toBe(0);
+  });
+
+  it('abrir não monta nada na hora, e cada fatia lê só um pedaço', async () => {
+    const idx = await opened(bigBody());
+    expect(mockCalls.numberKeys).toBe(0);
+    expect(mockCalls.parseRow).toBe(0);
+    jest.advanceTimersToNextTimer();
+    expect(mockCalls.numberKeys).toBeGreaterThan(0);
+    expect(mockCalls.numberKeys).toBeLessThan(NUMBERED);
+    jest.runAllTimers();
+    // Cada linha uma vez só, e os treinadores também.
+    expect(mockCalls.numberKeys).toBe(NUMBERED);
+    expect(mockCalls.parseRow).toBe(TRAINERS);
+    expect(jest.getTimerCount()).toBe(0);
+    mockCalls.parseRow = 0;
+    expect(idx.lookupByNumber('6000/9999').map((c) => c.key)).toEqual(['p6000']);
+    expect(idx.searchTrainers('trainer 3000').map((c) => c.key)).toEqual(['t3000']);
+    expect(mockCalls.numberKeys).toBe(NUMBERED);
+    expect(mockCalls.parseRow).toBe(1);
+  });
+
+  it('busca no meio da montagem completa o resto na hora, sem ler linha duas vezes, e acha o mesmo', async () => {
+    const reference = await opened(bigBody());
+    // Sem dar tempo às fatias: a montagem inteira, de uma vez, na própria busca.
+    const keys = ['1/9999', '2000/9999', '2001/9999', '6000/9999'];
+    const expected = keys.map((k) => reference.lookupByNumber(k).map((c) => c.key));
+    const expectedCode = reference.lookupByCode('BS', '4500').map((c) => c.key);
+    const expectedTrainers = reference.searchTrainers('trainer 2999').map((c) => c.key);
+    await reference.clearLookup();
+    expect(expected).toEqual([['p1'], ['p2000'], ['p2001'], ['p6000']]);
+    expect(expectedCode).toEqual(['p4500']);
+    expect(expectedTrainers).toEqual(['t2999']);
+
+    mockCalls.numberKeys = 0;
+    const idx = await opened(bigBody());
+    jest.advanceTimersToNextTimer();
+    expect(mockCalls.numberKeys).toBeLessThan(NUMBERED);
+    expect(keys.map((k) => idx.lookupByNumber(k).map((c) => c.key))).toEqual(expected);
+    expect(idx.lookupByCode('BS', '4500').map((c) => c.key)).toEqual(expectedCode);
+    expect(mockCalls.numberKeys).toBe(NUMBERED);
+    // Agora as fatias montam os treinadores; a busca no meio deles também completa, cada linha uma vez.
+    mockCalls.parseRow = 0;
+    jest.advanceTimersToNextTimer();
+    expect(mockCalls.parseRow).toBeGreaterThan(0);
+    expect(mockCalls.parseRow).toBeLessThan(TRAINERS);
+    expect(idx.searchTrainers('trainer 2999').map((c) => c.key)).toEqual(expectedTrainers);
+    expect(mockCalls.parseRow).toBe(TRAINERS);
+    jest.runAllTimers();
+    expect(mockCalls.numberKeys).toBe(NUMBERED);
+    expect(mockCalls.parseRow).toBe(TRAINERS);
+  });
+
+  it('limpar o índice cancela a montagem e não segura o índice velho', async () => {
+    const idx = await opened(bigBody());
+    expect(jest.getTimerCount()).toBe(1);
+    await idx.clearLookup();
+    expect(jest.getTimerCount()).toBe(0);
+    jest.runAllTimers();
+    expect(mockCalls.numberKeys).toBe(0);
+  });
+
+  it('índice trocado: a montagem é a do novo', async () => {
+    const idx = await opened();
+    mockServer.row = { md5: 'v2', format: LOOKUP_FORMAT, body: BODY.replace('Charizard', 'Charizard Novo') };
+    await idx.warmLookup();
+    // A fatia do índice que saiu foi cancelada; só a do novo fica agendada.
+    expect(jest.getTimerCount()).toBe(1);
+    jest.runAllTimers();
+    mockCalls.numberKeys = 0;
+    expect(idx.lookupByNumber('4/102')[0].name).toBe('Charizard Novo');
+    expect(mockCalls.numberKeys).toBe(0);
+  });
+
+  describe('com requestIdleCallback', () => {
+    type Deadline = { didTimeout: boolean; timeRemaining: () => number };
+    const g = globalThis as { requestIdleCallback?: unknown; cancelIdleCallback?: unknown };
+    let queue: ((d: Deadline) => void)[];
+    let timeouts: (number | undefined)[];
+    let cancelled: unknown[];
+
+    beforeEach(() => {
+      queue = [];
+      timeouts = [];
+      cancelled = [];
+      g.requestIdleCallback = (run: (d: Deadline) => void, options?: { timeout?: number }) => {
+        queue.push(run);
+        timeouts.push(options?.timeout);
+        return queue.length;
+      };
+      g.cancelIdleCallback = (handle: unknown) => cancelled.push(handle);
+    });
+    afterEach(() => {
+      delete g.requestIdleCallback;
+      delete g.cancelIdleCallback;
+    });
+
+    const runNext = (timeRemaining: number, didTimeout = false) => queue.at(-1)!({ didTimeout, timeRemaining: () => timeRemaining });
+
+    it('pede a folga com prazo, devolve a vez quando o aparelho pede e segue na próxima', async () => {
+      const idx = await opened(bigBody());
+      expect(queue).toHaveLength(1);
+      expect(timeouts[0]).toBeGreaterThan(0);
+      // Tecla chegando: timeRemaining() 0. A fatia lê só um punhado de linhas.
+      runNext(0);
+      const small = mockCalls.numberKeys;
+      expect(small).toBeGreaterThan(0);
+      expect(small).toBeLessThan(100);
+      expect(queue).toHaveLength(2);
+      // Folga de verdade: lê bem mais.
+      runNext(50);
+      expect(mockCalls.numberKeys).toBeGreaterThan(small * 10);
+      // Na web, a que estourou o prazo tem timeRemaining() 0, mas anda pelo relógio daqui.
+      const beforeTimeout = mockCalls.numberKeys;
+      runNext(0, true);
+      expect(mockCalls.numberKeys - beforeTimeout).toBeGreaterThan(small * 10);
+      while (mockCalls.parseRow < TRAINERS) runNext(50);
+      expect(mockCalls.numberKeys).toBe(NUMBERED);
+      const pending = queue.length;
+      await idx.clearLookup();
+      // Nada mais agendado depois de pronto: limpar não tem o que cancelar.
+      expect(cancelled).toEqual([]);
+      expect(queue).toHaveLength(pending);
+    });
+
+    it('limpar no meio cancela a folga pedida', async () => {
+      const idx = await opened(bigBody());
+      runNext(50);
+      await idx.clearLookup();
+      expect(cancelled).toEqual([queue.length]);
+    });
   });
 });

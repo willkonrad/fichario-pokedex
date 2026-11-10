@@ -107,7 +107,8 @@ describe('consultMypNow', () => {
   });
 
   it('erro HTTP do MYP não é "sem internet"', async () => {
-    mockFetch((url) => (url.includes('/carta/') ? { status: 403, body: {} } : undefined));
+    // 403 é recusa e para tudo (ver "403: o MYP recusou"); um erro do servidor é só uma falha.
+    mockFetch((url) => (url.includes('/carta/') ? { status: 500, body: {} } : undefined));
     const { queue } = load();
     expect(await queue.consultMypNow(keysFor('Charizard'))).toEqual({ failed: true });
   });
@@ -326,6 +327,82 @@ describe('429', () => {
   });
 });
 
+describe('403: o MYP recusou', () => {
+  const BLOCK_KEY = 'myp:blocked-at';
+  type Storage = { getItem: (k: string) => Promise<string | null>; setItem: (k: string, v: string) => Promise<unknown> };
+  /** Fila nova (app reaberto) com o armazenamento do aparelho que ela usa. */
+  function loadWithStorage() {
+    let queue!: Queue;
+    let storage!: Storage;
+    jest.isolateModules(() => {
+      storage = jest.requireMock('@react-native-async-storage/async-storage');
+      queue = jest.requireActual('@/lib/myp-queue');
+    });
+    return { queue, storage };
+  }
+  const refused = () => mockFetch((url) => (url.includes('mypcards.com') ? { status: 403, body: {} } : setsRoute(url)));
+  const mypCalls = (calls: FetchCall[]) => calls.filter((c) => c.url.includes('mypcards.com'));
+  const waiting = () => ({ x: { ...entry({ id: 'x', lang: 'en' }), cardId: 'base1-5' } });
+
+  it('a fila para no app inteiro: nenhuma outra consulta sai, nem a da Consulta, e a carta não conta como falha', async () => {
+    const { calls } = refused();
+    const { queue } = load();
+    expect(queue.nextMypGroup(waiting(), now, new Set(), new Map())).toBeDefined();
+    const r = runner(queue);
+    expect(await r.group('Charizard')).toBe('blocked');
+    expect(r.fails.size).toBe(0);
+    expect(mypCalls(calls)).toHaveLength(1);
+    // Fila vazia (nem a carta aberta na tela passa), outra carta não consulta, a Consulta também não.
+    expect(queue.nextMypGroup(waiting(), now, new Set(['x']), new Map())).toBeUndefined();
+    now += 60 * 60_000;
+    expect(await r.group('Outra')).toBe('blocked');
+    expect(await queue.consultMypNow(keysFor('Outra'))).toEqual({ blocked: true });
+    expect(mypCalls(calls)).toHaveLength(1);
+    expect(queue.mypBlockedUntil(now)).toBe(T0 + queue.MYP_BLOCK_MS);
+  });
+
+  it('pelo código do produto, o 403 não vira "não encontrada": para tudo, sem tentar o outro código', async () => {
+    const { calls } = mockFetch((url) => (url.includes('/precos/') ? { status: 403, body: {} } : { body: { cards: [] } }));
+    const { queue } = load();
+    expect(await queue.consultMypNow(keysFor('Charizard'))).toEqual({ blocked: true });
+    expect(urls(calls).filter((u) => u.includes('/precos/'))).toHaveLength(1);
+  });
+
+  it('a recusa fica guardada no aparelho: vale depois de reabrir o app e acaba em 24 h', async () => {
+    const { calls } = refused();
+    const first = loadWithStorage();
+    expect(await first.queue.consultMypNow(keysFor('Charizard'))).toEqual({ blocked: true });
+    const saved = await first.storage.getItem(BLOCK_KEY);
+    expect(saved).toBe(new Date(T0).toISOString());
+    // App reaberto (módulo novo, sem nada na memória), com a marca no aparelho.
+    const again = loadWithStorage();
+    await again.storage.setItem(BLOCK_KEY, saved!);
+    now += 23 * 60 * 60_000;
+    expect(await again.queue.consultMypNow(keysFor('Outra'))).toEqual({ blocked: true });
+    expect(again.queue.nextMypGroup(waiting(), now, new Set(), new Map())).toBeUndefined();
+    expect(mypCalls(calls)).toHaveLength(1);
+    // Passadas as 24 h, uma consulta sai (recusada de novo, tudo para de novo).
+    now += 60 * 60_000;
+    expect(again.queue.mypBlockedUntil(now)).toBe(0);
+    expect(await again.queue.consultMypNow(keysFor('Outra'))).toEqual({ blocked: true });
+    expect(mypCalls(calls)).toHaveLength(2);
+  });
+
+  it('"Tentar de novo" libera a próxima consulta e apaga a marca do aparelho', async () => {
+    let refuse = true;
+    const { calls } = mockFetch((url) =>
+      url.includes('mypcards.com') ? (refuse ? { status: 403, body: {} } : { body: { cards: [product({ name_en: byName(url) })] } }) : setsRoute(url),
+    );
+    const { queue, storage } = loadWithStorage();
+    await queue.consultMypNow(keysFor('Charizard'));
+    refuse = false;
+    queue.clearMypBlock();
+    expect(await storage.getItem(BLOCK_KEY)).toBeNull();
+    expect('price' in (await queue.consultMypNow(keysFor('Outra')))).toBe(true);
+    expect(mypCalls(calls)).toHaveLength(2);
+  });
+});
+
 describe('fetchMypPrice sem mudar o comportamento', () => {
   const consultFrom = (results: Record<string, MypProduct[]>) => jest.fn(async (name: string) => results[name] ?? []);
   const tcgdexRoute = (url: string) => {
@@ -344,6 +421,15 @@ describe('fetchMypPrice sem mudar o comportamento', () => {
     expect(price).toMatchObject({ cardId: 'base1-4', variant: 'normal', productId: 77, code: 'pokemon_bs_004/102', min: 480, avg: 600, max: 700, qty: 12, v: api.MYP_MATCHER });
     expect(price.notFound).toBeUndefined();
     expect(price.imagePt).toBeUndefined();
+  });
+
+  it('link do produto fora do site do MYP não vai para o botão "MYP Cards"', async () => {
+    mockFetch(tcgdexRoute);
+    const { api } = load();
+    const e = entry({ cardId: 'base1-4', cardName: 'Charizard', setId: 'base1', localId: '4', setTotal: 102, lang: 'en' });
+    const price = await api.fetchMypPrice(e, consultFrom({ Charizard: [product({ link: 'https://outro-site.example/produto/77' })] }));
+    expect(price.avg).toBe(600);
+    expect(price.url).toBeUndefined();
   });
 
   it('carta em português consulta também a foto em português', async () => {

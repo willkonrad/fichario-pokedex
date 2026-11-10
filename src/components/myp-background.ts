@@ -3,9 +3,16 @@ import * as TaskManager from 'expo-task-manager';
 import { AppState, Platform } from 'react-native';
 
 import { MYP_API_INTERVAL_MS } from '@/lib/myp-api';
-import { MypRunStopped, nextMypGroup, runMypGroup } from '@/lib/myp-queue';
+import { loadMypBlock, MypRunStopped, nextMypGroup, runMypGroup } from '@/lib/myp-queue';
 import { supabase } from '@/lib/supabase';
-import { collectionActions, collectionState, saveCollectionNow, startCollection, subscribeCollection } from '@/store/collection';
+import {
+  allowBackgroundSync,
+  collectionActions,
+  collectionState,
+  saveCollectionNow,
+  startCollection,
+  subscribeCollection,
+} from '@/store/collection';
 
 /** Nome da tarefa no aparelho. Não troque: o registro fica salvo no Android. */
 const TASK = 'myp-precos';
@@ -18,14 +25,9 @@ const LOAD_MS = 60_000;
 
 const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-/** A coleção carregada e, com conta, sincronizada nesta abertura (como a busca com o app aberto espera)? */
-async function collectionReady(ms: number) {
-  const signedIn = supabase ? !!(await supabase.auth.getSession()).data.session : false;
-  const ok = () => {
-    const s = collectionState();
-    return s.ready && (!signedIn || (!!s.session && !!s.lastSyncAt));
-  };
-  if (ok()) return true;
+/** Espera a coleção chegar a `ok` por até `ms`; false se não chegar. */
+function waitCollection(ok: () => boolean, ms: number) {
+  if (ok()) return Promise.resolve(true);
   return new Promise<boolean>((resolve) => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const unsubscribe = subscribeCollection(() => {
@@ -37,19 +39,38 @@ async function collectionReady(ms: number) {
     timer = setTimeout(() => {
       unsubscribe();
       resolve(ok());
-    }, ms);
+    }, Math.max(0, ms));
   });
+}
+
+/** A coleção carregada e, com conta, sincronizada nesta abertura (como a busca com o app aberto espera)? */
+async function collectionReady(ms: number) {
+  const signedIn = supabase ? !!(await supabase.auth.getSession()).data.session : false;
+  return waitCollection(() => {
+    const s = collectionState();
+    return s.ready && (!signedIn || (!!s.session && !!s.lastSyncAt));
+  }, ms);
 }
 
 /**
  * Segue a fila do MYP com o app em segundo plano: no ritmo de sempre (uma consulta a cada 6,5 s), por até 3 min.
- * Com o app aberto não faz nada (quem busca é o MypRefresher). Com o app fechado pelo sistema, liga a coleção antes.
+ * Com o app aberto não faz nada (quem busca é o MypRefresher). Com o app fechado pelo sistema, liga a coleção antes, no
+ * modo da tarefa: sem tela, a coleção só sincroniza quando pedida, e a incremental basta (a completa fica para quando
+ * a pessoa abrir o app).
  */
 async function runInBackground() {
   if (AppState.currentState === 'active') return;
-  const stop = startCollection();
+  const stop = startCollection({ background: true });
   try {
-    if (!(await collectionReady(LOAD_MS))) return;
+    const loadBy = Date.now() + LOAD_MS;
+    if (!(await waitCollection(() => collectionState().ready, LOAD_MS))) return;
+    // Recusa do MYP (403) guardada no aparelho: com ela, a fila fica vazia e a tarefa termina sem consultar.
+    await loadMypBlock();
+    // Nenhuma carta deste aparelho na fila: termina sem sincronizar. As cartas novas de outro aparelho chegam quando a
+    // pessoa abrir o app, ou numa execução em que a fila daqui tenha alguma.
+    if (!nextMypGroup(collectionState().entries, Date.now())) return;
+    allowBackgroundSync();
+    if (!(await collectionReady(loadBy - Date.now()))) return;
     const deadline = Date.now() + RUN_MS;
     // Para antes de uma consulta quando o tempo acaba ou o app volta (o MypRefresher continua de onde parou).
     const beforeCall = () => {
@@ -64,8 +85,8 @@ async function runInBackground() {
         apply: collectionActions.applyMypPrice,
         current: (id) => collectionState().entries[id],
       });
-      // Limite do MYP (429): para por aqui; a próxima vez já respeita a pausa.
-      if (step === 'stopped' || step === 'rateLimited') break;
+      // Limite do MYP (429) ou recusa (403): para por aqui; a próxima vez já respeita a pausa.
+      if (step === 'stopped' || step === 'rateLimited' || step === 'blocked') break;
       if (step === 'failed' || step === 'offline') await pause(MYP_API_INTERVAL_MS);
     }
   } finally {

@@ -1,4 +1,5 @@
 import { catalogByTcgdexIds, catalogProduct, isOversize } from './catalog';
+import { MYP_URL, storeUrl } from './copy';
 import { timedFetch } from './fetch-timeout';
 import { pickMypProduct, price, type MypProduct } from './myp-match';
 import { supabase } from './supabase';
@@ -74,12 +75,19 @@ export function nameVariants(name: string) {
 /** O MYP respondeu "muitas consultas": esperar antes de continuar. */
 export class MypRateLimited extends Error {}
 
+/**
+ * O MYP (ou a Cloudflare dele) recusou a consulta (403): é um "não". A fila para no app inteiro e avisa (ver
+ * markMypBlocked em myp-queue.ts); nada de tentar de outro jeito.
+ */
+export class MypBlocked extends Error {}
+
 /** Produtos com este nome exato (em inglês ou português), de todas as edições. */
 export function searchMypByName(name: string): Promise<MypProduct[]> {
   return timedFetch(
     `${API}/carta/${encodeURIComponent(name)}`,
     async (res) => {
       if (res.status === 429) throw new MypRateLimited('MYP 429');
+      if (res.status === 403) throw new MypBlocked('MYP 403');
       if (res.status === 404) return [];
       if (!res.ok) throw new Error(`MYP ${res.status}`);
       const body = (await res.json()) as { cards?: MypProduct[] };
@@ -98,6 +106,8 @@ export function searchMypByCode(code: string): Promise<MypProduct[]> {
     `${API}/precos/${encodeURIComponent(btoa(code))}`,
     async (res) => {
       if (res.status === 429) throw new MypRateLimited('MYP 429');
+      // 403 é recusa, não "produto inexistente": a carta não vira "não encontrada".
+      if (res.status === 403) throw new MypBlocked('MYP 403');
       if (res.status >= 400 && res.status < 500) return [];
       if (!res.ok) throw new Error(`MYP ${res.status}`);
       const body = (await res.json()) as MypProduct | { error?: string };
@@ -324,7 +334,8 @@ export async function fetchMypByKeys(
       ...base,
       productId: p.internal_code,
       code: p.card_code,
-      url: p.link ?? undefined,
+      // Só um endereço do próprio MYP vai para o botão "MYP Cards".
+      url: storeUrl(p.link, MYP_URL),
       min: price(p.min_price),
       avg: price(p.avg_price),
       max: price(p.max_price),

@@ -4,7 +4,7 @@ import { createRoot, type Root, type TestInstance } from 'test-renderer';
 
 import BinderScreen from '@/app/index';
 import { HomeSearchInput, suggestionRoom, suggestionsSpeech } from '@/components/home-search';
-import { OUTSIDE_PAGE, OutsideCardsSheet } from '@/components/home-sheets';
+import { CardPeekSheet, OUTSIDE_PAGE, OutsideCardsSheet } from '@/components/home-sheets';
 import { NoticeSlot } from '@/components/home-summary';
 import { VALUE_SCOPE } from '@/lib/copy';
 import { formatBRLTight } from '@/lib/format';
@@ -62,6 +62,8 @@ jest.mock('react-native/Libraries/Components/Pressable/Pressable', () => {
 jest.mock('react-native/Libraries/Utilities/useWindowDimensions', () => ({ __esModule: true, default: () => mockWindow }));
 // A miniatura não importa aqui (e buscaria a imagem que falta).
 jest.mock('@/components/card-image', () => ({ CardImage: () => null, cardImageUrl: () => undefined, prefetchCardImages: () => {} }));
+// Recusa do MYP (403): cada teste diz até quando (0 = nenhuma).
+jest.mock('@/lib/myp-queue', () => ({ ...jest.requireActual('@/lib/myp-queue'), mypBlockedUntil: jest.fn(() => 0), clearMypBlock: jest.fn() }));
 jest.mock('@/store/collection', () => ({
   ...jest.requireActual('@/store/collection'),
   useCollectionReady: () => mockState.ready,
@@ -229,6 +231,28 @@ describe('Home no computador', () => {
   });
 });
 
+describe('Aviso da recusa do MYP', () => {
+  it('MYP recusou (403): o Fichário avisa até quando, e "Tentar de novo" libera a próxima consulta', async () => {
+    const { mypBlockedUntil, clearMypBlock } = jest.requireMock<{ mypBlockedUntil: jest.Mock; clearMypBlock: jest.Mock }>('@/lib/myp-queue');
+    mypBlockedUntil.mockImplementation(() => new Date(AT).getTime() + 24 * 60 * 60_000);
+    try {
+      const root = await open();
+      expect(screenText(root)).toContain('MYP Cards recusou as consultas de preço');
+      const retry = root.container.queryAll((n: TestInstance) => n.type === 'Pressable' && textOf(n).includes('Tentar de novo'))[0];
+      expect(retry).toBeDefined();
+      await act(async () => (retry.props.onPress as () => void)());
+      expect(clearMypBlock).toHaveBeenCalledTimes(1);
+    } finally {
+      mypBlockedUntil.mockImplementation(() => 0);
+    }
+  });
+
+  it('sem recusa, nenhum aviso do MYP', async () => {
+    const root = await open();
+    expect(screenText(root)).not.toContain('MYP Cards recusou');
+  });
+});
+
 describe('Cartas fora do fichário', () => {
   it('mostra as cartas em levas, não todas de uma vez', async () => {
     const list = Array.from({ length: 75 }, (_, i) => entry({ id: `${i + 1}-1`, dex: i + 1, slot: 1, cardName: `Carta ${i + 1}` }));
@@ -243,6 +267,19 @@ describe('Cartas fora do fichário', () => {
     await press(root, 'Ver mais 15 cartas');
     expect(rows()).toBe(75);
     expect(pressable(root, 'Ver mais 15 cartas')).toBeUndefined();
+  });
+});
+
+describe('Espiar a carta (toque longo no bolso)', () => {
+  const setLine = (root: Root, setName: string) => root.container.queryAll((n: TestInstance) => n.type === 'Text' && textOf(n).startsWith(setName)).map(textOf)[0];
+
+  it('coleção e número; japonesa antiga sem número e sem o " · " sobrando', async () => {
+    const props = { onClose: () => {}, onOpen: () => {} };
+    const pika = await open(createElement(CardPeekSheet, { ...props, entry: entry({ setTotal: 165 }) }));
+    expect(setLine(pika, '151')).toBe('151 · 025/165');
+    const old = entry({ id: '6-0', dex: 6, cardId: 'PMCG1-021', lang: 'ja', setId: 'PMCG1', setName: '拡張パック', localId: '021', setTotal: 102 });
+    const root = await open(createElement(CardPeekSheet, { ...props, entry: old }));
+    expect(setLine(root, '拡張パック')).toBe('拡張パック');
   });
 });
 

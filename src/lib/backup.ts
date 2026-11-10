@@ -1,7 +1,9 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import { Platform, Share } from 'react-native';
 
+import { TOTAL_SPECIES } from '@/data/pokedex';
 import {
+  BINDER_PURPOSES,
   CONDITIONS,
   DEFAULT_CUSTOM_BINDER,
   DEFAULT_SETTINGS,
@@ -17,7 +19,10 @@ import {
   type Variant,
 } from '@/lib/types';
 
+import { MAX_COLS, MAX_PAGES, MAX_ROWS, MAX_SLOTS_PER_POKEMON } from './binder';
+import { MYP_URL, storeUrl, TCGPLAYER_URL } from './copy';
 import { upgradeEntry } from './entry-upgrade';
+import { cardNumber } from './lists';
 
 /** Formato do arquivo da cópia (sobe quando mudar de um jeito que versões antigas do app não saibam ler). */
 export const BACKUP_VERSION = 1;
@@ -111,6 +116,18 @@ const isPrice = (v: unknown) =>
   isObject(v) && typeof v.cardId === 'string' && typeof v.variant === 'string' && !!isoDate(v.checkedAt);
 
 /**
+ * Teto da posição da carta: Pokémon até o último da Pokédex (0 = não é Pokémon, no fichário livre) e bolso até o último
+ * do maior fichário livre (500 páginas de 8 × 6). Acima disso é cópia forjada ou estragada: a carta ficaria fora de
+ * qualquer bolso e, acima do int do banco (`dex`/`slot`), o envio dela falharia a cada tentativa e travaria a fila.
+ */
+const MAX_SLOT = MAX_PAGES * MAX_ROWS * MAX_COLS - 1;
+const isDex = (v: unknown): v is number => isIndex(v) && v <= TOTAL_SPECIES;
+const isSlot = (v: unknown): v is number => isIndex(v) && v <= MAX_SLOT;
+
+/** Endereço do botão de cada loja (ver storeUrl): de outro site, sai (o botão volta para a busca da loja). */
+const PRICE_SITES = { mypApi: MYP_URL, tcgplayer: TCGPLAYER_URL } as const;
+
+/**
  * Campos opcionais com formato errado (ex.: arquivo editado à mão) saem, em vez de quebrar as contas do valor. Devolve
  * quais chaves tirar.
  */
@@ -131,10 +148,21 @@ function badFields(raw: Record<string, unknown>): string[] {
   return bad;
 }
 
-/** Carta lida de uma cópia, com o mínimo para ser colocada no fichário; `null` se faltar o essencial. */
-function toEntry(raw: unknown): Entry | null {
+/** O objeto com `k` em `latest` quando a data dele vem depois; sem data (ou já no passado), o mesmo objeto. */
+function notAfter(v: Record<string, unknown>, k: string, latest: string): Record<string, unknown> {
+  const ms = typeof v[k] === 'string' ? Date.parse(v[k] as string) : NaN;
+  return ms > Date.parse(latest) ? { ...v, [k]: latest } : v;
+}
+
+/**
+ * Carta lida de uma cópia, com o mínimo para ser colocada no fichário; `null` se faltar o essencial. As datas que
+ * decidem a junção ficam no máximo em `latest` (agora): a da edição, a dos preços (`checkedAt`; o banco guarda sempre o
+ * preço de data maior, então um 9999 nunca mais seria trocado) e as do "Meu valor" (com `setAt` no futuro, o preço da
+ * fonte nunca o substituiria). Como na configuração (cleanSettings).
+ */
+function toEntry(raw: unknown, latest: string): Entry | null {
   if (!isObject(raw)) return null;
-  if (!isIndex(raw.dex) || !isIndex(raw.slot)) return null;
+  if (!isDex(raw.dex) || !isSlot(raw.slot)) return null;
   if (typeof raw.cardId !== 'string' || !raw.cardId) return null;
   if (!LANGS.includes(raw.lang as CardLang)) return null;
   if (raw.binderId != null && typeof raw.binderId !== 'string') return null;
@@ -149,13 +177,25 @@ function toEntry(raw: unknown): Entry | null {
     localId: str(raw.localId),
     variant,
     condition,
-    updatedAt: isoDate(raw.updatedAt),
+    updatedAt: cleanDate(raw.updatedAt, latest),
   };
   for (const k of badFields(raw)) delete out[k];
+  for (const [k, date] of [['mypApi', 'checkedAt'], ['tcgplayer', 'checkedAt'], ['myValue', 'setAt'], ['myValueReplaced', 'at']] as const) {
+    const v = out[k];
+    if (isObject(v)) out[k] = notAfter(v, date, latest);
+  }
+  for (const [k, site] of Object.entries(PRICE_SITES)) {
+    const v = out[k];
+    if (isObject(v) && 'url' in v && !storeUrl(v.url, site)) {
+      const { url: _url, ...rest } = v;
+      out[k] = rest;
+    }
+  }
   return upgradeEntry(stripLegacyFields(out as unknown as Entry));
 }
 
-function isSettings(v: unknown): v is BinderSettings {
+/** A cópia tem um bloco de configuração (sem ele, a configuração daqui fica como está). */
+function hasSettings(v: unknown): v is Record<string, unknown> {
   return (
     isObject(v) &&
     typeof v.rows === 'number' &&
@@ -166,17 +206,109 @@ function isSettings(v: unknown): v is BinderSettings {
   );
 }
 
-/** Fichário livre com o mínimo para ser desenhado (o resto vem do padrão). */
-function isBinder(v: unknown): v is Pick<CustomBinder, 'id' | 'name' | 'rows' | 'cols' | 'pages'> {
-  return (
-    isObject(v) &&
-    typeof v.id === 'string' &&
-    !!v.id &&
-    typeof v.name === 'string' &&
-    typeof v.rows === 'number' &&
-    typeof v.cols === 'number' &&
-    typeof v.pages === 'number'
-  );
+const PURPOSE_IDS = new Set<string>(BINDER_PURPOSES.map((p) => p.id));
+const isLang = (v: unknown): v is CardLang => LANGS.includes(v as CardLang);
+const bool = (v: unknown, fallback: boolean) => (typeof v === 'boolean' ? v : fallback);
+/** Inteiro de 1 até `max` (o limite da tela); qualquer outra coisa vira o padrão. */
+const upTo = (v: unknown, max: number, fallback: number) => (isIndex(v) && v >= 1 && v <= max ? v : fallback);
+
+export type CleanSettingsOptions = {
+  /**
+   * Teto das datas (ISO): na cópia, agora, para uma data no futuro não vencer a junção para sempre. Sem ele (aparelho e
+   * nuvem), uma data mais de 1 ano no futuro sai (ver FAR_FUTURE_MS); um teto em "agora" a cada leitura faria a nuvem
+   * vencer toda edição feita aqui.
+   */
+  latest?: string;
+  /** `createdAt` de um fichário livre sem data válida. */
+  createdAt?: string;
+};
+
+/**
+ * Nenhum relógio de aparelho está tão adiantado (nem o de quem adianta a data para um jogo): é cópia forjada ou estragada.
+ * Com 9999-12-31T23:59:59.999Z, a edição seguinte ganharia uma data do ano 10000 ("+010000-…"), que no texto vem antes
+ * e perderia a junção.
+ */
+const FAR_FUTURE_MS = 365 * 24 * 3_600_000;
+
+/** Data no formato do app, no máximo `latest` (ou, sem ele, '' se for longe demais no futuro); '' se não for data. */
+function cleanDate(v: unknown, latest?: string) {
+  const d = isoDate(v);
+  if (!d) return '';
+  const ms = Date.parse(d);
+  if (latest) return ms > Date.parse(latest) ? latest : d;
+  return ms > Date.now() + FAR_FUTURE_MS ? '' : d;
+}
+
+/** Tira a chave quando o valor não serve (os campos opcionais da configuração). */
+function keepIf(out: Record<string, unknown>, k: string, ok: (v: unknown) => boolean) {
+  if (k in out && !ok(out[k])) delete out[k];
+}
+
+/** Fichário livre de fora; null sem um id (não há como achar as cartas dele). Grade e páginas fora dos limites: o padrão. */
+function cleanBinder(raw: unknown, opts: CleanSettingsOptions): CustomBinder | null {
+  if (!isObject(raw) || typeof raw.id !== 'string' || !raw.id) return null;
+  const d = DEFAULT_CUSTOM_BINDER;
+  // Campos que esta versão não conhece ficam (podem ser de uma versão mais nova do app, em outro aparelho).
+  const out: Record<string, unknown> = {
+    ...raw,
+    name: typeof raw.name === 'string' ? raw.name : d.name,
+    color: typeof raw.color === 'string' ? raw.color : d.color,
+    purpose: PURPOSE_IDS.has(str(raw.purpose)) ? raw.purpose : d.purpose,
+    rows: upTo(raw.rows, MAX_ROWS, d.rows),
+    cols: upTo(raw.cols, MAX_COLS, d.cols),
+    pages: upTo(raw.pages, MAX_PAGES, d.pages),
+    doubleSided: bool(raw.doubleSided, d.doubleSided),
+    showPrices: bool(raw.showPrices, d.showPrices),
+    showPocketNumbers: bool(raw.showPocketNumbers, d.showPocketNumbers),
+    searchLang: isLang(raw.searchLang) ? raw.searchLang : d.searchLang,
+    createdAt: cleanDate(raw.createdAt, opts.latest) || opts.createdAt || '',
+  };
+  keepIf(out, 'description', (v) => typeof v === 'string');
+  const updatedAt = cleanDate(raw.updatedAt, opts.latest);
+  if (updatedAt) out.updatedAt = updatedAt;
+  else delete out.updatedAt;
+  return out as CustomBinder;
+}
+
+/**
+ * Configuração vinda de fora do app: da cópia, do aparelho e da nuvem. Linhas, colunas, espaços por Pokémon e páginas
+ * só dentro dos limites da tela (1–8, 1–6, 1–6 e 1–500); fora disso, o padrão. Uma grade de 2000 × 2000 travaria o
+ * fichário ao abrir, em todos os aparelhos da conta. O que faltar vem do padrão; o resto fica como está (configuração
+ * válida sai igual, para a junção não mandar à nuvem só por causa da leitura). null se não for um objeto.
+ */
+export function cleanSettings(raw: unknown, opts: CleanSettingsOptions = {}): BinderSettings | null {
+  if (!isObject(raw)) return null;
+  const d = DEFAULT_SETTINGS;
+  const languages = Array.isArray(raw.languages) ? raw.languages.filter(isLang) : [];
+  const out: Record<string, unknown> = {
+    ...raw,
+    rows: upTo(raw.rows, MAX_ROWS, d.rows),
+    cols: upTo(raw.cols, MAX_COLS, d.cols),
+    slotsPerPokemon: upTo(raw.slotsPerPokemon, MAX_SLOTS_PER_POKEMON, d.slotsPerPokemon),
+    doubleSided: bool(raw.doubleSided, d.doubleSided),
+    languages: languages.length ? languages : [...d.languages],
+  };
+  keepIf(out, 'sheets', (v) => Number.isSafeInteger(v) && (v as number) >= 0);
+  keepIf(out, 'name', (v) => typeof v === 'string');
+  keepIf(out, 'color', (v) => typeof v === 'string');
+  // A faixa já é cortada na Pokédex por dexRange; aqui, só número inteiro.
+  keepIf(out, 'dexFrom', Number.isInteger);
+  keepIf(out, 'dexTo', Number.isInteger);
+  if (Array.isArray(raw.extras)) {
+    out.extras = raw.extras.map((b) => cleanBinder(b, opts)).filter((b): b is CustomBinder => !!b);
+  } else delete out.extras;
+  if (isObject(raw.removedBinders)) {
+    const removed: Record<string, string> = {};
+    for (const [id, at] of Object.entries(raw.removedBinders)) {
+      const date = cleanDate(at, opts.latest);
+      if (date) removed[id] = date;
+    }
+    out.removedBinders = removed;
+  } else delete out.removedBinders;
+  const updatedAt = cleanDate(raw.updatedAt, opts.latest);
+  if (updatedAt) out.updatedAt = updatedAt;
+  else delete out.updatedAt;
+  return out as BinderSettings;
 }
 
 /**
@@ -195,6 +327,8 @@ export function parseBackup(input: unknown): ParsedBackup {
   let rawEntries: unknown[];
   let settings: BinderSettings | null = null;
   let exportedAt: string | undefined;
+  /** Teto das datas da cópia (ver toEntry e cleanSettings). */
+  const now = new Date().toISOString();
   if (Array.isArray(data)) {
     rawEntries = data;
   } else if (isObject(data)) {
@@ -205,15 +339,12 @@ export function parseBackup(input: unknown): ParsedBackup {
     else if (isObject(data.entries)) rawEntries = Object.values(data.entries);
     else if (data.app == null && data.version == null && Object.values(data).every(isObject)) rawEntries = Object.values(data);
     else throw new Error('Este arquivo não tem a lista de cartas da coleção.');
-    exportedAt = typeof data.exportedAt === 'string' ? data.exportedAt : undefined;
-    if (isSettings(data.settings)) {
-      // O que faltar (cópia antiga ou editada à mão) fica com o padrão do app.
-      const createdAt = isoDate(exportedAt) || new Date().toISOString();
-      const extras = (data.settings.extras as unknown[] | undefined)
-        ?.filter(isBinder)
-        .map((b): CustomBinder => ({ ...DEFAULT_CUSTOM_BINDER, createdAt, ...b }));
-      settings = { ...DEFAULT_SETTINGS, ...data.settings, extras };
-      if (!settings.extras) delete settings.extras;
+    // A data da cópia vale para as cartas sem data (importCollection): no futuro, fica em agora, como as outras.
+    exportedAt = typeof data.exportedAt === 'string' ? (notAfter(data, 'exportedAt', now).exportedAt as string) : undefined;
+    if (hasSettings(data.settings)) {
+      // O que faltar ou vier fora dos limites (cópia antiga, editada à mão ou feita por outra pessoa) fica com o padrão
+      // do app, e as datas no futuro ficam em agora.
+      settings = cleanSettings(data.settings, { latest: now, createdAt: cleanDate(exportedAt, now) || now });
     }
   } else {
     throw new Error('Este arquivo não é uma cópia da coleção.');
@@ -221,7 +352,7 @@ export function parseBackup(input: unknown): ParsedBackup {
   const entries: Entry[] = [];
   let invalid = 0;
   for (const raw of rawEntries) {
-    const e = toEntry(raw);
+    const e = toEntry(raw, now);
     if (e) entries.push(e);
     else invalid++;
   }
@@ -282,7 +413,8 @@ export function backupToCsv(backup: CollectionBackup): string {
       e.slot + 1,
       e.cardName,
       e.setName,
-      e.setTotal ? `${e.localId}/${e.setTotal}` : e.localId,
+      // O número impresso, como na tela e nas listas (promo sem o total inventado; japonesa antiga, nenhum).
+      cardNumber(e),
       LANG_LABEL[e.lang] ?? e.lang,
       variantLabel.get(e.variant) ?? e.variant,
       e.variantNote,

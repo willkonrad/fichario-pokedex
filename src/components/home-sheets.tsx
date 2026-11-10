@@ -100,6 +100,8 @@ function PeekPrice({ entry }: { entry: Entry }) {
 /** Espiar a carta sem sair da página (toque longo no bolso, H3): imagem, coleção, versão, estado, preço e "Abrir". */
 export function CardPeekSheet({ entry, position, onClose, onOpen }: { entry?: Entry; position?: string; onClose: () => void; onOpen: () => void }) {
   const variant = entry && entry.variant !== 'normal' ? [VARIANT_LABEL[entry.variant], entry.variantNote?.trim()].filter(Boolean).join(' · ') : '';
+  // Sem número impresso (japonesa antiga), nada depois da coleção: nem o " · ".
+  const number = entry ? cardNumber(entry) : '';
   return (
     <InfoSheet
       visible={!!entry}
@@ -129,7 +131,7 @@ export function CardPeekSheet({ entry, position, onClose, onOpen }: { entry?: En
           <View style={styles.peekInfo}>
             <Text style={styles.peekSet}>
               {entry.setName}
-              {entry.localId ? ` · ${cardNumber(entry)}` : ''}
+              {number ? ` · ${number}` : ''}
             </Text>
             <Text style={styles.peekMuted}>{[LANG_SHORT[entry.lang], variant, entry.condition].filter(Boolean).join(' · ')}</Text>
             <PeekPrice entry={entry} />

@@ -18,6 +18,7 @@ import {
   priceAfterPlacingText,
   SET_MY_VALUE,
   SOURCE_NAME,
+  storeUrl,
   TCGCSV_URL,
   TCGPLAYER_URL,
   usdConversionText,
@@ -48,6 +49,7 @@ export function PricePanel({
   basis,
   onBasis,
   ligaUrl,
+  mypSearchUrl,
   onSetMyValue,
 }: {
   /** Carta salva (os preços chegam depois de salvar). */
@@ -59,6 +61,8 @@ export function PricePanel({
   onBasis?: (basis: ValueBasis) => void;
   /** Página da carta na LigaPokemon (só o link; o valor vem do MYP). */
   ligaUrl?: string;
+  /** Busca da carta no MYP Cards, quando a API não achou o produto dela (japonesa, ou preço ainda não buscado). */
+  mypSearchUrl?: string;
   /** "✎ Definir meu valor": leva ao campo "Meu valor" (V8). */
   onSetMyValue?: () => void;
 }) {
@@ -82,7 +86,7 @@ export function PricePanel({
       <View style={styles.card}>
         {head}
         <Text style={styles.muted}>{priceAfterPlacingText(WEB)}</Text>
-        <StoreLinks mypUrl={MYP_URL} ligaUrl={ligaUrl} />
+        <StoreLinks mypUrl={mypSearchUrl ?? MYP_URL} ligaUrl={ligaUrl} />
         {howSheet}
       </View>
     );
@@ -210,7 +214,8 @@ export function PricePanel({
       {/* Embaixo do valor: ao lado do título em Kanit não cabe num celular, e o número vem primeiro. */}
       {ref.basis !== 'manual' && !gapMyValue && onSetMyValue ? <TextAction label={SET_MY_VALUE} accessibilityLabel="Definir meu valor" onPress={onSetMyValue} /> : null}
 
-      <StoreLinks mypUrl={api?.url ?? MYP_URL} tcgUrl={tcg?.url} ligaUrl={ligaUrl} />
+      {/* Só endereços do site de cada loja (uma cópia importada guardada antes da conferência não troca o destino). */}
+      <StoreLinks mypUrl={storeUrl(api?.url, MYP_URL) ?? mypSearchUrl ?? MYP_URL} tcgUrl={storeUrl(tcg?.url, TCGPLAYER_URL)} ligaUrl={ligaUrl} />
 
       {details.length ? (
         <Disclosure title="Detalhes da cotação" open={detailsOpen} onToggle={() => setDetailsOpen((o) => !o)}>

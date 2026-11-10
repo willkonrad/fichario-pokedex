@@ -2,10 +2,10 @@
 // selo, ordem das coleções só do catálogo, Nidoran e reserva japonesa, carta antiga sem número, anos das coleções.
 // Nenhum teste acessa a rede.
 import { plainName, type CatalogRow } from '@/lib/catalog';
-import { cardsForDexResult, searchCardsResult, setReleaseYears, type CardBrief, type CardDetail } from '@/lib/tcgdex';
+import { cardsForDexResult, searchCardsResult, setFacts, setNameIn, setReleaseYears, type CardBrief, type CardDetail } from '@/lib/tcgdex';
 import { versionOptions, withCatalogVersions } from '@/lib/variants';
 
-const mockDb = { rows: [] as CatalogRow[], names: [] as string[], years: {} as Record<string, number> };
+const mockDb = { rows: [] as CatalogRow[], names: [] as string[], dates: {} as Record<string, string> };
 
 // O catálogo filtra pelo nome sem acento como o banco (name_plain ilike %busca%).
 jest.mock('@/lib/catalog', () => {
@@ -21,7 +21,7 @@ jest.mock('@/lib/catalog', () => {
       mockDb.rows.filter((r) => r.category === category && !!r.tcgdex_id && ids.includes(r.tcgdex_id)),
     ),
     catalogGroupSet: jest.fn(async () => []),
-    catalogGroupYears: jest.fn(async () => mockDb.years),
+    catalogGroupDates: jest.fn(async () => mockDb.dates),
   };
 });
 
@@ -51,6 +51,19 @@ const SETS: Record<string, { id: string; name: string; cardCount?: { total?: num
   ],
 };
 
+/** Séries da TCGdex (/v2/<idioma>/series): a lista em português não tem neo, gym, ecard… */
+const SERIES: Record<string, { id: string; name: string }[]> = {
+  pt: [
+    { id: 'base', name: 'Coleção Básica' },
+    { id: 'sv', name: 'Escarlate e Violeta' },
+  ],
+  en: [
+    { id: 'base', name: 'Base' },
+    { id: 'neo', name: 'Neo' },
+    { id: 'sv', name: 'Scarlet & Violet' },
+  ],
+};
+
 const json = (body: unknown, status = 200) => ({ ok: status < 400, status, json: async () => body });
 
 beforeAll(() => {
@@ -58,13 +71,25 @@ beforeAll(() => {
     const url = decodeURIComponent(String(input));
     if (url.startsWith('https://www.zukan.com.br/mcp')) return json({ result: { isError: true } });
     if (url.endsWith('/v2/graphql')) {
-      expect(JSON.parse(String(init?.body)).query).toContain('releaseDate');
-      return json({ data: { sets: [{ id: 'neo2', releaseDate: '2001-06-01' }, { id: 'base1', releaseDate: '1999-01-09' }] } });
+      const query = JSON.parse(String(init?.body)).query;
+      expect(query).toContain('releaseDate');
+      expect(query).toContain('serie { id }');
+      return json({
+        data: {
+          sets: [
+            { id: 'neo1', releaseDate: '2000-12-16', serie: { id: 'neo' } },
+            { id: 'neo2', releaseDate: '2001-06-01', serie: { id: 'neo' } },
+            { id: 'base1', releaseDate: '1999-01-09', serie: { id: 'base' } },
+            { id: 'sv03.5', releaseDate: '2023-09-22', serie: { id: 'sv' } },
+          ],
+        },
+      });
     }
     const m = url.match(/\/v2\/(en|pt|ja)\/(.+)$/);
     if (!m) return json(null, 404);
     const [, lang, path] = m;
     if (path === 'sets') return json(SETS[lang]);
+    if (path === 'series') return json(SERIES[lang] ?? []);
     if (path === 'series/tcgp') return json({ sets: [] });
     const hit = tcgdex.get(`${lang}/${path}`);
     if (hit !== undefined) return json(hit);
@@ -77,7 +102,7 @@ beforeEach(() => {
   tcgdex.clear();
   mockDb.rows = [];
   mockDb.names = [];
-  mockDb.years = {};
+  mockDb.dates = {};
 });
 
 function row(o: Partial<CatalogRow> & { product_id: number; group_id: number; name: string }, group: CatalogRow['tcg_groups'] = null): CatalogRow {
@@ -268,9 +293,9 @@ describe('lista japonesa (85 como base, TCGdex japonesa de reserva)', () => {
 
 describe('setReleaseYears (ano ao lado da coleção)', () => {
   it('na lista em português e inglês: a data da TCGdex e do catálogo, com o CD Promo em 1998', async () => {
-    mockDb.years = { tcgp24568: 2025, tcgp604: 1997 };
+    mockDb.dates = { tcgp24568: '2025-12-01', tcgp604: '1997-03-05' };
     const years = await setReleaseYears();
-    expect(years).toMatchObject({ neo2: 2001, base1: 1999, tcgp604: 1997, tcgp24568: 1998 });
+    expect(years).toEqual({ neo1: 2000, neo2: 2001, base1: 1999, 'sv03.5': 2023, tcgp604: 1997, tcgp24568: 1998 });
   });
 
   it('na lista japonesa: a coleção da reserva com o ano dela (neo2 de 2000), nunca o da inglesa de mesmo id', async () => {
@@ -282,6 +307,39 @@ describe('setReleaseYears (ano ao lado da coleção)', () => {
     // Sem a coleção japonesa (404) e as inglesas: sem ano.
     expect(years.PMCG9).toBeUndefined();
     expect(years.base1).toBeUndefined();
+  });
+});
+
+describe('setFacts e setNameIn (bloco "Para colecionador")', () => {
+  it('português: o dia da TCGdex (o da coleção em inglês) e a série em português', async () => {
+    expect(await setFacts('sv03.5', 'pt')).toEqual({ day: '2023-09-22', serieId: 'sv', serie: 'Escarlate e Violeta' });
+    expect(await setFacts('base1', 'pt')).toEqual({ day: '1999-01-09', serieId: 'base', serie: 'Coleção Básica' });
+  });
+
+  it('português sem o nome traduzido da série (neo2): o nome em inglês', async () => {
+    expect(await setFacts('neo2', 'pt')).toEqual({ day: '2001-06-01', serieId: 'neo', serie: 'Neo' });
+    expect(await setFacts('neo2', 'en')).toEqual({ day: '2001-06-01', serieId: 'neo', serie: 'Neo' });
+  });
+
+  it('japonês: o dia da coleção japonesa (neo1 de 2000-02-04, nunca o 2000-12-16 da inglesa) e a série em japonês', async () => {
+    tcgdex.set('ja/sets/neo1', { id: 'neo1', name: '金、銀、新世界へ...', releaseDate: '2000-02-04', serie: { id: 'neo', name: 'ポケモンカード★neo' } });
+    tcgdex.set('ja/sets/M5', { id: 'M5', name: 'アビスアイ', releaseDate: '2026-05-22', serie: { id: 'M', name: 'ポケモンカードゲーム MEGA' } });
+    expect(await setFacts('neo1', 'ja')).toEqual({ day: '2000-02-04', serieId: 'neo', serie: 'ポケモンカード★neo' });
+    expect(await setFacts('M5', 'ja')).toEqual({ day: '2026-05-22', serieId: 'M', serie: 'ポケモンカードゲーム MEGA' });
+    // Coleção japonesa que a TCGdex não tem (404): nada.
+    expect(await setFacts('PMCG8', 'ja')).toEqual({});
+  });
+
+  it('coleção só do catálogo, sem id ou desconhecida: nada', async () => {
+    expect(await setFacts('tcgp604', 'pt')).toEqual({});
+    expect(await setFacts('', 'en')).toEqual({});
+    expect(await setFacts('xx9', 'en')).toEqual({});
+  });
+
+  it('setNameIn: o nome da coleção na lista do idioma', async () => {
+    expect(await setNameIn('30th-c', 'pt')).toBe('Coleção Clássica');
+    expect(await setNameIn('base1', 'pt')).toBeUndefined();
+    expect(await setNameIn('', 'pt')).toBeUndefined();
   });
 });
 

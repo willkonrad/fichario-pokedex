@@ -23,9 +23,20 @@ export type CatalogRow = {
   tcgdex_id: string | null;
   /** Coleção (grupo) da TCGplayer; `published_on` = data de lançamento (nula quando a fonte não tem). */
   tcg_groups: { name: string; abbr: string | null; published_on?: string | null } | null;
+  /** Data de lançamento do próprio produto (poucos têm); só nas consultas que a pedem (`released`, `facts`). */
+  released_on?: string | null;
+  /** HP, tipo e estágio da carta como a TCGplayer escreve ("Psychic", "Stage 1"); só com `facts`. */
+  hp?: number | null;
+  card_type?: string | null;
+  stage?: string | null;
 };
 
 const COLUMNS = 'product_id, category, group_id, name, full_name, number, rarity, image, stamp, tcgdex_id, tcg_groups(name, abbr, published_on)';
+/** Colunas a mais da tela da carta, fora das listas (cada lista levaria a coluna a mais em todas as linhas). */
+const RELEASED_COLUMNS = `${COLUMNS}, released_on`;
+const FACT_COLUMNS = `${COLUMNS}, released_on, hp, card_type, stage`;
+/** Banco ainda sem a coluna pedida (migração não aplicada): a consulta volta às colunas de sempre. */
+const noSuchColumn = (e: { code?: string } | null) => e?.code === '42703';
 /** 3 = Pokémon em inglês (as cartas em português são as mesmas, com o mesmo nome). */
 export const ENGLISH = 3;
 /** 85 = Pokémon em japonês (cartas japonesas de todas as épocas, inclusive as "Pocket Monsters" antigas). */
@@ -169,19 +180,28 @@ export async function catalogByName(name: string, category = ENGLISH, opts: { ma
 
 /**
  * Cartas ligadas a estes ids da TCGdex (pega as de nome diferente, ex.: "Nidoran♀"), em blocos de 200 em paralelo, só da
- * categoria pedida: os ids da TCGdex japonesa repetem os ingleses ("neo1-…", "SM6-…").
+ * categoria pedida: os ids da TCGdex japonesa repetem os ingleses ("neo1-…", "SM6-…"). Com `released` (tela da carta),
+ * também a data de cada produto; banco sem a coluna, as colunas de sempre.
  */
-export async function catalogByTcgdexIds(ids: string[], category = ENGLISH, opts: { signal?: AbortSignal } = {}): Promise<CatalogRow[]> {
+export async function catalogByTcgdexIds(
+  ids: string[],
+  category = ENGLISH,
+  opts: { signal?: AbortSignal; released?: boolean } = {},
+): Promise<CatalogRow[]> {
   const client = supabase;
   if (!client || !ids.length) return [];
   const unique = [...new Set(ids)];
   const chunks: string[][] = [];
   for (let i = 0; i < unique.length; i += 200) chunks.push(unique.slice(i, i + 200));
+  const read = (chunk: string[], columns: string) => {
+    let query = client.from('tcg_catalog').select(columns).eq('category', category).in('tcgdex_id', chunk);
+    if (opts.signal) query = query.abortSignal(opts.signal);
+    return query;
+  };
   const pages = await Promise.all(
     chunks.map(async (chunk) => {
-      let query = client.from('tcg_catalog').select(COLUMNS).eq('category', category).in('tcgdex_id', chunk);
-      if (opts.signal) query = query.abortSignal(opts.signal);
-      const { data, error } = await query;
+      let { data, error } = await read(chunk, opts.released ? RELEASED_COLUMNS : COLUMNS);
+      if (error && opts.released && noSuchColumn(error)) ({ data, error } = await read(chunk, COLUMNS));
       if (error) throw error;
       return (data ?? []) as unknown as CatalogRow[];
     }),
@@ -195,12 +215,18 @@ export function catalogYear(publishedOn?: string | null): number | undefined {
   return year > 1990 ? year : undefined;
 }
 
+/** Dia "AAAA-MM-DD" de uma data do catálogo; sem data, data inválida ou anterior a 1991, undefined. */
+export function catalogDay(date?: string | null): string | undefined {
+  const day = String(date ?? '').slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) && catalogYear(day) ? day : undefined;
+}
+
 /**
- * Ano de lançamento das coleções do catálogo em inglês e em japonês (publishedOn do TCGCSV), pela chave que as listas
+ * Dia de lançamento das coleções do catálogo em inglês e em japonês (publishedOn do TCGCSV), pela chave que as listas
  * usam para a coleção que só existe no catálogo ("tcgp<grupo>"; o group_id é único nas duas categorias). Coleção sem
- * data fica de fora. Banco sem a coluna ainda: nenhum ano.
+ * data fica de fora. Banco sem a coluna ainda: nenhum dia.
  */
-export async function catalogGroupYears(): Promise<Record<string, number>> {
+export async function catalogGroupDates(): Promise<Record<string, string>> {
   if (!supabase) return {};
   const { data, error } = await supabase
     .from('tcg_groups')
@@ -208,14 +234,21 @@ export async function catalogGroupYears(): Promise<Record<string, number>> {
     .in('category', [ENGLISH, JAPANESE])
     .not('published_on', 'is', null);
   if (error) {
-    if (error.code === '42703') return {};
+    if (noSuchColumn(error)) return {};
     throw error;
   }
-  const out: Record<string, number> = {};
+  const out: Record<string, string> = {};
   for (const r of (data ?? []) as { group_id: number; published_on: string | null }[]) {
-    const year = catalogYear(r.published_on);
-    if (year) out[`tcgp${r.group_id}`] = year;
+    const day = catalogDay(r.published_on);
+    if (day) out[`tcgp${r.group_id}`] = day;
   }
+  return out;
+}
+
+/** O ano de cada coleção do catálogo (o de catalogGroupDates). */
+export async function catalogGroupYears(): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  for (const [key, day] of Object.entries(await catalogGroupDates())) out[key] = catalogYear(day)!;
   return out;
 }
 
@@ -227,9 +260,16 @@ export async function catalogGroupSet(groupId: number): Promise<string[]> {
   return (data ?? []).map((r) => (r as { tcgdex_id: string }).tcgdex_id);
 }
 
-export async function catalogProduct(productId: number): Promise<CatalogRow | undefined> {
-  if (!supabase) return undefined;
-  const { data, error } = await supabase.from('tcg_catalog').select(COLUMNS).eq('product_id', productId).maybeSingle();
+/**
+ * Um produto do catálogo. Com `facts` (ficha da carta só do catálogo), também a data do produto, HP, tipo e estágio;
+ * banco sem essas colunas, as de sempre.
+ */
+export async function catalogProduct(productId: number, opts: { facts?: boolean } = {}): Promise<CatalogRow | undefined> {
+  const client = supabase;
+  if (!client) return undefined;
+  const read = (columns: string) => client.from('tcg_catalog').select(columns).eq('product_id', productId).maybeSingle();
+  let { data, error } = await read(opts.facts ? FACT_COLUMNS : COLUMNS);
+  if (error && opts.facts && noSuchColumn(error)) ({ data, error } = await read(COLUMNS));
   if (error) throw error;
   return (data as unknown as CatalogRow) ?? undefined;
 }

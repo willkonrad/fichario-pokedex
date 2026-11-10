@@ -2,6 +2,7 @@ import type { CatalogRow } from '@/lib/catalog';
 import {
   clearJapaneseCatalogCache,
   groupsForSet,
+  japaneseGroupFor,
   japaneseCandidatesFrom,
   japaneseNumber,
   japaneseProducts,
@@ -161,5 +162,29 @@ describe('japaneseProducts (em lote, pelo banco)', () => {
   it('nada para ler: nenhuma consulta', async () => {
     expect((await japaneseProducts([{ cardId: 'tcgp-1' }, { cardId: 'X-1', setId: 'X' }])).size).toBe(0);
     expect(db.queries).toEqual([]);
+  });
+});
+
+describe('japaneseGroupFor (nome da coleção na TCGplayer, tela da carta)', () => {
+  it('exatamente um grupo da 85 com a sigla: o grupo', async () => {
+    expect((await japaneseGroupFor('SMH'))?.name).toBe('SMH: GX Starter Decks');
+    expect((await japaneseGroupFor('smh'))?.group_id).toBe(23875);
+  });
+
+  it('nenhum ou dois ou mais grupos com a sigla: undefined (nunca o primeiro achado)', async () => {
+    // M5 e m5 (24711 e 99001), SI duas vezes; a M5 da categoria 3 não conta.
+    expect(await japaneseGroupFor('M5')).toBeUndefined();
+    expect(await japaneseGroupFor('SI')).toBeUndefined();
+    expect(await japaneseGroupFor('XX9')).toBeUndefined();
+    expect(await japaneseGroupFor('')).toBeUndefined();
+  });
+
+  it('com um grupo só da sigla M5: "M5: Abyss Eye", lido uma vez', async () => {
+    const tables = japaneseCatalogTables();
+    tables.tcg_groups = tables.tcg_groups.filter((g) => g.group_id !== 99001);
+    db.reset(tables);
+    expect((await japaneseGroupFor('M5'))?.name).toBe('M5: Abyss Eye');
+    await japaneseGroupFor('M5');
+    expect(queriesOf(db, 'tcg_groups')).toHaveLength(1);
   });
 });

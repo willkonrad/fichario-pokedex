@@ -6,6 +6,7 @@ import { formatDex, getSpecies, type Species } from '@/data/pokedex';
 import { indexOfEntry, isPlaced, isPlacedCustom, physicalPosition, regionsIn, volumesNeeded } from './binder';
 import { printedNumber } from './card-number';
 import { plainName } from './catalog';
+import { isPromoSeries, jaNumberless } from './collector';
 import { MYP_URL, sourceCredits, TCGPLAYER_URL, valueMark } from './copy';
 import { formatBRL } from './format';
 import { collectionTotals } from './quotes';
@@ -67,9 +68,18 @@ export function entryParams(e: Entry) {
 
 // ---------- Descrição curta ----------
 
-/** "025/165", "1/64", "TG05/TG30", "SWSH020": o número como impresso, igual ao da tela da carta; sem número, nada. */
-export function cardNumber(e: Pick<Entry, 'localId' | 'setTotal'> & Partial<Pick<Entry, 'setId' | 'setName'>>) {
-  return printedNumber({ localId: e.localId, total: e.setTotal, setId: e.setId, setName: e.setName });
+/**
+ * "025/165", "1/64", "TG05/TG30", "SWSH020": o número como impresso, com a regra da tela da carta (promo pela lista
+ * fechada de isPromoSeries: "045/071" numa SV2P, "1/12" num tk-ex-p; japonesa antiga, nenhum). Sem número, nada. Só a
+ * Coleção Clássica fica diferente: a tela usa o número do catálogo ("4/102"), que a lista não tem, e aqui fica o da
+ * TCGdex ("CC002", "001/030"). Sem a coleção da TCGdex (ou na carta só do catálogo), promo pelo nome (isPromoSet).
+ */
+export function cardNumber(e: Pick<Entry, 'localId' | 'setTotal'> & Partial<Pick<Entry, 'setId' | 'setName' | 'lang'>>) {
+  const setId = e.setId?.trim();
+  const tcgdexSet = !!setId && !setId.startsWith('tcgp');
+  if (tcgdexSet && e.lang === 'ja' && jaNumberless(setId)) return '';
+  const promo = tcgdexSet ? isPromoSeries(setId, e.lang ?? 'pt') : undefined;
+  return printedNumber({ localId: e.localId, total: e.setTotal, setId: e.setId, setName: e.setName, promo });
 }
 
 /** Versão em texto: "Holo / Foil", "Pokémon Center" (selo), "Holo / Foil · Cosmos Holo"; a normal não aparece. */

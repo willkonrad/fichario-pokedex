@@ -3,7 +3,7 @@ import type { AuthChangeEvent, Session, SupabaseClient } from '@supabase/supabas
 import { useEffect, useSyncExternalStore, type ReactNode } from 'react';
 import { AppState, Platform } from 'react-native';
 
-import { buildBackup, parseBackup, stripLegacyFields, type CollectionBackup } from '@/lib/backup';
+import { buildBackup, cleanSettings, parseBackup, stripLegacyFields, type CollectionBackup } from '@/lib/backup';
 import { customTotalSlots, extraSlots, inDexRange } from '@/lib/binder';
 import { upgradeEntry } from '@/lib/entry-upgrade';
 import { mypApiMatches } from '@/lib/myp-api';
@@ -487,7 +487,7 @@ async function readStash(uid: string): Promise<AccountData | null> {
     }
   }
   return {
-    settings: isObject(st.settings) ? (st.settings as BinderSettings) : null,
+    settings: cleanSettings(st.settings),
     activeBinderId: typeof st.activeBinderId === 'string' ? st.activeBinderId : POKEDEX_BINDER,
     entries,
     pending: datesOf(st.pending),
@@ -693,24 +693,62 @@ class CollectionStore {
   }
 
   private starts = 0;
+  /** Quantos dos `starts` são de telas (os outros são da tarefa de segundo plano). */
+  private screenStarts = 0;
+  /** A tarefa de segundo plano pediu a sincronização (ver allowBackgroundSync). */
+  private backgroundSync = false;
   private stopListening: (() => void) | null = null;
 
   /**
    * Começa (carrega o aparelho, acompanha a conta e o app). Devolve a função que desliga os ouvintes. Pode ser chamada
    * por mais de um (as telas e a busca em segundo plano com o app fechado): os ouvintes são ligados uma vez só e
-   * desligados quando o último desliga.
+   * desligados quando o último desliga. `background`: a tarefa de segundo plano. Enquanto nenhuma tela ligou a coleção,
+   * ela não sincroniza sozinha (só depois de allowBackgroundSync) e, num aparelho em dia com a conta, a sincronização é a
+   * incremental: baixar a coleção inteira a cada execução gastaria a cota de dados do plano grátis. A completa fica para
+   * quando uma tela ligar a coleção (a pessoa abriu o app).
    */
-  start(): () => void {
+  start(opts: { background?: boolean } = {}): () => void {
+    const screen = !opts.background;
     if (this.starts++ === 0) this.stopListening = this.listen();
+    if (screen && this.screenStarts++ === 0) this.onScreenStart();
     let stopped = false;
     return () => {
       if (stopped) return;
       stopped = true;
+      if (screen) this.screenStarts--;
       if (--this.starts === 0) {
         this.stopListening?.();
         this.stopListening = null;
+        this.backgroundSync = false;
       }
     };
+  }
+
+  /**
+   * Primeira tela ligada. No processo que a tarefa de segundo plano abriu (a coleção já carregada, a conta já aberta),
+   * a sincronização completa desta abertura ainda não rodou: roda agora, como ao abrir o app.
+   */
+  private onScreenStart() {
+    if (this.loaded && this.uid && this.fullDoneFor !== this.uid) this.startSync(this.uid, 'full');
+  }
+
+  /** A sincronização que roda sozinha (ao carregar, ao entrar, na volta ao app e no relógio) pode rodar agora? */
+  private autoSyncAllowed() {
+    return this.screenStarts > 0 || this.backgroundSync;
+  }
+
+  /** Sincronização ao carregar a coleção e ao entrar na conta: com tela, a completa; só a tarefa, a que bastar. */
+  private openSync(uid: string) {
+    if (this.autoSyncAllowed()) this.startSync(uid, this.screenStarts > 0 ? 'full' : 'auto');
+  }
+
+  /**
+   * A tarefa de segundo plano vai buscar preços: sincroniza agora (a incremental, num aparelho em dia com a conta), e
+   * daqui em diante a coleção sincroniza sozinha até a tarefa desligar. Com uma tela ligada, quem sincroniza é ela.
+   */
+  allowBackgroundSync() {
+    this.backgroundSync = true;
+    if (!this.screenStarts && this.uid && this.loaded) this.startSync(this.uid, 'auto');
   }
 
   private listen(): () => void {
@@ -840,7 +878,8 @@ class CollectionStore {
       if (!s.ok) this.lock('settings');
       else if (s.value) {
         const parsed = parseJson(s.value);
-        if (isObject(parsed)) settings = parsed as BinderSettings;
+        // Fora dos limites (ex.: uma cópia forjada importada por uma versão anterior): o padrão, para não travar o fichário.
+        if (isObject(parsed)) settings = cleanSettings(parsed);
         else if (await keepUnreadable(SETTINGS_KEY, s.value)) this.setStorageError(UNREADABLE);
         else this.lock('settings');
       }
@@ -927,7 +966,7 @@ class CollectionStore {
     this.commit({ ready: true, settings, entries, activeBinderId });
     if (this.dirtyEntries.size || this.dirtyKeys.size || this.dropLegacyKey) this.scheduleWrite();
     pruneStaleCache();
-    if (this.uid) this.startSync(this.uid, 'full');
+    if (this.uid) this.openSync(this.uid);
   }
 
   private scheduleWrite() {
@@ -1123,7 +1162,7 @@ class CollectionStore {
     }
     // "Última sincronização desta abertura" é da conta: as buscas de preço esperam a da conta nova.
     this.commit(changed ? { session: s, lastSyncAt: null } : { session: s });
-    if ((changed || renewed) && uid && this.loaded) this.startSync(uid, 'full');
+    if ((changed || renewed) && uid && this.loaded) this.openSync(uid);
   }
 
   /**
@@ -1247,7 +1286,7 @@ class CollectionStore {
   }
 
   private autoSync() {
-    if (this.uid && this.state.ready) this.startSync(this.uid, 'auto');
+    if (this.uid && this.state.ready && this.autoSyncAllowed()) this.startSync(this.uid, 'auto');
   }
 
   private clearRetry() {
@@ -1292,10 +1331,13 @@ class CollectionStore {
       return Promise.resolve({ sent: 0, received: 0 });
     }
     const lastFull = Date.parse(this.meta.lastFullAt ?? '');
+    // Sem tela (só a tarefa de segundo plano), num aparelho lido inteiro e que já é desta conta, a completa desta abertura
+    // fica para quando uma tela ligar a coleção (onScreenStart); as outras razões para a completa continuam valendo.
+    const screenless = this.screenStarts === 0 && this.locked.size === 0 && this.meta.holder === uid;
     const full =
       mode === 'full' ||
       !this.serverV3 ||
-      this.fullDoneFor !== uid ||
+      (this.fullDoneFor !== uid && !screenless) ||
       !this.meta.cursor ||
       this.meta.owner !== uid ||
       !(Date.now() - lastFull < FULL_SYNC_EVERY_MS);
@@ -1365,8 +1407,8 @@ class CollectionStore {
       // Trocou de conta no meio: o resultado é da conta anterior.
       if (this.uid !== uid) return { sent: 0, received: 0 };
 
-      // Configuração: num aparelho que nunca sincronizou com esta conta, a da nuvem vence.
-      const remoteSettings = isObject(settingsRes.data?.data) ? (settingsRes.data.data as BinderSettings) : null;
+      // Configuração: num aparelho que nunca sincronizou com esta conta, a da nuvem vence. Limpa como a do aparelho.
+      const remoteSettings = cleanSettings(settingsRes.data?.data);
       const settingsVersion = this.settingsVersion;
       const pushSettings = this.reconcileSettings(remoteSettings, neverSynced);
 
@@ -1412,7 +1454,10 @@ class CollectionStore {
     }
   }
 
-  /** Junta a configuração da nuvem com a daqui. Devolve se a nuvem precisa receber a junção. */
+  /**
+   * Junta a configuração da nuvem (já limpa por cleanSettings) com a daqui. Devolve se a nuvem precisa receber a junção.
+   * O que só a limpeza mudou não sobe: uma versão mais nova do app, em outro aparelho, pode aceitar mais que esta.
+   */
   private reconcileSettings(remote: BinderSettings | null, remoteWinsBase: boolean): boolean {
     const local = this.state.settings;
     const merged = mergeSettings(local, remote, remoteWinsBase);
@@ -1646,7 +1691,7 @@ class CollectionStore {
     if (error) throw error;
     if (this.uid !== uid) return;
     // Aparelho que ainda não sincronizou com esta conta não passa a configuração dele por cima da nuvem (S3).
-    const push = this.reconcileSettings(isObject(data?.data) ? (data.data as BinderSettings) : null, this.meta.owner !== uid);
+    const push = this.reconcileSettings(cleanSettings(data?.data), this.meta.owner !== uid);
     if (push && this.state.settings) {
       const { error: e2 } = await sb.from('binder_settings').upsert({ user_id: uid, data: this.state.settings, updated_at: new Date().toISOString() });
       if (e2) throw e2;
@@ -2028,8 +2073,13 @@ export function useCollectionActions(): CollectionActions {
 export const collectionState = () => store.getSnapshot();
 export const subscribeCollection = (fn: () => void) => store.subscribe(fn);
 export const collectionActions: CollectionActions = store.actions;
-/** Liga a coleção sem tela aberta (como o CollectionProvider); devolve como desligar. */
-export const startCollection = () => store.start();
+/**
+ * Liga a coleção sem tela aberta (como o CollectionProvider); devolve como desligar. `background`: a tarefa de segundo
+ * plano (sincroniza só depois de allowBackgroundSync, e a incremental basta; ver CollectionStore.start).
+ */
+export const startCollection = (opts?: { background?: boolean }) => store.start(opts);
+/** Tarefa de segundo plano: sincroniza agora a coleção ligada com `startCollection({ background: true })`. */
+export const allowBackgroundSync = () => store.allowBackgroundSync();
 /**
  * Grava já no aparelho o que estiver esperando (com o app em segundo plano, a gravação agrupada pode atrasar). Não avisa
  * de falha: quem precisa saber se as cartas ficaram no aparelho usa saveEntriesNow.

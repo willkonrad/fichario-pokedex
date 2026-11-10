@@ -9,6 +9,14 @@ export const MYP_URL = 'https://mypcards.com';
 export const TCGPLAYER_URL = 'https://www.tcgplayer.com';
 export const TCGCSV_URL = 'https://tcgcsv.com';
 
+/**
+ * Endereço guardado na carta que pode ir no botão de uma loja: só uma página do site dela (`site` é MYP_URL ou
+ * TCGPLAYER_URL). Uma cópia editada ou um link estranho da API não trocam o destino do botão; senão, undefined.
+ */
+export function storeUrl(url: unknown, site: string): string | undefined {
+  return typeof url === 'string' && url.startsWith(`${site}/`) ? url : undefined;
+}
+
 /** Nome de cada fonte do valor. */
 export const SOURCE_NAME: Record<SourceId, string> = {
   manual: 'Meu valor',
@@ -379,6 +387,10 @@ export const mypPauseText = (seconds: number, by: 'myp' | 'app' = 'myp') => (by 
 /** O MYP respondeu com erro ou recusou a consulta: não é falta de internet. */
 export const MYP_NO_ANSWER = 'MYP Cards não respondeu agora';
 export const MYP_OFFLINE = 'MYP Cards: sem internet agora';
+/** O MYP recusou as consultas (403): a busca de preços dele fica parada (ver myp-queue.ts). */
+export const MYP_BLOCKED = 'MYP Cards recusou as consultas de preço';
+export const mypBlockedNotice = (until: string) =>
+  `${MYP_BLOCKED}. Os preços do MYP ficam parados até ${until}; os já buscados continuam.`;
 
 /** Consulta sem índice: 'server' vale tentar de novo; 'format' (arquivo que este app não lê) só atualizando o app. */
 export const LOOKUP_UNAVAILABLE = {

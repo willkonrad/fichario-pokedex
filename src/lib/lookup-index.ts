@@ -29,9 +29,18 @@ type Loaded = {
   sections: Map<number, { start: number; end: number }>;
   counts?: Map<number, number>;
   numbers?: NumberMaps;
+  /** Mapas de número pela metade: a montagem em fatias para aqui e continua daqui. */
+  numberBuild?: NumberBuild;
+  trainers?: Trainers;
+  trainerBuild?: TrainerBuild;
 };
 /** Linhas por chave, em pares [posição, seção]. */
 type NumberMaps = { byNumber: Map<string, number[]>; byCode: Map<string, number[]> };
+/** Seção e posição da próxima linha; `memo` guarda as chaves de cada par de números já visto. */
+type NumberBuild = NumberMaps & { ranges: [number, { start: number; end: number }][]; section: number; at: number; memo: Map<string, string[]> };
+/** Treinadores e energias (seção 0), com o nome sem acento para a busca por palavras. */
+type Trainers = { cards: LookupCard[]; plain: string[] };
+type TrainerBuild = Trainers & { at: number; end: number };
 type Snapshot = { status: LookupStatus; header: LookupHeader | null; problem: LookupProblem | null };
 
 let snapshot: Snapshot = { status: 'idle', header: null, problem: null };
@@ -40,8 +49,9 @@ let focused = false;
 let newOnDisk = false;
 let loading: Promise<void> | null = null;
 let warming: Promise<void> | null = null;
+/** Como cancelar a próxima fatia da montagem dos mapas (ver buildInSlices). */
+let cancelSlice: (() => void) | null = null;
 const parsed = new Map<number, LookupCard[]>();
-let trainers: { cards: LookupCard[]; plain: string[] } | null = null;
 /** Última busca de treinador: a leitura do campo e a grade pedem a mesma, a cada tecla. */
 let lastTrainers: { text: string; cards: LookupCard[] } | null = null;
 
@@ -84,9 +94,9 @@ function install(md5: string, body: string): boolean {
   if (!sections.size) return false;
   loaded = { md5, body, header, sections };
   parsed.clear();
-  trainers = null;
   lastTrainers = null;
   newOnDisk = false;
+  buildInSlices(loaded);
   setStatus('ready', header);
   return true;
 }
@@ -243,12 +253,40 @@ export function sectionCards(dex: number): LookupCard[] {
   return cards;
 }
 
-function trainerIndex(idx: Loaded) {
-  if (!trainers) {
-    const cards = parseSection(idx, 0);
-    trainers = { cards, plain: cards.map((c) => plainName(`${c.name} ${c.ptName ?? ''}`)) };
+function startTrainers(idx: Loaded): TrainerBuild {
+  const range = idx.sections.get(0);
+  const [at, end] = range && range.end > range.start ? [range.start, range.end] : [0, 0];
+  return { cards: [], plain: [], at, end };
+}
+
+/** Lê as linhas de treinador que faltam enquanto `more()` deixar; true quando chegou ao fim da seção. */
+function addTrainerRows(idx: Loaded, b: TrainerBuild, more: () => boolean): boolean {
+  while (b.at < b.end) {
+    if (!more()) return false;
+    let eol = idx.body.indexOf('\n', b.at);
+    if (eol < 0 || eol > b.end) eol = b.end;
+    if (eol > b.at) {
+      const card = parseRow(idx.body.slice(b.at, eol), 0, idx.header);
+      b.cards.push(card);
+      b.plain.push(plainName(`${card.name} ${card.ptName ?? ''}`));
+    }
+    b.at = eol + 1;
   }
-  return trainers;
+  return true;
+}
+
+function finishTrainers(idx: Loaded, b: TrainerBuild): Trainers {
+  idx.trainerBuild = undefined;
+  idx.trainers = { cards: b.cards, plain: b.plain };
+  return idx.trainers;
+}
+
+/** Seção 0 lida. Montada em fatias depois de abrir; quem precisa antes do fim completa o resto na hora. */
+function trainerIndex(idx: Loaded): Trainers {
+  if (idx.trainers) return idx.trainers;
+  const b = (idx.trainerBuild ??= startTrainers(idx));
+  addTrainerRows(idx, b, unlimited);
+  return finishTrainers(idx, b);
 }
 
 /**
@@ -297,48 +335,142 @@ const pushLine = (map: Map<string, number[]>, key: string, at: number, dex: numb
   else map.set(key, [at, dex]);
 };
 
-/** Mapas de número e de sigla + número, montados uma vez, na primeira busca. */
+/** Uma linha nos mapas de número e de sigla + número. */
+function addNumberRow(b: NumberBuild, header: LookupHeader, line: string, at: number, dex: number) {
+  const c = line.split('\t');
+  const number = c[3] ?? '';
+  const altNumber = c[4] ?? '';
+  if (!number && !altNumber) return;
+  const raw = `${number}\t${altNumber}`;
+  let keys = b.memo.get(raw);
+  if (!keys) {
+    keys = numberKeys({ number, altNumber });
+    b.memo.set(raw, keys);
+  }
+  for (const key of keys) {
+    pushLine(b.byNumber, key, at, dex);
+    // "TG05" sem o total acha "TG05/TG30". Só com letras: um número puro sozinho seriam milhares de cartas.
+    const left = numberLeft(key);
+    if (left !== key && /[a-z]/.test(left)) pushLine(b.byNumber, left, at, dex);
+  }
+  const set = header.sets.get(c[1]);
+  const abbrs = set?.abbr ? [set.abbr.toLowerCase()] : [];
+  // A sigla oficial (TCGdex) só vale para as coleções internacionais: os ids da TCGdex japonesa repetem os ingleses.
+  const td = c[11];
+  if (td && (set?.lang === 'en' || set?.lang === 'pt')) {
+    const official = header.tdAbbr.get(td.slice(0, td.lastIndexOf('-')))?.toLowerCase();
+    if (official && !abbrs.includes(official)) abbrs.push(official);
+  }
+  for (const left of new Set(keys.map(numberLeft))) for (const abbr of abbrs) pushLine(b.byCode, `${abbr}|${left}`, at, dex);
+}
+
+function startNumbers(idx: Loaded): NumberBuild {
+  const ranges = [...idx.sections];
+  return { byNumber: new Map(), byCode: new Map(), memo: new Map(), ranges, section: 0, at: ranges[0]?.[1].start ?? 0 };
+}
+
+/** Lê as linhas que faltam, na ordem do arquivo, enquanto `more()` deixar; true quando passou por todas as seções. */
+function addNumberRows(idx: Loaded, b: NumberBuild, more: () => boolean): boolean {
+  while (b.section < b.ranges.length) {
+    const [dex, { end }] = b.ranges[b.section];
+    if (b.at >= end) {
+      b.section += 1;
+      if (b.section < b.ranges.length) b.at = b.ranges[b.section][1].start;
+      continue;
+    }
+    if (!more()) return false;
+    let eol = idx.body.indexOf('\n', b.at);
+    if (eol < 0 || eol > end) eol = end;
+    addNumberRow(b, idx.header, idx.body.slice(b.at, eol), b.at, dex);
+    b.at = eol + 1;
+  }
+  return true;
+}
+
+function finishNumbers(idx: Loaded, b: NumberBuild): NumberMaps {
+  idx.numberBuild = undefined;
+  idx.numbers = { byNumber: b.byNumber, byCode: b.byCode };
+  return idx.numbers;
+}
+
+/** Mapas de número e de sigla + número. Montados em fatias depois de abrir; quem precisa antes do fim completa o resto na hora. */
 function numberMaps(idx: Loaded): NumberMaps {
   if (idx.numbers) return idx.numbers;
-  const byNumber = new Map<string, number[]>();
-  const byCode = new Map<string, number[]>();
-  const memo = new Map<string, string[]>();
-  for (const [dex, { start, end }] of idx.sections) {
-    let at = start;
-    while (at < end) {
-      let eol = idx.body.indexOf('\n', at);
-      if (eol < 0 || eol > end) eol = end;
-      const c = idx.body.slice(at, eol).split('\t');
-      const number = c[3] ?? '';
-      const altNumber = c[4] ?? '';
-      if (number || altNumber) {
-        const raw = `${number}\t${altNumber}`;
-        let keys = memo.get(raw);
-        if (!keys) {
-          keys = numberKeys({ number, altNumber });
-          memo.set(raw, keys);
-        }
-        for (const key of keys) {
-          pushLine(byNumber, key, at, dex);
-          // "TG05" sem o total acha "TG05/TG30". Só com letras: um número puro sozinho seriam milhares de cartas.
-          const left = numberLeft(key);
-          if (left !== key && /[a-z]/.test(left)) pushLine(byNumber, left, at, dex);
-        }
-        const set = idx.header.sets.get(c[1]);
-        const abbrs = set?.abbr ? [set.abbr.toLowerCase()] : [];
-        // A sigla oficial (TCGdex) só vale para as coleções internacionais: os ids da TCGdex japonesa repetem os ingleses.
-        const td = c[11];
-        if (td && (set?.lang === 'en' || set?.lang === 'pt')) {
-          const official = idx.header.tdAbbr.get(td.slice(0, td.lastIndexOf('-')))?.toLowerCase();
-          if (official && !abbrs.includes(official)) abbrs.push(official);
-        }
-        for (const left of new Set(keys.map(numberLeft))) for (const abbr of abbrs) pushLine(byCode, `${abbr}|${left}`, at, dex);
-      }
-      at = eol + 1;
+  const b = (idx.numberBuild ??= startNumbers(idx));
+  addNumberRows(idx, b, unlimited);
+  return finishNumbers(idx, b);
+}
+
+/** Prazo que o agendador dá à fatia (requestIdleCallback). No app, timeRemaining() vai a 0 quando chega uma tecla ou um evento. */
+type IdleDeadline = { didTimeout?: boolean; timeRemaining: () => number };
+type IdleScheduler = (run: (deadline: IdleDeadline) => void, options?: { timeout: number }) => unknown;
+
+/** Quanto uma fatia segura o JS no máximo, quantas linhas lê no máximo e de quantas em quantas olha o relógio. */
+const SLICE_MS = 8;
+const SLICE_ROWS = 2000;
+const CLOCK_EVERY = 32;
+/** Sem folga (a pessoa digitando sem parar), a fatia roda assim mesmo depois disso. */
+const IDLE_TIMEOUT_MS = 500;
+
+const unlimited = () => true;
+
+/** Uma fatia: true enquanto dá para ler mais uma linha sem segurar a tela. Lê pelo menos CLOCK_EVERY linhas. */
+function sliceBudget(deadline?: IdleDeadline): () => boolean {
+  const until = Date.now() + SLICE_MS;
+  // Na web, uma fatia que estourou o timeout tem timeRemaining() 0: aí vale só o relógio daqui.
+  const device = deadline && !deadline.didTimeout ? deadline : null;
+  let rows = 0;
+  return () => {
+    rows += 1;
+    if (rows > SLICE_ROWS) return false;
+    if (rows % CLOCK_EVERY) return true;
+    return Date.now() < until && (!device || device.timeRemaining() > 0);
+  };
+}
+
+type IdleGlobal = { requestIdleCallback?: IdleScheduler; cancelIdleCallback?: (handle: unknown) => void };
+
+/** Na próxima folga do aparelho; sem requestIdleCallback (Safari, testes), no próximo setTimeout. Devolve como cancelar. */
+function later(run: (deadline?: IdleDeadline) => void): () => void {
+  const g = globalThis as IdleGlobal;
+  try {
+    if (typeof g.requestIdleCallback === 'function') {
+      const handle = g.requestIdleCallback(run, { timeout: IDLE_TIMEOUT_MS });
+      return () => g.cancelIdleCallback?.(handle);
     }
+  } catch {
+    // Agendador sem tarefas de folga: cai no setTimeout.
   }
-  idx.numbers = { byNumber, byCode };
-  return idx.numbers;
+  const timer = setTimeout(run, 0);
+  return () => clearTimeout(timer);
+}
+
+/** Cancela a fatia agendada: ela seguraria na memória o índice que saiu até rodar. */
+function stopSlices() {
+  cancelSlice?.();
+  cancelSlice = null;
+}
+
+/**
+ * Logo depois de abrir: monta os mapas de número e depois os treinadores em fatias pequenas, para a primeira busca por
+ * número, sigla ou treinador (e a primeira leitura da câmera) não parar a tela na tecla. Para se o índice trocar.
+ */
+function buildInSlices(idx: Loaded) {
+  const slice = (deadline?: IdleDeadline) => {
+    cancelSlice = null;
+    if (loaded !== idx) return;
+    const more = sliceBudget(deadline);
+    if (!idx.numbers) {
+      const b = (idx.numberBuild ??= startNumbers(idx));
+      if (addNumberRows(idx, b, more)) finishNumbers(idx, b);
+    } else if (!idx.trainers) {
+      const b = (idx.trainerBuild ??= startTrainers(idx));
+      if (addTrainerRows(idx, b, more)) finishTrainers(idx, b);
+    }
+    if (!idx.numbers || !idx.trainers) cancelSlice = later(slice);
+  };
+  stopSlices();
+  cancelSlice = later(slice);
 }
 
 function cardsAt(idx: Loaded, pairs: number[] | undefined): LookupCard[] {
@@ -402,10 +534,10 @@ export function cardByKey(key: string, hintDex?: number): LookupCard | null {
 
 /** "Recarregar catálogo e imagens": apaga o disco e a memória. */
 export async function clearLookup(): Promise<void> {
+  stopSlices();
   loaded = null;
   newOnDisk = false;
   parsed.clear();
-  trainers = null;
   lastTrainers = null;
   setStatus('idle', null);
   await clearStoredBody().catch(() => {});

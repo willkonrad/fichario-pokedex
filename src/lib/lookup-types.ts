@@ -109,7 +109,8 @@ export type PriceBlock = {
 };
 
 export type PortalLink = { id: string; label: string; url: string };
-export type LinkContext = { card: LookupCard; lang: LookupLang; condition: Condition; mypUrl?: string };
+/** `twinName`: nome do produto gêmeo da TCGplayer japonesa (linhas chinesas), em inglês, para as lojas. */
+export type LinkContext = { card: LookupCard; lang: LookupLang; condition: Condition; mypUrl?: string; twinName?: string };
 
 export type MypKeys = CardKeys & { cardId: string; variant: Variant; note: string };
 export type MypNow =
@@ -118,4 +119,5 @@ export type MypNow =
   | { status: 'notFound' }
   // by: 'myp' é a pausa pedida pelo MYP (429); 'app', o limite de consultas do próprio app. Sem by, a do MYP.
   | { status: 'limited'; retryInS: number; by?: 'myp' | 'app' }
-  | { status: 'unavailable'; reason: 'web' | 'language' | 'offline' | 'error' };
+  // blocked: o MYP recusou as consultas (403); nenhuma sai até a pausa da recusa acabar (myp-queue.ts).
+  | { status: 'unavailable'; reason: 'web' | 'language' | 'offline' | 'error' | 'blocked' };

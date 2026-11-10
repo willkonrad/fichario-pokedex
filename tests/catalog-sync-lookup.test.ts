@@ -42,7 +42,8 @@ const speciesSql = jest.requireActual<{
   replaceBetweenMarkers(text: string, sql: string): string;
 }>('../scripts/make-species-sql.js');
 
-const read = (file: string) => readFileSync(`${__dirname}/../${file}`, 'utf8');
+// Fim de linha do git no Windows (CRLF) ou no Linux (LF): os testes comparam o texto, não os bytes.
+const read = (file: string) => readFileSync(`${__dirname}/../${file}`, 'utf8').replace(/\r\n/g, '\n');
 const MIGRATION = 'supabase/migrations/20261109a_consulta.sql';
 
 const product = (fields: ([string, string] | [string, string, string])[], presale?: Product['presaleInfo']): Product => ({
@@ -651,7 +652,7 @@ describe('migração da Consulta', () => {
     expect(schema).toContain('add column if not exists released_on date');
     expect(schema).toContain('alter table public.tcgdex_sets add column if not exists release_date date;');
     expect(schema).toContain("select cron.schedule('lookup-build', '10 0,6 * * *', $$ select public.lookup_build(); $$);");
-    expect(schema).toContain('retrato completo da versão 3.4.0');
+    expect(schema).toContain('retrato completo da versão 3.5.0');
   });
 
   it('o texto das colunas sai sem TAB e sem quebra de linha, com as 18 colunas na ordem do formato 1', () => {

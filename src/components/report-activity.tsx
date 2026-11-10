@@ -261,7 +261,7 @@ function moveText(from: EntryPlace | null, to: EntryPlace | null) {
   return from ? `Movida de ${placeText(from)}` : 'Movida';
 }
 
-type CardLike = { setId?: string; setName?: string; localId?: string; setTotal?: number; variant?: Variant; variantNote?: string };
+type CardLike = { setId?: string; setName?: string; localId?: string; setTotal?: number; variant?: Variant; variantNote?: string; lang?: CardLang };
 
 /**
  * "Megaevolução · 025/132 · Holo / Foil". O número como impresso, igual ao da tela da carta: a coleção diz se é galeria
@@ -269,7 +269,7 @@ type CardLike = { setId?: string; setName?: string; localId?: string; setTotal?:
  */
 export function detailsOf(c: CardLike) {
   const version = versionText({ variant: c.variant ?? 'normal', variantNote: c.variantNote });
-  const number = cardNumber({ localId: c.localId ?? '', setTotal: c.setTotal, setId: c.setId, setName: c.setName });
+  const number = cardNumber({ localId: c.localId ?? '', setTotal: c.setTotal, setId: c.setId, setName: c.setName, lang: c.lang });
   return [c.setName, number, version].filter(Boolean).join(' · ');
 }
 

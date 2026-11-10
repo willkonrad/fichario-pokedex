@@ -24,7 +24,21 @@ import {
   useLayout,
 } from '@/components/ui';
 import { TOTAL_SPECIES } from '@/data/pokedex';
-import { capacity, dexRange, extraSlots, isPlaced, pageSize, physicalMoves, REGIONS, totalPages, totalSlots, volumesText } from '@/lib/binder';
+import {
+  capacity,
+  dexRange,
+  extraSlots,
+  isPlaced,
+  MAX_COLS,
+  MAX_ROWS,
+  MAX_SLOTS_PER_POKEMON,
+  pageSize,
+  physicalMoves,
+  REGIONS,
+  totalPages,
+  totalSlots,
+  volumesText,
+} from '@/lib/binder';
 import { formatInt } from '@/lib/format';
 import { supabase } from '@/lib/supabase';
 import { DEFAULT_SETTINGS, LANG_LABEL, POKEDEX_BINDER, type BinderSettings, type CardLang } from '@/lib/types';
@@ -259,10 +273,10 @@ function SetupForm() {
               ))}
             </ChipGroup>
             <Row label="Linhas">
-              <Stepper value={s.rows} onChange={(rows) => update({ rows })} max={8} label="linhas" />
+              <Stepper value={s.rows} onChange={(rows) => update({ rows })} max={MAX_ROWS} label="linhas" />
             </Row>
             <Row label="Colunas">
-              <Stepper value={s.cols} onChange={(cols) => update({ cols })} max={6} label="colunas" />
+              <Stepper value={s.cols} onChange={(cols) => update({ cols })} max={MAX_COLS} label="colunas" />
             </Row>
           </Section>
           <Section title="Folhas do fichário" hint="Opcional: para avisar se todas as cartas cabem">
@@ -290,7 +304,7 @@ function SetupForm() {
         <Card style={styles.card}>
           <Section title="Espaços por Pokémon" hint="Mais de 1 para versões lado a lado">
             <Row label="Espaços">
-              <Stepper value={s.slotsPerPokemon} onChange={(slotsPerPokemon) => update({ slotsPerPokemon })} max={6} label="espaços por Pokémon" />
+              <Stepper value={s.slotsPerPokemon} onChange={(slotsPerPokemon) => update({ slotsPerPokemon })} max={MAX_SLOTS_PER_POKEMON} label="espaços por Pokémon" />
             </Row>
           </Section>
           <Section title="Idiomas das cartas" hint="Os que aparecem ao escolher a carta">

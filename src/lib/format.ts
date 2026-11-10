@@ -197,3 +197,37 @@ export function formatDay(day: string | number | Date) {
 export function formatDate(day: string | number | Date) {
   return toDate(day).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
+
+const MONTHS = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+
+/**
+ * Data por extenso, para o leitor de tela: "22 de setembro de 2023" ("AAAA-MM-DD" é lido como dia, sem fuso). O dia 1
+ * é "1º", como se escreve e se lê no Brasil ("primeiro de abril").
+ */
+export function formatDateSpoken(day: string | number | Date) {
+  const d = toDate(day);
+  const date = d.getDate();
+  return `${date === 1 ? '1º' : date} de ${MONTHS[d.getMonth()]} de ${d.getFullYear()}`;
+}
+
+/** Mês e ano de um "AAAA-MM" (ou "AAAA-MM-DD"): "05/2007". */
+export function formatMonth(month: string) {
+  return `${month.slice(5, 7)}/${month.slice(0, 4)}`;
+}
+
+/** O mesmo mês para o leitor de tela: "maio de 2007". */
+export function formatMonthSpoken(month: string) {
+  return `${MONTHS[Number(month.slice(5, 7)) - 1]} de ${month.slice(0, 4)}`;
+}
+
+/** Anos: "1999", "1999–2003"; `to` null = série ainda aberta, "desde 2025". Anos iguais viram um só. */
+export function formatYears(from: number, to?: number | null) {
+  if (to === null) return `desde ${from}`;
+  return to == null || to === from ? String(from) : `${from}–${to}`;
+}
+
+/** Os mesmos anos para o leitor de tela: "1999", "de 1999 a 2003", "desde 2025". */
+export function formatYearsSpoken(from: number, to?: number | null) {
+  if (to === null) return `desde ${from}`;
+  return to == null || to === from ? String(from) : `de ${from} a ${to}`;
+}

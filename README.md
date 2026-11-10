@@ -57,13 +57,13 @@ Em cada carta, **"Usar na soma"** escolhe qual dos três preços é o valor dela
 
 O **"Valor deste fichário"** e o **"Valor da coleção"** são a soma do valor de cada carta, que também aparece nos bolsos, ordena as mais valiosas e é a linha do gráfico. Com menos destaque, a coleção mostra quanto daria "se cada carta saísse pelo menor anúncio · pela média"; a soma dos maiores anúncios fica só em "Como calculamos", porque não é preço de venda.
 
-A regra mora em `src/lib/valuation.ts` (valor atual), `src/lib/history.ts` (fotos diárias) e nas funções `collection_history` e `snapshot_prices` do banco, sempre iguais; os nomes e textos do valor ficam em `src/lib/copy.ts`.
+A regra mora em `src/lib/valuation.ts` (valor atual), `src/lib/history.ts` (fotos diárias) e nas funções `history_day_sums` (a soma de cada dia) e `snapshot_prices` do banco, sempre iguais; os nomes e textos do valor ficam em `src/lib/copy.ts`.
 
 ### Preços, histórico e cópias no servidor
 
 - O `catalog-sync` (cron a cada 10 min) copia os preços do TCGCSV para `tcg_prices` 1×/dia por coleção e a PTAX para `fx_rates`; o app (no celular e na web) lê essas tabelas e grava o preço na carta (`patch_entry_tcgplayer`).
 - O preço do MYP é buscado pelo app no celular e gravado na carta (`patch_entry_myp`). Gravar um preço não conta como edição da carta.
-- Todo dia às 23:50 de Brasília, `snapshot_prices` guarda em `price_history` o "Meu valor", o preço da TCGplayer do dia (cartas em inglês e japonês) e o do MYP de cada carta com preço; o gráfico pede ao servidor o total de cada dia (`collection_history`).
+- Todo dia às 23:50 de Brasília, `snapshot_prices` guarda em `price_history` o "Meu valor", o preço da TCGplayer do dia (cartas em inglês e japonês) e o do MYP de cada carta com preço. Às 23:55, `history_day_totals` guarda o total de cada dia em `price_history_daily`, e o gráfico lê esses totais pela `collection_history` (o dia que ainda não tem total é somado na hora por `history_day_sums`).
 - Todo dia às 00:20, `backup.snapshot_collection` copia as cartas e a configuração para o schema `backup` (14 dias, fora da API).
 
 ## Rodar o app

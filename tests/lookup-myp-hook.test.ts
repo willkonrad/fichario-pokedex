@@ -148,6 +148,14 @@ describe('respostas', () => {
     expect(r.last()).toEqual({ status: 'unavailable', reason: 'offline' });
   });
 
+  it('MYP recusou (403): avisa e não tenta de novo sozinho', async () => {
+    const r = await render(lookupCard(), 'pt', { blocked: true });
+    await tick(300);
+    expect(r.last()).toEqual({ status: 'unavailable', reason: 'blocked' });
+    await tick(120_000);
+    expect(consult).toHaveBeenCalledTimes(1);
+  });
+
   it('pausa: conta os segundos e tenta de novo ao terminar', async () => {
     let n = 0;
     const r = await render(lookupCard(), 'pt', async () => (++n === 1 ? { limitedForMs: 2000, by: 'myp' } : { price: okPrice }));

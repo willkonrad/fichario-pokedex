@@ -7,7 +7,14 @@
  * - Número com letras fora de uma galeria ("RC5" em Gerações): só o número, porque o total da coleção não é o da
  *   sub-coleção impressa.
  */
-export type PrintedNumberInput = { localId?: string; total?: number; setId?: string; setName?: string };
+export type PrintedNumberInput = {
+  localId?: string;
+  total?: number;
+  setId?: string;
+  setName?: string;
+  /** Coleção de promos já decidida por quem chama (a tela da carta usa a lista fechada de isPromoSeries); sem ela, isPromoSet. */
+  promo?: boolean;
+};
 
 /** Coleção de promos: ids da TCGdex terminados em "p" (swshp, svp, mep, SV-P…) ou o nome com "Promo". */
 export function isPromoSet(c: Pick<PrintedNumberInput, 'setId' | 'setName'>) {
@@ -20,7 +27,7 @@ const isGallerySet = (setId?: string) => /(?:tg|gg)$/i.test(setId ?? '') || setI
 export function printedNumber(c: PrintedNumberInput): string {
   const id = c.localId?.trim() ?? '';
   if (!id) return '';
-  if (!c.total || c.total < 1 || isPromoSet(c)) return id;
+  if (!c.total || c.total < 1 || (c.promo ?? isPromoSet(c))) return id;
   const m = /^([A-Za-z]*)(\d+)[a-z]?$/.exec(id);
   if (!m) return id;
   const [, prefix, digits] = m;

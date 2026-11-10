@@ -20,7 +20,7 @@ import type { Entry, MypApiPrice, TcgplayerPrice, ValueBasis } from './types';
  * O VALOR da carta (o da soma, dos bolsos, das mais valiosas e do gráfico) é um dos três, escolhido na carta
  * (`valueBasis`, "Usar na soma"): a média por padrão; o mínimo costuma ser o valor real de cartas novas. Sem nenhuma
  * fonte, a carta fica sem valor (o app não estima). A mesma regra vale no servidor (snapshot_prices e
- * collection_history, em supabase/migrations) e nas fotos diárias (lib/history.ts).
+ * history_day_sums, em supabase/migrations) e nas fotos diárias (lib/history.ts).
  */
 
 export type SourceId = 'manual' | 'tcgplayer' | 'myp';

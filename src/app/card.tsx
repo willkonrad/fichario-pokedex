@@ -21,9 +21,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { isSpecialCard } from '@/components/binder-slot';
-import { CardAttributes, cardAttributeItems, CardMoves } from '@/components/card-facts';
+import { CardAttributes, cardAttributeItems, CardMoves, hasCardFacts } from '@/components/card-facts';
 import { CardImage } from '@/components/card-image';
 import { CardMovePanel } from '@/components/card-move';
+import { CollectorFacts, useCollectorSources } from '@/components/collector-facts';
 import { digitsInSystemFont } from '@/components/digits';
 import { FoilRing } from '@/components/foil';
 import { headerTitleFor } from '@/components/header-title';
@@ -63,12 +64,12 @@ import { VersionPicker } from '@/components/version-picker';
 import { getSpecies, speciesInCardName } from '@/data/pokedex';
 import { isCopyOf, japaneseProductOf } from '@/lib/add-card';
 import { indexOfDex, indexOfExtra, isPlaced, isPlacedCustom, physicalLabel, physicalPosition, volumesNeeded } from '@/lib/binder';
-import { printedNumber } from '@/lib/card-number';
 import { cardRoute, type CardRoute } from '@/lib/card-route';
-import { entryImageUrl } from '@/lib/catalog';
+import { catalogByTcgdexIds, ENGLISH, entryImageUrl, type CatalogRow } from '@/lib/catalog';
+import { collectorDex, collectorFacts, isPromoSeries, ligaByNameOnly, setOfCard, type CollectorInput } from '@/lib/collector';
 import { MY_VALUE_HINT, MY_VALUE_RULE, myValueReplacedText, purchaseText as paidVsNowText } from '@/lib/copy';
 import { formatBRL, formatDay, formatInput, formatPct, parseBRL, type ParsedBRL } from '@/lib/format';
-import { ligaQuery, ligaSearchUrl } from '@/lib/liga';
+import { hasJapaneseScript, japaneseStoreName, ligaQuery, ligaSearchUrl, mypSearchUrl } from '@/lib/liga';
 import { entryPlace, placeText, versionText } from '@/lib/lists';
 import { mypApiDue, mypPtImage, prioritizeMypPrice } from '@/lib/myp-api';
 import { useStampImage } from '@/lib/stamp-image';
@@ -90,7 +91,7 @@ import {
   type Variant,
 } from '@/lib/types';
 import { valuation } from '@/lib/valuation';
-import { availableVariants, cardVersions, sameStamp, sameVersion, savedVersionOf, versionOptions, type VersionOption } from '@/lib/variants';
+import { availableVariants, sameStamp, sameVersion, savedVersionOf, versionOptions, withCatalogVersions, type VersionOption } from '@/lib/variants';
 import {
   keyOf,
   saveCollectionNow,
@@ -294,6 +295,8 @@ function CardForm({
 
   const [detail, setDetail] = useState<CardDetail | null>(null);
   const [enDetail, setEnDetail] = useState<CardDetail | null>(null);
+  // A ficha em inglês não veio (sem internet, ou a carta não existe em inglês): o bloco do colecionador não a espera.
+  const [enFailed, setEnFailed] = useState(false);
   const [loadError, setLoadError] = useState<'notFound' | 'offline' | null>(null);
   // "Tentar de novo" (T5): cada toque carrega a ficha outra vez.
   const [attempt, setAttempt] = useState(0);
@@ -323,7 +326,28 @@ function CardForm({
       .then((d) => {
         if (live) setEnDetail(d);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (live) setEnFailed(true);
+      });
+    return () => {
+      live = false;
+    };
+  }, [cardId, lang, attempt]);
+
+  // Linhas do catálogo da carta (versões, número da Coleção Clássica, raridade e datas dos produtos), pedidas ao abrir. Com
+  // erro, lista vazia: o seletor de versões abre mesmo sem internet. Japonesa e "tcgp-" não têm (a 85 não é ligada).
+  const [catalogRows, setCatalogRows] = useState<CatalogRow[] | null>(null);
+  useEffect(() => {
+    if (!cardId || cardId.startsWith('tcgp-') || lang === 'ja') return;
+    let live = true;
+    catalogByTcgdexIds([cardId], ENGLISH, { released: true }).then(
+      (rows) => {
+        if (live) setCatalogRows(rows);
+      },
+      () => {
+        if (live) setCatalogRows([]);
+      },
+    );
     return () => {
       live = false;
     };
@@ -410,8 +434,6 @@ function CardForm({
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [versionsDismissed, setVersionsDismissed] = useState(false);
   const [resolvedImageUrl, setResolvedImageUrl] = useState<string | undefined>();
-  // Versões da TCGdex mais as do catálogo (C9), as mesmas que a lista de escolha mostra.
-  const [catalogVersions, setCatalogVersions] = useState<VersionOption[] | null>(null);
   const scrollRef = useRef<ScrollViewInstance>(null);
   // "Reduzir movimento": as rolagens até o painel de mover e o "Meu valor" pulam direto (DESIGN.md).
   const reduceMotion = useReducedMotion();
@@ -435,20 +457,6 @@ function CardForm({
   const moveScrollPending = useRef(false);
   const moveY = useRef(0);
 
-  useEffect(() => {
-    // As versões saem do catálogo em inglês (impressões da TCGdex sem tradução) e do catálogo do TCGCSV.
-    if (!cardId || lang === 'ja' || !enDetail) return;
-    let live = true;
-    cardVersions(cardId, null, enDetail)
-      .then((list) => {
-        if (live) setCatalogVersions(list);
-      })
-      .catch(() => {});
-    return () => {
-      live = false;
-    };
-  }, [cardId, lang, enDetail]);
-
   // Carta já salva sem imagem: grava a imagem reserva assim que for encontrada, para aparecer no fichário.
   useEffect(() => {
     if (!resolvedImageUrl || !autoSave || !existing || existing.image || existing.imageUrl) return;
@@ -458,11 +466,17 @@ function CardForm({
 
   const avail = availableVariants(detail, enDetail);
   const variant: Variant = pickedVariant ?? avail.ids[0] ?? 'normal';
-  const ownVersions = catalogVersions ?? versionOptions(detail, enDetail);
+  const isTcgp = !!cardId?.startsWith('tcgp-');
+  // Versões da TCGdex (impressões do catálogo em inglês, sem tradução) mais as do catálogo do TCGCSV (C9), as mesmas que
+  // a lista de escolha mostra.
+  const ownVersions =
+    !isTcgp && lang !== 'ja' && enDetail && catalogRows
+      ? withCatalogVersions(versionOptions(null, enDetail), catalogRows, enDetail.set.name)
+      : versionOptions(detail, enDetail);
   // Ficha sem versões (carta japonesa só do catálogo): a das impressões do produto, como no "Adicionar".
   const versions = !ownVersions.length && productVariant ? [{ variant: productVariant }] : ownVersions;
   // As versões vêm do catálogo em inglês (carta japonesa: só do próprio).
-  const versionsReady = lang === 'ja' ? !!detail : !!catalogVersions;
+  const versionsReady = lang === 'ja' ? !!detail : isTcgp ? !!enDetail : !!enDetail && catalogRows != null;
   const showVersions = versionsOpen || (isNewCard && versionsReady && versions.length > 1 && pickedVariant == null && !versionsDismissed);
 
   /**
@@ -593,6 +607,20 @@ function CardForm({
     return () => sub.remove();
   }, []);
 
+  // Fontes do bloco "Para colecionador" (antes das saídas antecipadas: a ordem dos ganchos não muda).
+  const collectorSources = useCollectorSources({
+    cardId,
+    setId: detail?.set.id || saved?.setId || (cardId ? setOfCard(cardId) : ''),
+    lang,
+    dataLang,
+    isTcgp,
+    detailSettled: !!detail || !!loadError,
+    enSettled: lang === 'ja' || !!enDetail || enFailed,
+    needCatalog: !isTcgp && lang !== 'ja',
+    catalogSettled: catalogRows != null,
+    attempt,
+  });
+
   if (!settings || (route.binder && !customBinder)) {
     return <EmptyState title="Fichário não encontrado" text="Ele pode ter sido apagado em outro aparelho." />;
   }
@@ -617,22 +645,10 @@ function CardForm({
   const posLabel = physicalLabel(pos, volumes);
   const binderLabel = customBinder?.name ?? (settings.name || 'Fichário Pokédex');
   const setName = detail?.set.name ?? saved?.setName ?? params.setName ?? '';
-  const total = detail?.set.cardCount?.official || saved?.setTotal;
   const localId = detail?.localId ?? saved?.localId ?? params.localId ?? '';
   const setId = detail?.set.id ?? saved?.setId;
-  // Como impresso: "1/64" na Jungle, "TG05/TG30" na galeria, "SWSH020" na promo (sem o total inventado).
-  const number = printedNumber({ localId, total, setId, setName });
   const name = detail?.name ?? saved?.cardName ?? params.name ?? '';
   const rarity = detail?.rarity ?? saved?.rarity;
-  // Link da carta na Liga: a busca salva (versões antigas, com os casos especiais de numeração) ou
-  // "Nome em inglês (número/total)"; carta japonesa usa o nome do Pokémon.
-  const ligaName = lang === 'ja' ? (getSpecies(dex)?.name ?? name) : (enDetail?.name ?? name);
-  const ligaUrl = name
-    ? ligaSearchUrl(
-        saved?.ligaQuery ??
-          ligaQuery(ligaName, localId || undefined, (detail?.set.cardCount?.official || detail?.set.cardCount?.total) ?? saved?.setTotal, { setId, setName }),
-      )
-    : undefined;
   // Mesma carta (id + idioma) em outros bolsos ou fichários. "Já tem" só com a mesma versão (F3): outro selo, reverse ou
   // holo é outra versão. Com a variação ainda desconhecida (ficha carregando), só o selo conta. Na japonesa, também a
   // mesma carta salva com o outro id: o produto da TCGplayer japonesa e a carta da TCGdex que é ele (ver isCopyOf).
@@ -641,6 +657,48 @@ function CardForm({
   const variantKnown = pickedVariant != null || !!detail || !!enDetail || !!loadError;
   // Selo da versão: o de promo/staff e o das versões do catálogo (Poke Ball Pattern, Cosmos Holo…); "Outra" é texto livre.
   const versionStamp = variant === 'other' ? '' : variantNote.trim();
+  // "Para colecionador", o número como impresso ("1/64" na Jungle, "TG05/TG30" na galeria, "SWSH020" na promo, "4/102"
+  // na Coleção Clássica), a raridade e o ano do título. Carta nova escolhida na lista: a coleção e o número da lista valem
+  // até a ficha chegar, e sem internet (T5).
+  const collectorInput: CollectorInput = {
+    cardId,
+    lang,
+    dataLang,
+    detail,
+    enDetail,
+    saved: saved ?? (isNewCard ? { setId: '', setName: params.setName ?? '', localId: params.localId ?? '' } : undefined),
+    set: collectorSources.set,
+    ptSetName: collectorSources.ptSetName,
+    jaGroupName: collectorSources.jaGroupName,
+    rows: catalogRows ?? [],
+    version: { variant, stamp: versionStamp || undefined },
+    dex: collectorDex(detail, dex),
+  };
+  const facts = collectorFacts(collectorInput);
+  const number = facts.number;
+  // Link da carta na Liga: a busca salva (versões antigas, com os casos especiais de numeração) ou
+  // "Nome em inglês (número/total)", com a mesma regra de promo da tela (isPromoSeries). Coleção Clássica, "Yellow A
+  // Alternate" e japonesa antiga: só o nome (ver ligaByNameOnly). Carta japonesa: o nome em inglês do produto ("Dark
+  // Kadabra"); com o nome em japonês (TCGdex), o do Pokémon; sem nenhum dos dois (treinador), nenhum link da Liga, que
+  // cadastra em inglês e não acharia a carta.
+  const ligaName = lang === 'ja' ? japaneseStoreName(name, getSpecies(dex)?.name) : (enDetail?.name ?? name);
+  const storeName = !!name && !(lang === 'ja' && hasJapaneseScript(ligaName));
+  const ligaUrl = storeName
+    ? ligaSearchUrl(
+        saved?.ligaQuery ??
+          (ligaByNameOnly(collectorInput)
+            ? ligaName
+            : ligaQuery(ligaName, localId || undefined, (detail?.set.cardCount?.official || detail?.set.cardCount?.total) ?? saved?.setTotal, {
+                setId,
+                setName,
+                promo: !isTcgp && setId ? isPromoSeries(setId, lang) : undefined,
+              })),
+      )
+    : undefined;
+  // MYP Cards sem o produto achado pela API (japonesa, ou preço ainda não buscado): a busca pelo nome no idioma da carta,
+  // em vez da página inicial. Em português, o nome em português, como o MYP lista. Japonesa sem nome em inglês: a página
+  // inicial (o quadro de preço cai no MYP_URL).
+  const mypUrl = storeName ? mypSearchUrl(lang === 'pt' ? name : ligaName, lang) : undefined;
   const isSameVersion = (c: Entry) =>
     variantKnown
       ? sameVersion({ variant, stamp: versionStamp }, { variant: c.variant, stamp: c.variant === 'other' ? '' : c.variantNote, keys: c.stampKeys })
@@ -995,9 +1053,17 @@ function CardForm({
       ) : null}
       <View style={[styles.badges, !wide && styles.rowCenter]}>
         <Badge label={LANG_SHORT[lang]} accessibilityLabel={`Idioma: ${LANG_LABEL[lang]}`} />
-        {rarity && rarity !== 'None' ? <Badge label={rarity} /> : null}
-        {!placed ? <Badge tone="warning" icon="alert-circle-outline" label="Fora do fichário" /> : null}
+        {facts.rarity ? <Badge label={facts.rarity} /> : null}
+        {/* Ano só de um dia que é desta carta, reimpressão ou versão (nunca um período). */}
+        {collectorSources.ready && facts.badge ? <Badge label={facts.badge.text} accessibilityLabel={facts.badge.spoken} /> : null}
       </View>
+      {/* "Fora do fichário" numa linha só dele: o ano, que chega depois, nunca o empurra para a linha de baixo (o que
+          desceria o resto da tela). */}
+      {!placed ? (
+        <View style={[styles.badges, !wide && styles.rowCenter]}>
+          <Badge tone="warning" icon="alert-circle-outline" label="Fora do fichário" />
+        </View>
+      ) : null}
       {!placed ? (
         <Text style={[styles.goesTo, !wide && styles.textCenter]}>
           {isNewCard
@@ -1124,6 +1190,7 @@ function CardForm({
           : undefined
       }
       ligaUrl={ligaUrl}
+      mypSearchUrl={mypUrl}
       onSetMyValue={autoSave ? focusMyValue : undefined}
     />
   );
@@ -1309,7 +1376,8 @@ function CardForm({
     </View>
   );
 
-  const about = detail ? (
+  // Só com algum fato de jogo: um treinador só do catálogo não abre um cartão vazio.
+  const about = detail && hasCardFacts(detail) ? (
     <View>
       <Pressable
         onPress={() => setAboutOpen((o) => !o)}
@@ -1333,9 +1401,18 @@ function CardForm({
     </View>
   ) : null;
 
+  // Fatos de colecionador, logo depois do preço (nunca acima dele); só com a carta identificada.
+  const collector = detail || saved ? <CollectorFacts facts={facts} ready={collectorSources.ready} /> : null;
+  const priceBlock = (
+    <>
+      {pricePanel}
+      {collector}
+    </>
+  );
+
   // Carta salva: o valor primeiro, depois o que se edita. Carta nova: o que se escolhe primeiro (o preço só chega depois).
-  const first = isNewCard ? myCard : pricePanel;
-  const second = isNewCard ? pricePanel : myCard;
+  const first = isNewCard ? myCard : priceBlock;
+  const second = isNewCard ? priceBlock : myCard;
   // Teclado aberto no Android: o fim da rolagem ganha o espaço dele, para "Observações" e "Meu valor" saírem de baixo.
   const bottomPad = keyboard.bottomPad((isNewCard ? barSpace : insets.bottom) + space.xxl);
 

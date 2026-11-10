@@ -5,12 +5,15 @@ import {
   formatBRLTight,
   formatCompact,
   formatDate,
+  formatDateSpoken,
   formatDay,
   formatInput,
   formatPct,
   formatRate,
   formatSignedBRL,
   formatUSD,
+  formatYears,
+  formatYearsSpoken,
   parseBRL,
 } from '@/lib/format';
 
@@ -138,6 +141,38 @@ describe('datas', () => {
     expect(formatDay('2026-10-20')).toBe('20/10');
     expect(formatDate('2026-10-20')).toBe('20/10/2026');
     expect(formatDate('2026-01-01')).toBe('01/01/2026');
+  });
+
+  it('formatDateSpoken: por extenso para o leitor de tela, sem fuso', () => {
+    expect(formatDateSpoken('2023-09-22')).toBe('22 de setembro de 2023');
+    expect(formatDateSpoken('1999-01-09')).toBe('9 de janeiro de 1999');
+    expect(formatDateSpoken('2021-12-31')).toBe('31 de dezembro de 2021');
+  });
+
+  it('formatDateSpoken: o dia 1 é "1º", como se escreve e se lê no Brasil ("primeiro de abril")', () => {
+    expect(formatDateSpoken('2022-04-01')).toBe('1º de abril de 2022');
+    expect(formatDateSpoken('2026-03-01')).toBe('1º de março de 2026');
+    expect(formatDateSpoken('2026-01-01')).toBe('1º de janeiro de 2026');
+    expect(formatDateSpoken('2026-01-10')).toBe('10 de janeiro de 2026');
+    expect(formatDateSpoken('2026-01-21')).toBe('21 de janeiro de 2026');
+  });
+});
+
+describe('anos (formatYears, formatYearsSpoken)', () => {
+  it('um ano, um período ou uma série ainda aberta', () => {
+    expect(formatYears(1999)).toBe('1999');
+    expect(formatYears(1999, 2003)).toBe('1999–2003');
+    expect(formatYears(2025, null)).toBe('desde 2025');
+    // Anos iguais: um só.
+    expect(formatYears(2021, 2021)).toBe('2021');
+    expect(formatYears(1999, undefined)).toBe('1999');
+  });
+
+  it('para o leitor de tela', () => {
+    expect(formatYearsSpoken(1999)).toBe('1999');
+    expect(formatYearsSpoken(1999, 2003)).toBe('de 1999 a 2003');
+    expect(formatYearsSpoken(2025, null)).toBe('desde 2025');
+    expect(formatYearsSpoken(2021, 2021)).toBe('2021');
   });
 });
 

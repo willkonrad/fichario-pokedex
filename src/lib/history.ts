@@ -9,7 +9,8 @@ import type { SourceId, ValueRange } from './valuation';
  * snapshot_prices): uma linha por carta com preço por dia, com as fontes daquele dia. Começa no dia da regra de preço
  * atual (PRICE_RULE_SINCE): as fotos de antes guardam fontes que saíram, e a soma delas cobre só parte das cartas.
  *
- * O total por dia vem somado do servidor (função collection_history, uma requisição por período); a variação de um
+ * O total por dia vem somado do servidor (função collection_history, uma requisição por período): os totais de cada
+ * dia guardados pelo cron "price-totals" (price_history_daily) e, somado na hora, só o que veio depois. A variação de um
  * período compara só as mesmas cartas nos dois dias (carta nova, removida, trocada ou com outra fonte fica à parte),
  * e o histórico de uma carta filtra a carta e a versão, para não misturar cartas trocadas no mesmo bolso. Os
  * resultados ficam guardados na memória por 30 min (a tela é montada de novo a cada abertura).
@@ -46,7 +47,7 @@ function basisOf(s: Record<string, unknown> | null | undefined): ValueBasis {
 
 /**
  * Valor de uma carta numa foto diária, pela mesma regra do app (src/lib/valuation.ts) e do servidor
- * (public.collection_history): "Meu valor" (mínimo, média e máximo iguais), senão a TCGplayer — só nas cartas em inglês e
+ * (public.history_day_sums): "Meu valor" (mínimo, média e máximo iguais), senão a TCGplayer — só nas cartas em inglês e
  * japonês, já em reais —, senão mínimo/média/máximo do MYP. Fontes antigas gravadas nas fotos (vendas reais, menor
  * anúncio, oferta por estado) não entram. Com `basis`, usa essa escolha no lugar da gravada (para comparar dois dias
  * pela mesma escolha).
@@ -146,7 +147,10 @@ async function historyRows(f: { from?: string; days?: string[]; entryId?: string
   return rows;
 }
 
-/** Soma por dia no aparelho (quando o banco ainda não tem collection_history). */
+/**
+ * Soma por dia no aparelho (quando o banco ainda não tem collection_history ou a history_day_sums que ela chama), com a
+ * mesma conta do banco (tests/history-totals.test.ts).
+ */
 function sumByDay(rows: HistoryRow[]): HistoryPoint[] {
   const byDay = new Map<string, HistoryPoint>();
   for (const r of rows) {

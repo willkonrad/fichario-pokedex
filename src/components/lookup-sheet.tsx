@@ -15,7 +15,7 @@ import { NATIVE_DRIVER, useReducedMotion } from '@/components/motion';
 import { Badge, Button, Chip, ChipGroup, ExternalLink, Notice, Segmented, Skeleton, useLayout } from '@/components/ui';
 import { ownershipOf } from '@/components/owned-badge';
 import { isCopyOf } from '@/lib/add-card';
-import { LOOKUP_PRICE, lookupChipPrice, lookupChipSpeech, lookupDatesText, MYP_NO_ANSWER, MYP_OFFLINE, MYP_URL, mypOffersText, mypPauseText } from '@/lib/copy';
+import { LOOKUP_PRICE, lookupChipPrice, lookupChipSpeech, lookupDatesText, MYP_BLOCKED, MYP_NO_ANSWER, MYP_OFFLINE, MYP_URL, mypOffersText, mypPauseText } from '@/lib/copy';
 import { formatAgo, formatBRL, formatBRLTight } from '@/lib/format';
 import { entryPlace, placeText } from '@/lib/lists';
 import { lookupBrief, printOfVariant } from '@/lib/lookup-brief';
@@ -116,7 +116,9 @@ function CardBody({ card, header, activeLang, openLang, variant, width, pick, fo
   const block = priceBlock(card, lang, header, twin, print);
   const myp = useMypNow(card, lang);
   const mypUrl = myp.status === 'ok' ? myp.url : undefined;
-  const { main, more } = useMemo(() => portalLinks({ card, lang, condition, mypUrl }), [card, lang, condition, mypUrl]);
+  // O nome do produto gêmeo (TCGplayer japonesa) dá o nome em inglês de um treinador chinês para as lojas.
+  const twinName = twin?.name;
+  const { main, more } = useMemo(() => portalLinks({ card, lang, condition, mypUrl, twinName }), [card, lang, condition, mypUrl, twinName]);
   const section = useMemo(() => sectionCards(card.dex), [card.dex]);
   const others = useMemo(() => siblings(card, section), [card, section]);
 
@@ -365,7 +367,8 @@ function PriceArea({ block, onlyLookup }: { block: PriceBlock; onlyLookup: boole
 function MypLine({ now, lang, main = false }: { now: MypNow; lang: LookupLang; main?: boolean }) {
   if (now.status === 'unavailable' && now.reason === 'language') return null;
   if (now.status === 'unavailable') {
-    return <Text style={styles.detail}>{now.reason === 'web' ? LOOKUP_PRICE.mypMobileOnly : now.reason === 'error' ? MYP_NO_ANSWER : MYP_OFFLINE}</Text>;
+    const text = now.reason === 'web' ? LOOKUP_PRICE.mypMobileOnly : now.reason === 'error' ? MYP_NO_ANSWER : now.reason === 'blocked' ? MYP_BLOCKED : MYP_OFFLINE;
+    return <Text style={styles.detail}>{text}</Text>;
   }
   const credit = (href: string) => (
     <ExternalLink href={href} variant="inline" arrow browserOptions={LINK_BROWSER}>

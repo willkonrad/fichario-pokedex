@@ -1,6 +1,6 @@
 {
   "name": "pokedex-binder",
-  "version": "3.4.0",
+  "version": "3.5.0",
   "main": "index.ts",
   "dependencies": {
     "@expo-google-fonts/kanit": "^0.4.1",
@@ -25,7 +25,6 @@
     "expo-router": "~58.0.30",
     "expo-splash-screen": "~58.0.13",
     "expo-status-bar": "~58.0.4",
-    "expo-symbols": "~58.0.4",
     "expo-system-ui": "~58.0.7",
     "expo-task-manager": "~58.0.13",
     "expo-updates": "~58.0.21",
@@ -60,6 +59,15 @@
     "lint": "expo lint .",
     "typecheck": "tsc --noEmit",
     "test": "jest"
+  },
+  "expo": {
+    "autolinking": {
+      "exclude": [
+        "react-native-gesture-handler",
+        "react-native-reanimated",
+        "react-native-worklets"
+      ]
+    }
   },
   "private": true
 }

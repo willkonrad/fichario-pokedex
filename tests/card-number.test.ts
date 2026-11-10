@@ -1,10 +1,22 @@
 import { isPromoSet, printedNumber } from '@/lib/card-number';
+import { collectorFacts, setOfCard } from '@/lib/collector';
 import { ligaQuery } from '@/lib/liga';
 import { cardNumber } from '@/lib/lists';
 
 // Número da carta como impresso (tela da carta, listas e busca da Liga). Dados das coleções conferidos na TCGdex.
 
 describe('printedNumber', () => {
+  it('`promo` dado por quem chama vale no lugar de isPromoSet; sem ele, nada muda', () => {
+    // SV2P (Snow Hazard) termina em "P", mas é coleção comum: "045/071".
+    expect(printedNumber({ localId: '045', total: 71, setId: 'SV2P', promo: false })).toBe('045/071');
+    expect(printedNumber({ localId: '045', total: 71, setId: 'SV2P' })).toBe('045');
+    expect(printedNumber({ localId: '1', total: 12, setId: 'tk-ex-p', promo: false })).toBe('1/12');
+    expect(printedNumber({ localId: '1', total: 12, setId: 'tk-ex-p' })).toBe('1');
+    expect(printedNumber({ localId: '33', total: 53, setId: 'basep', promo: true })).toBe('33');
+    expect(printedNumber({ localId: '33', total: 53, setId: 'basep' })).toBe('33');
+    expect(printedNumber({ localId: '025', total: 165, setId: 'sv03.5', setName: 'Promos', promo: false })).toBe('025/165');
+  });
+
   it('total com zeros só até a largura do número', () => {
     // Jungle: Clefable é "1/64", não "1/064".
     expect(printedNumber({ localId: '1', total: 64, setId: 'base2' })).toBe('1/64');
@@ -56,6 +68,28 @@ describe('cardNumber (listas e relatórios)', () => {
     expect(cardNumber({ localId: '025', setTotal: 165 })).toBe('025/165');
     expect(cardNumber({ localId: '', setTotal: 165 })).toBe('');
   });
+
+  it('o mesmo número do título da carta: promo pela lista fechada, japonesa antiga sem número', () => {
+    const screen = (cardId: string, lang: 'pt' | 'en' | 'ja', localId: string, total: number, setName = '') =>
+      collectorFacts({ cardId, lang, dataLang: lang, detail: null, enDetail: null, rows: [], dex: [], saved: { setId: setOfCard(cardId), setName, localId, setTotal: total } }).number;
+    const list = (cardId: string, lang: 'pt' | 'en' | 'ja', localId: string, total: number, setName = '') =>
+      cardNumber({ localId, setTotal: total, setId: setOfCard(cardId), setName, lang });
+    const cases: [string, 'pt' | 'en' | 'ja', string, number, string, string][] = [
+      // SV2P (Snow Hazard) e tk-ex-p (kit) terminam em "P", mas são coleções comuns.
+      ['SV2P-045', 'ja', '045', 71, '', '045/071'],
+      ['tk-ex-p-1', 'en', '1', 12, 'EX trainer Kit (Plusle)', '1/12'],
+      ['svp-027', 'pt', '027', 225, '', '027'],
+      ['S-P-001', 'ja', '001', 200, '', '001'],
+      ['PMCG1-021', 'ja', '021', 102, '', ''],
+      ['sv03.5-025', 'pt', '025', 165, '151', '025/165'],
+    ];
+    for (const [cardId, lang, localId, total, setName, expected] of cases) {
+      expect(list(cardId, lang, localId, total, setName)).toBe(expected);
+      expect(list(cardId, lang, localId, total, setName)).toBe(screen(cardId, lang, localId, total, setName));
+    }
+    // Carta só do catálogo: promo pelo nome do grupo, como antes.
+    expect(cardNumber({ localId: '085', setTotal: 200, setId: 'tcgp22872', setName: 'SV: Scarlet & Violet Promo Cards', lang: 'en' })).toBe('085');
+  });
 });
 
 describe('ligaQuery', () => {
@@ -70,5 +104,9 @@ describe('ligaQuery', () => {
     expect(ligaQuery('Pikachu', 'SWSH020', 307, { setId: 'swshp' })).toBe('Pikachu');
     expect(ligaQuery('Pikachu', 'SWSH020', 307, { setName: 'SWSH Black Star Promos' })).toBe('Pikachu');
     expect(ligaQuery('Pikachu')).toBe('Pikachu');
+  });
+
+  it('`promo` dado pela tela vale no lugar de isPromoSet ("045/071" na SV2P)', () => {
+    expect(ligaQuery('Abomasnow', '045', 71, { setId: 'SV2P', promo: false })).toBe('Abomasnow (045/071)');
   });
 });

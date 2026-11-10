@@ -42,9 +42,12 @@ function Energy({ type, size = 16 }: { type: string; size?: number }) {
   return <View style={[styles.energy, { width: size, height: size, borderRadius: size / 2, backgroundColor: e?.color ?? colors.iconFaint }]} />;
 }
 
+/** O atributo tem valor para mostrar. */
+const hasValue = (v: string | number | undefined) => v != null && v !== '' && v !== 'None';
+
 /** Grade de atributos, no estilo das fichas de catálogo: rótulo pequeno em cima, valor embaixo. */
 export function CardAttributes({ items }: { items: [string, string | number | undefined][] }) {
-  const shown = items.filter(([, v]) => v != null && v !== '' && v !== 'None');
+  const shown = items.filter(([, v]) => hasValue(v));
   if (!shown.length) return null;
   return (
     <View style={styles.grid}>
@@ -58,6 +61,7 @@ export function CardAttributes({ items }: { items: [string, string | number | un
   );
 }
 
+/** Fatos de jogo da carta ("Sobre a carta"). Raridade e ilustrador ficam no bloco "Para colecionador". */
 export function cardAttributeItems(detail: CardDetail | null): [string, string | number | undefined][] {
   if (!detail) return [];
   return [
@@ -66,10 +70,19 @@ export function cardAttributeItems(detail: CardDetail | null): [string, string |
     ['Tipo', detail.types?.map(energyName).join(', ')],
     ['Estágio', stageName(detail.stage)],
     ['Evolui de', detail.evolveFrom],
-    ['Ilustrador', detail.illustrator],
-    ['Raridade', detail.rarity],
     ['Marca de regulamento', detail.regulationMark],
   ];
+}
+
+/**
+ * "Sobre a carta" tem o que mostrar: algum atributo de jogo, habilidade, ataque, fraqueza, resistência ou recuo. Um
+ * treinador ou uma energia só do catálogo ("tcgp-") não tem nenhum (e a seção não abre um cartão vazio).
+ */
+export function hasCardFacts(detail: CardDetail | null): boolean {
+  if (!detail) return false;
+  const { abilities, attacks, weaknesses, resistances, retreat } = detail;
+  if (cardAttributeItems(detail).some(([, v]) => hasValue(v))) return true;
+  return !!abilities?.length || !!attacks?.length || !!weaknesses?.length || !!resistances?.length || retreat != null;
 }
 
 /** "Fogo, Fogo e Incolor". */

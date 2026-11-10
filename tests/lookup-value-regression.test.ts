@@ -80,7 +80,7 @@ describe('quem cuida do valor não lê a Consulta', () => {
 
   it('o banco não conhece o índice nas funções de valor', () => {
     const schema = read('supabase/schema.sql');
-    for (const fn of ['collection_history', 'snapshot_prices']) {
+    for (const fn of ['collection_history', 'history_day_sums', 'history_day_totals', 'snapshot_prices']) {
       const at = schema.indexOf(`function public.${fn}`);
       expect(at).toBeGreaterThanOrEqual(0);
       const end = schema.indexOf('$$;', at);

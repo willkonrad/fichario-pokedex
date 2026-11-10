@@ -1,3 +1,5 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import type { MypKeys } from '@/lib/lookup-types';
 import {
   fetchMypByKeys,
@@ -7,6 +9,7 @@ import {
   mypApiDue,
   mypApiMatches,
   mypApiNote,
+  MypBlocked,
   MypRateLimited,
   searchMypByCode,
   searchMypByName,
@@ -18,9 +21,9 @@ import type { Entry, MypApiPrice } from '@/lib/types';
 
 /**
  * Fila das buscas no MYP Cards, usada pela busca com o app aberto (MypRefresher) e pela de segundo plano
- * (myp-background). As duas dividem o ritmo (uma consulta a cada 6,5 s), a pausa depois de um 429, as falhas por
- * carta e as buscas guardadas, então nunca passam juntas do limite de 10 consultas por minuto. A Consulta de cartas
- * entra na mesma conta (consultMypNow), sem esperar a vez da fila.
+ * (myp-background). As duas dividem o ritmo (uma consulta a cada 6,5 s), a pausa depois de um 429, a parada depois de
+ * um 403, as falhas por carta e as buscas guardadas, então nunca passam juntas do limite de 10 consultas por minuto. A
+ * Consulta de cartas entra na mesma conta (consultMypNow), sem esperar a vez da fila.
  */
 
 /** Carta que falhou: espera 1 h; depois de 3 falhas seguidas, só na próxima vez que o app abrir. */
@@ -47,6 +50,66 @@ let nextCallAt = 0;
 /** Até quando ninguém consulta, depois de um 429. */
 let pausedUntil = 0;
 const recent = new Map<string, { at: number; products: MypProduct[] }>();
+
+/**
+ * Recusa do MYP (403): "não" é "não". Nenhuma consulta ao MYP (fila, segundo plano e Consulta) por 24 h ou até a pessoa
+ * pedir de novo (clearMypBlock). A hora da recusa fica no aparelho, para valer também depois de reabrir o app e na
+ * tarefa em segundo plano.
+ */
+export const MYP_BLOCK_MS = 24 * 60 * 60_000;
+const BLOCK_KEY = 'myp:blocked-at';
+/** Hora da última recusa (0 = nenhuma). */
+let blockedAt = 0;
+/** Muda a cada recusa ou pedido de tentar de novo: a leitura do aparelho que chega depois não desfaz nenhum dos dois. */
+let blockGen = 0;
+let blockLoad: Promise<void> | null = null;
+const blockListeners = new Set<() => void>();
+
+/** Lê a recusa guardada no aparelho (uma vez por abertura); sem armazenamento, vale só a da memória. */
+export function loadMypBlock(): Promise<void> {
+  const gen = blockGen;
+  blockLoad ??= AsyncStorage.getItem(BLOCK_KEY)
+    .then((raw) => {
+      const at = Date.parse(raw ?? '');
+      if (gen !== blockGen || !Number.isFinite(at) || at <= blockedAt) return;
+      blockedAt = at;
+      for (const fn of blockListeners) fn();
+    })
+    .catch(() => {});
+  return blockLoad;
+}
+
+/** Até quando as consultas ao MYP estão paradas (0 = não estão). */
+export function mypBlockedUntil(now = Date.now()): number {
+  const until = blockedAt ? blockedAt + MYP_BLOCK_MS : 0;
+  return until > now ? until : 0;
+}
+
+/** Avisa quem mostra o aviso da recusa; devolve quem desliga. */
+export function subscribeMypBlock(listener: () => void): () => void {
+  blockListeners.add(listener);
+  return () => {
+    blockListeners.delete(listener);
+  };
+}
+
+function setBlockedAt(at: number) {
+  blockedAt = at;
+  blockGen += 1;
+  const write = at ? AsyncStorage.setItem(BLOCK_KEY, new Date(at).toISOString()) : AsyncStorage.removeItem(BLOCK_KEY);
+  write.catch(() => {});
+  for (const fn of blockListeners) fn();
+}
+
+/** O MYP recusou uma consulta: tudo para por MYP_BLOCK_MS. */
+function markMypBlocked() {
+  setBlockedAt(Date.now());
+}
+
+/** A pessoa pediu para tentar de novo: a próxima consulta sai (outra recusa para tudo de novo). */
+export function clearMypBlock() {
+  setBlockedAt(0);
+}
 
 /** Janela deslizante: no máximo 9 consultas em 60 s, somando a fila e a Consulta. */
 const WINDOW_MS = 60_000;
@@ -94,6 +157,8 @@ export function nextMypGroup(
   urgent: ReadonlySet<string> = new Set(),
   fails: MypFailures = failures,
 ): Entry[] | undefined {
+  // MYP recusou as consultas: fila vazia até a pausa acabar (nem a carta aberta na tela consulta).
+  if (mypBlockedUntil(now)) return undefined;
   const due = Object.values(entries).filter((e) => {
     if (!mypApiDue(e, now)) return false;
     const f = fails.get(mypGroupKey(e));
@@ -124,8 +189,21 @@ export type MypRunner = {
   current: (id: string) => Entry | undefined;
 };
 
-/** `offline`: falhou sem chegar ao MYP ou à TCGdex (sem internet ou sem resposta no tempo); a carta espera como em `failed`. */
-export type MypStep = 'done' | 'failed' | 'offline' | 'rateLimited' | 'stopped';
+/**
+ * `offline`: falhou sem chegar ao MYP ou à TCGdex (sem internet ou sem resposta no tempo); a carta espera como em `failed`.
+ * `blocked`: o MYP recusou (403), e nenhuma consulta sai até a pausa da recusa acabar (ver MYP_BLOCK_MS).
+ */
+export type MypStep = 'done' | 'failed' | 'offline' | 'rateLimited' | 'blocked' | 'stopped';
+
+/** Antes de cada consulta: com o MYP recusando, nenhuma sai. */
+function checkNotBlocked() {
+  if (mypBlockedUntil()) throw new MypBlocked('MYP recusou: consultas paradas');
+}
+
+/** Recusa nova do MYP (não a da conferência acima): para tudo daqui em diante. */
+function noteBlocked() {
+  if (!mypBlockedUntil()) markMypBlocked();
+}
 
 /** Sem internet, ou a chamada passou do tempo (timedFetch). */
 const offline = (err: unknown) => isNetworkError(err) || (err as { name?: unknown } | null)?.name === 'FetchTimeoutError';
@@ -152,6 +230,7 @@ export async function runMypGroup(group: Entry[], run: MypRunner, fails: MypFail
       await run.pause(wait);
       await run.beforeCall?.();
     }
+    checkNotBlocked();
     nextCallAt = Date.now() + MYP_API_INTERVAL_MS;
     calls.push(Date.now());
     const products = await load();
@@ -165,6 +244,8 @@ export async function runMypGroup(group: Entry[], run: MypRunner, fails: MypFail
   // A busca serve o grupo todo; pela cópia em português, que também traz a foto em português do MYP.
   const target = group.find((e) => e.lang === 'pt') ?? group[0];
   try {
+    await loadMypBlock();
+    checkNotBlocked();
     const price = await fetchMypPrice(target, consult, consultCode);
     // Renovação que não achou uma carta já encontrada: fica o preço achado (ver KEEP_FOUND_MS).
     const priced = (e: Entry) => !!e.mypApi && mypApiMatches(e, e.mypApi) && e.mypApi.avg != null;
@@ -184,6 +265,11 @@ export async function runMypGroup(group: Entry[], run: MypRunner, fails: MypFail
     return 'done';
   } catch (err) {
     if (err instanceof MypRunStopped) return 'stopped';
+    if (err instanceof MypBlocked) {
+      // Não é falha da carta: a fila inteira para (e ela volta quando a pausa acabar).
+      noteBlocked();
+      return 'blocked';
+    }
     if (err instanceof MypRateLimited) {
       // Limite do MYP: mais de um minuto sem nenhuma consulta, nas duas buscas e na Consulta.
       pausedUntil = Date.now() + RATE_LIMIT_PAUSE_MS;
@@ -212,9 +298,11 @@ class NowLimited extends Error {
  * Preço na hora para a Consulta: com as chaves prontas (sem TCGdex), sem esperar a vez da fila enquanto a janela tiver
  * vaga. Divide com a fila a janela, a pausa do 429 e as buscas guardadas por 30 min. Veio da busca guardada: `checkedAt`
  * é a hora dela, para a tela não dizer "agora" de um preço de meia hora. `failed`: o MYP respondeu com erro (não é falta
- * de internet).
+ * de internet). `blocked`: o MYP recusou as consultas (403, agora ou nas últimas 24 h); nenhuma sai.
  */
-export async function consultMypNow(keys: MypKeys): Promise<{ price: MypApiPrice } | { limitedForMs: number; by: MypLimitBy } | { offline: true } | { failed: true }> {
+export async function consultMypNow(
+  keys: MypKeys,
+): Promise<{ price: MypApiPrice } | { limitedForMs: number; by: MypLimitBy } | { offline: true } | { failed: true } | { blocked: true }> {
   let oldestHit = Infinity;
   const limited = async (cacheKey: string, load: () => Promise<MypProduct[]>) => {
     const hit = recent.get(cacheKey);
@@ -222,6 +310,7 @@ export async function consultMypNow(keys: MypKeys): Promise<{ price: MypApiPrice
       oldestHit = Math.min(oldestHit, hit.at);
       return hit.products;
     }
+    checkNotBlocked();
     const now = Date.now();
     const pause = pausedUntil - now;
     const wait = Math.max(pause, windowWait(now));
@@ -233,6 +322,7 @@ export async function consultMypNow(keys: MypKeys): Promise<{ price: MypApiPrice
   };
   const base = { cardId: keys.cardId, variant: keys.variant, note: keys.note || undefined, checkedAt: new Date().toISOString(), v: MYP_MATCHER };
   try {
+    await loadMypBlock();
     const price = await fetchMypByKeys(
       keys,
       base,
@@ -242,6 +332,10 @@ export async function consultMypNow(keys: MypKeys): Promise<{ price: MypApiPrice
     return { price: Number.isFinite(oldestHit) ? { ...price, checkedAt: new Date(oldestHit).toISOString() } : price };
   } catch (err) {
     if (err instanceof NowLimited) return { limitedForMs: err.ms, by: err.by };
+    if (err instanceof MypBlocked) {
+      noteBlocked();
+      return { blocked: true };
+    }
     if (err instanceof MypRateLimited) {
       pausedUntil = Date.now() + RATE_LIMIT_PAUSE_MS;
       return { limitedForMs: RATE_LIMIT_PAUSE_MS, by: 'myp' };

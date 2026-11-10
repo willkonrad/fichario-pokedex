@@ -1,7 +1,7 @@
 // Sincronização do store da coleção com a nuvem de mentira (tests/fake-cloud.ts): troca de conta no mesmo aparelho,
 // abertura sem internet com o token vencido, remoções no meio de uma busca, cartas sem data e o que fica gravado no
 // aparelho. Cada teste começa com o app "aberto do zero" (módulos e armazenamento novos) e o relógio de mentira.
-import type { Entry } from '@/lib/types';
+import type { BinderSettings, Entry } from '@/lib/types';
 
 import { AUTH_STORAGE_KEY, makeSession, type Cloud } from './fake-cloud';
 import { AT, binder, entry, LATER, settings } from './fixtures';
@@ -240,6 +240,110 @@ describe('cópia importada', () => {
     await until(() => col.collectionState().ready);
     await col.collectionActions.importCollection({ exportedAt: LATER, entries: [{ dex: 25, slot: 0, cardId: 'base1-58', lang: 'en' }] });
     expect(col.collectionState().entries['25-0']?.updatedAt).toBe(LATER);
+  });
+});
+
+describe('configuração fora dos limites da tela (cópia forjada)', () => {
+  // Grade de 2000 × 2000 e fichário de 1e6 páginas, com data 9999: travava o fichário ao abrir, em todos os aparelhos.
+  const FAR = '9999-12-31T23:59:59.999Z';
+  const huge = { ...settings(), rows: 2000, cols: 2000, updatedAt: FAR, extras: [binder({ rows: 10_000, cols: 10_000, pages: 1e6, updatedAt: FAR })] };
+  const cloudSettings = (cloud: Cloud) => cloud.rows('A', 'binder_settings')[0]?.data as BinderSettings | undefined;
+
+  it('a já gravada no aparelho abre com a grade padrão', async () => {
+    const { col, start } = await boot({ 'binder:settings': huge });
+    start();
+    await until(() => col.collectionState().ready);
+    expect(col.collectionState().settings).toMatchObject({ rows: 3, cols: 3 });
+    expect(col.collectionState().settings?.extras?.[0]).toMatchObject({ id: 'b1', rows: 3, cols: 3, pages: 20 });
+  });
+
+  it('a da nuvem também; a limpeza sozinha não sobe, e a edição seguinte vence e conserta a nuvem', async () => {
+    const { cloud, col, start } = await boot();
+    const s = () => col.collectionState();
+    cloud.seed('A', { settings: huge });
+    cloud.uid = 'A';
+    cloud.session = makeSession('A');
+    start();
+    await until(() => !!s().lastSyncAt);
+    expect(s().settings).toMatchObject({ rows: 3, cols: 3 });
+    expect(cloud.calls.filter((c) => c.table === 'binder_settings' && c.op === 'upsert')).toEqual([]);
+    await col.collectionActions.saveSettings({ ...s().settings!, rows: 4 });
+    await until(() => cloudSettings(cloud)?.rows === 4 && s().syncStatus.pending === 0);
+    expect(cloudSettings(cloud)).toMatchObject({ rows: 4, cols: 3 });
+    expect(s().settings?.rows).toBe(4);
+  });
+
+  it('importar a cópia forjada: grade padrão (também na nuvem) e datas em agora', async () => {
+    const { cloud, col, start } = await boot();
+    const s = () => col.collectionState();
+    cloud.seed('A', { settings: settings({ rows: 4, updatedAt: AT }) });
+    cloud.signIn('A');
+    start();
+    await until(() => !!s().lastSyncAt);
+    await col.collectionActions.importCollection(JSON.stringify({ app: 'fichario-pokedex', version: 1, settings: huge, entries: [] }));
+    expect(s().settings).toMatchObject({ rows: 3, cols: 3 });
+    expect(s().settings?.extras?.[0]).toMatchObject({ rows: 3, cols: 3, pages: 20 });
+    expect(Date.parse(s().settings!.updatedAt!)).toBeLessThanOrEqual(Date.now());
+    await until(() => cloudSettings(cloud)?.extras?.length === 1 && s().syncStatus.pending === 0);
+    expect(cloudSettings(cloud)).toMatchObject({ rows: 3, cols: 3 });
+    expect(cloudSettings(cloud)?.extras?.[0]).toMatchObject({ pages: 20 });
+  });
+});
+
+describe('tarefa de segundo plano (app fechado, processo novo)', () => {
+  const hourAgo = '2026-11-09T11:00:00.000Z';
+  const pika = entry({ notes: 'aqui' });
+  // Só na nuvem, gravada antes do cursor do aparelho: a incremental não a traz, a completa traz.
+  const onlyCloud = entry({ id: '1-0', dex: 1, cardId: 'sv03.5-001', cardName: 'Bulbasaur' });
+  const meta = { owner: 'A', holder: 'A', cursor: '2026-11-05T00:00:00.000Z', lastSyncAt: hourAgo, lastFullAt: hourAgo };
+  const entryReads = (cloud: Cloud) => cloud.calls.filter((c) => c.table === 'entries' && c.op === 'select').length;
+  const savedMeta = async (storage: Storage) => JSON.parse((await storage.getItem('binder:sync')) ?? '{}') as typeof meta;
+
+  /** Aparelho que já sincronizou com A (a completa há 1 h, salvo `over`), com a conta aberta. */
+  async function bootSynced(over: Partial<typeof meta> = {}) {
+    const b = await boot({ 'binder:e:25-0': pika, 'binder:sync': { ...meta, ...over } });
+    b.cloud.seed('A', { entries: [pika, onlyCloud], settings: settings({ updatedAt: AT }) });
+    b.cloud.uid = 'A';
+    b.cloud.session = makeSession('A');
+    return b;
+  }
+
+  it('não vai à nuvem antes de a tarefa pedir; depois, só a incremental; a tela que abre em seguida faz a completa', async () => {
+    const { cloud, col, storage } = await bootSynced();
+    const s = () => col.collectionState();
+    stops.push(col.startCollection({ background: true }));
+    await until(() => s().ready && s().session?.user.id === 'A');
+    await jest.advanceTimersByTimeAsync(2_000);
+    expect(cloud.calls).toEqual([]);
+    expect(s().lastSyncAt).toBeNull();
+
+    col.allowBackgroundSync();
+    await until(() => !!s().lastSyncAt);
+    expect(entryReads(cloud)).toBe(1);
+    expect(s().entries['1-0']).toBeUndefined();
+    await col.saveCollectionNow();
+    expect((await savedMeta(storage)).lastFullAt).toBe(hourAgo);
+
+    // A pessoa abre o app no mesmo processo: a tela liga a coleção e a completa desta abertura roda.
+    stops.push(col.startCollection());
+    await until(() => !!s().entries['1-0']);
+    expect(entryReads(cloud)).toBe(2);
+    await col.saveCollectionNow();
+    expect((await savedMeta(storage)).lastFullAt).not.toBe(hourAgo);
+  });
+
+  it.each([
+    ['a última completa passou de 24 h', { lastFullAt: '2026-11-08T11:00:00.000Z' }],
+    ['o aparelho não tem o cursor', { cursor: undefined }],
+    ['o aparelho nunca sincronizou com esta conta', { owner: undefined, holder: undefined }],
+  ])('na tarefa, a completa continua quando %s', async (_, over) => {
+    const { col } = await bootSynced(over);
+    const s = () => col.collectionState();
+    stops.push(col.startCollection({ background: true }));
+    await until(() => s().ready && !!s().session);
+    col.allowBackgroundSync();
+    await until(() => !!s().lastSyncAt);
+    expect(s().entries['1-0']).toMatchObject({ cardName: 'Bulbasaur' });
   });
 });
 

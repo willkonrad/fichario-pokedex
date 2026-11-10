@@ -4,8 +4,9 @@ import { getSpecies, POKEDEX, speciesInCardName } from '@/data/pokedex';
 import {
   catalogByName,
   catalogByTcgdexIds,
+  catalogDay,
+  catalogGroupDates,
   catalogGroupSet,
-  catalogGroupYears,
   catalogNumber,
   catalogProduct,
   catalogYear,
@@ -98,7 +99,18 @@ export type CardDetail = {
   variants?: Partial<Record<'normal' | 'reverse' | 'holo' | 'firstEdition' | 'wPromo', boolean>>;
   /** Foto completa da carta, para cartas que só existem no catálogo do TCGCSV. */
   imageUrl?: string;
+  /**
+   * Carta só do catálogo ("tcgp-"): o produto, a coleção (grupo), o número como a TCGplayer escreve ("001/BW-P"), as
+   * datas do produto e da coleção, como vieram (sem a correção de GROUP_YEARS), e o tipo do produto como veio ("Water",
+   * "Trainer - Item", "Basic Energy": diz se é treinador ou energia).
+   */
+  catalog?: { productId: number; category: number; groupId: number; number?: string; releasedOn?: string; publishedOn?: string; cardType?: string };
+  /** Ficha básica do Zukan (a TCGdex ainda não tem a carta). */
+  source?: 'zukan';
 };
+
+/** Fatos da coleção para a tela da carta: dia de lançamento, id e nome da série. Vazio quando a fonte não tem. */
+export type SetFacts = { day?: string; serieId?: string; serie?: string };
 
 /**
  * Lista de cartas com a situação das fontes: `partial` = alguma fonte (catálogo, selos, inglês, Zukan) não respondeu e
@@ -245,6 +257,11 @@ const STALE_CACHE = [
   /^tcgdex:dex:v(?:[1-9]|1[0-5]):/,
   /^tcgdex:search:v[1-9]:/,
   /^tcgdex:set-years:v1$/,
+  // Viraram tcgdex:set-dates:v1 e tcgdex:ja-set-date:v1 (o dia e a série, não só o ano).
+  /^tcgdex:set-years:v2$/,
+  /^tcgdex:ja-set-year:v1:/,
+  // Ficha da carta só do catálogo: virou tcgdex:card:v2 (com as datas, o número e HP, tipo e estágio).
+  /^tcgdex:card:(?:pt|en|ja):tcgp-/,
   /^tcgdex:code-cat:v1:/,
   /^scrydex:(?!v5:)/,
   /^tcgdex:abbr:/,
@@ -404,16 +421,23 @@ const STAMPED_PT_SCANS = new Set(['xy/xy3/44']);
  *
  * Lista em japonês (`lang` 'ja'): a consulta da TCGdex só tem as coleções em inglês, e algumas japonesas da reserva
  * repetem o id delas com outra data (neo1–neo4: Neo Discovery é de 2001, 遺跡をこえて... de 2000). Então ficam só os anos
- * do catálogo e, para as coleções da reserva em `setIds`, o ano da própria coleção japonesa (ver japaneseSetYear).
+ * do catálogo e, para as coleções da reserva em `setIds`, o ano da própria coleção japonesa (ver japaneseSetDate).
  */
 export async function setReleaseYears(lang?: CardLang, setIds: string[] = []): Promise<Record<string, number>> {
-  const all = await allSetYears();
+  const all = await allSetDates();
   const out: Record<string, number> = {};
-  for (const [id, year] of Object.entries(all)) if (lang !== 'ja' || id.startsWith('tcgp')) out[id] = year;
+  for (const [id, { d }] of Object.entries(all)) {
+    const year = catalogYear(d);
+    if (year && (lang !== 'ja' || id.startsWith('tcgp'))) out[id] = year;
+  }
   for (const [group, [from]] of Object.entries(GROUP_YEARS)) if (out[`tcgp${group}`]) out[`tcgp${group}`] = from;
   if (lang !== 'ja') return out;
   const reserve = [...new Set(setIds.filter((id) => id && !id.startsWith('tcgp')))];
-  const years = await mapPool(reserve, 4, (id) => japaneseSetYear(id).catch(() => null));
+  const years = await mapPool(reserve, 4, (id) =>
+    japaneseSetDate(id)
+      .then((s) => catalogYear(s?.d) ?? null)
+      .catch(() => null),
+  );
   reserve.forEach((id, i) => {
     const year = years[i];
     if (year) out[id] = year;
@@ -421,43 +445,110 @@ export async function setReleaseYears(lang?: CardLang, setIds: string[] = []): P
   return out;
 }
 
-/** Ano de uma coleção da TCGdex japonesa, pela ficha dela (a lista de coleções não traz a data). Guardado por 4 semanas. */
-function japaneseSetYear(setId: string) {
-  return cached(
-    `tcgdex:ja-set-year:v1:${setId}`,
+/** Coleção da TCGdex japonesa: dia de lançamento (`d`), id (`s`) e nome em japonês (`n`) da série. */
+type JaSetDate = { d?: string; s?: string; n?: string };
+
+/**
+ * Dia e série de uma coleção da TCGdex japonesa, pela ficha dela (a lista de coleções não traz a data). Guardado por 4
+ * semanas; sem a coleção ou sem a data, por 1 dia.
+ */
+function japaneseSetDate(setId: string) {
+  return cached<JaSetDate | null>(
+    `tcgdex:ja-set-date:v1:${setId}`,
     async () => {
-      const set = await getJson<{ releaseDate?: string | null }>(`${API}/ja/sets/${encodeURIComponent(setId)}`).catch((e) => {
+      const set = await getJson<{ releaseDate?: string | null; serie?: { id?: string; name?: string } | null }>(
+        `${API}/ja/sets/${encodeURIComponent(setId)}`,
+      ).catch((e) => {
         if (notFound(e)) return null;
         throw e;
       });
-      return catalogYear(set?.releaseDate) ?? null;
+      if (!set) return null;
+      const out: JaSetDate = {};
+      const d = catalogDay(set.releaseDate);
+      if (d) out.d = d;
+      if (set.serie?.id) out.s = set.serie.id;
+      if (set.serie?.name) out.n = set.serie.name;
+      return out;
     },
     CACHE_TTL * 4,
-    { ttlFor: (year) => (year ? CACHE_TTL * 4 : LIST_TTL) },
+    { ttlFor: (s) => (s?.d ? CACHE_TTL * 4 : LIST_TTL) },
   );
 }
 
-function allSetYears(): Promise<Record<string, number>> {
+/** Dia de lançamento (`d`) e id da série na TCGdex (`s`) de cada coleção; "tcgp<grupo>" só com o dia. */
+type SetDate = { d: string; s?: string };
+
+/**
+ * As coleções da TCGdex numa consulta só (GraphQL em inglês: o dia e o id da série) mais o dia das coleções do catálogo
+ * ("tcgp<grupo>"). Guardado por 7 dias; se a TCGdex não responder, nada é guardado (tenta de novo depois).
+ */
+function allSetDates(): Promise<Record<string, SetDate>> {
   return cached(
-    'tcgdex:set-years:v2',
+    'tcgdex:set-dates:v1',
     async () => {
       const body = await timedFetch(
         `${API}/graphql`,
         (res) => {
           if (!res.ok) throw new Error(`TCGdex ${res.status}`);
-          return res.json() as Promise<{ data?: { sets?: { id: string; releaseDate?: string | null }[] } }>;
+          return res.json() as Promise<{ data?: { sets?: { id: string; releaseDate?: string | null; serie?: { id?: string } | null }[] } }>;
         },
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: '{ sets { id releaseDate } }' }) },
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: '{ sets { id releaseDate serie { id } } }' }) },
       );
-      const out: Record<string, number> = await catalogGroupYears().catch(() => ({}));
+      const out: Record<string, SetDate> = {};
+      for (const [key, d] of Object.entries(await catalogGroupDates().catch(() => ({}) as Record<string, string>))) out[key] = { d };
       for (const s of body.data?.sets ?? []) {
-        const year = Number(String(s.releaseDate ?? '').slice(0, 4));
-        if (year > 1990) out[s.id] = year;
+        const d = catalogDay(s.releaseDate);
+        if (d) out[s.id] = s.serie?.id ? { d, s: s.serie.id } : { d };
       }
       return out;
     },
     CACHE_TTL,
   );
+}
+
+/** Nome de cada série da TCGdex no idioma (id → nome), guardado por 4 semanas. */
+function seriesNames(lang: CardLang): Promise<Record<string, string>> {
+  return cached(
+    `tcgdex:series:v1:${lang}`,
+    async () => {
+      const list = await getJson<{ id: string; name?: string }[]>(`${API}/${lang}/series`);
+      const out: Record<string, string> = {};
+      for (const s of list ?? []) if (s.id && s.name) out[s.id] = s.name;
+      return out;
+    },
+    CACHE_TTL * 4,
+  );
+}
+
+/** Nome da série no idioma; em português, sem o nome traduzido (neo, gym, ecard…), o em inglês. */
+export async function serieName(id: string | undefined, lang: CardLang): Promise<string | undefined> {
+  if (!id) return undefined;
+  const own = (await seriesNames(lang))[id];
+  if (own || lang !== 'pt') return own;
+  return (await seriesNames('en'))[id];
+}
+
+/**
+ * Dia de lançamento e série de uma coleção, para a tela da carta. Em japonês, os da própria coleção japonesa (neo1 é de
+ * 2000-02-04, a inglesa de mesmo id é de 2000-12-16) e o nome da série em japonês; em português e inglês, o dia da TCGdex
+ * em inglês (a fonte não tem a data no Brasil) e a série no idioma. Coleção só do catálogo ("tcgp…") ou sem id: nada.
+ */
+export async function setFacts(setId: string, lang: CardLang): Promise<SetFacts> {
+  if (!setId || setId.startsWith('tcgp')) return {};
+  if (lang === 'ja') {
+    const s = await japaneseSetDate(setId);
+    return s ? { day: s.d, serieId: s.s, serie: s.n } : {};
+  }
+  const hit = (await allSetDates())[setId];
+  if (!hit) return {};
+  const serie = await serieName(hit.s, lang).catch(() => undefined);
+  return { day: hit.d, serieId: hit.s, serie };
+}
+
+/** Nome da coleção no idioma, pela lista de coleções da TCGdex (ex.: o nome em português de uma carta com dados em inglês). */
+export async function setNameIn(setId: string, lang: CardLang): Promise<string | undefined> {
+  if (!setId) return undefined;
+  return (await setsFor(lang)).find((s) => s.id === setId)?.name;
 }
 
 /** Sufixo de qualidade exigido pelas imagens da TCGdex (e a foto em inglês no lugar das fotos em português com selo). */
@@ -890,6 +981,12 @@ const GROUP_YEARS: Record<number, [number, number]> = {
   // Japanese CD Promo (Charizard, Blastoise, Venusaur, Misty's Treatment): o TCGCSV diz 2025-12-01; são de 1998–1999.
   24568: [1998, 1999],
 };
+
+/** Anos de verdade de uma coleção do catálogo com a data errada no TCGCSV (GROUP_YEARS); as outras, undefined. */
+export function catalogYearsFix(groupId: number): { from: number; to: number } | undefined {
+  const fix = GROUP_YEARS[groupId];
+  return fix ? { from: fix[0], to: fix[1] } : undefined;
+}
 
 /** Data de lançamento de uma coleção do catálogo, com a correção de GROUP_YEARS (o começo dos anos de verdade). */
 export function catalogPublishedOn(groupId: number, publishedOn?: string | null): string | null | undefined {
@@ -1512,19 +1609,40 @@ async function loadJaSearch(name: string, signal?: AbortSignal): Promise<CardLis
 
 // ---------- Ficha da carta ----------
 
+/** Tipos de energia como a TCGplayer escreve (card_type traz também "Trainer", "Energy"…, que não são tipo). */
+const CATALOG_TYPES = new Set(['Grass', 'Fire', 'Water', 'Lightning', 'Psychic', 'Fighting', 'Darkness', 'Metal', 'Fairy', 'Dragon', 'Colorless']);
+/** Estágios que a ficha mostra ("Level Up", "BREAK"… ficam de fora). */
+const CATALOG_STAGES = new Set(['Basic', 'Stage 1', 'Stage 2']);
+
 export function cardDetail(id: string, lang: CardLang) {
-  return cached(`tcgdex:card:${lang}:${id}`, async () => {
+  // A v2 da ficha só do catálogo trouxe as datas, o número completo e HP, tipo e estágio.
+  const key = id.startsWith('tcgp-') ? `tcgdex:card:v2:${lang}:${id}` : `tcgdex:card:${lang}:${id}`;
+  return cached(key, async () => {
     // Carta que só existe no catálogo do TCGCSV ("tcgp-<produto>"): ficha básica com a foto da TCGplayer.
     if (id.startsWith('tcgp-')) {
-      const r = await catalogProduct(Number(id.slice(5)));
+      const r = await catalogProduct(Number(id.slice(5)), { facts: true });
       if (!r) throw new Error('TCGCSV 404');
+      const type = r.card_type?.trim();
+      const stage = r.stage?.trim();
       return {
         id,
         localId: catalogNumber(r.number),
         name: r.name,
         rarity: r.rarity ?? undefined,
+        ...(r.hp != null && r.hp > 0 ? { hp: r.hp } : {}),
+        ...(type && CATALOG_TYPES.has(type) ? { types: [type] } : {}),
+        ...(stage && CATALOG_STAGES.has(stage) ? { stage } : {}),
         set: { id: `tcgp${r.group_id}`, name: r.tcg_groups?.name ?? '' },
         imageUrl: r.image,
+        catalog: {
+          productId: r.product_id,
+          category: r.category,
+          groupId: r.group_id,
+          number: r.number ?? undefined,
+          releasedOn: r.released_on ?? undefined,
+          publishedOn: r.tcg_groups?.published_on ?? undefined,
+          ...(type ? { cardType: type } : {}),
+        },
       } satisfies CardDetail;
     }
     try {
@@ -1647,5 +1765,6 @@ async function zukanCard(id: string, lang: CardLang): Promise<CardDetail | undef
     types: z.types ? [z.types] : undefined,
     stage: z.stage,
     set: { id: setId, name: z.setNamePt ?? setId },
+    source: 'zukan',
   };
 }

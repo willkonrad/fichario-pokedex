@@ -2,7 +2,7 @@
   "expo": {
     "name": "Fichário Pokédex",
     "slug": "pokedex-binder",
-    "version": "3.4.0",
+    "version": "3.5.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "pokedexbinder",
@@ -66,14 +66,23 @@
           "android": {
             "buildArchs": [
               "arm64-v8a"
-            ]
+            ],
+            "gifEnabled": false,
+            "webpEnabled": false
           }
         }
       ],
       [
         "expo-camera",
         {
-          "recordAudioAndroid": false
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": false
+        }
+      ],
+      [
+        "./plugins/with-camera-document-scanner.js",
+        {
+          "enabled": false
         }
       ],
       [
@@ -87,6 +96,15 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "7bb069df-1902-4427-a2ba-6c6f4ab9ea4c"
+      }
+    },
+    "owner": "mistko",
+    "updates": {
+      "url": "https://u.expo.dev/7bb069df-1902-4427-a2ba-6c6f4ab9ea4c"
     }
   }
 }

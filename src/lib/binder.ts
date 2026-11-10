@@ -7,6 +7,15 @@ export type SlotRef = { dex: number; slot: number; index: number };
 /** O que todo fichário tem: grade da página e se as folhas são frente e verso. */
 type Grid = { rows: number; cols: number; doubleSided: boolean };
 
+/**
+ * Limites da grade e das páginas, os mesmos dos controles de setup.tsx e binder-edit.tsx. Valem também para o que vem de
+ * fora (cópia, aparelho, nuvem: `cleanSettings` em backup.ts): cada página desenhada passa por linhas × colunas bolsos.
+ */
+export const MAX_ROWS = 8;
+export const MAX_COLS = 6;
+export const MAX_SLOTS_PER_POKEMON = 6;
+export const MAX_PAGES = 500;
+
 export function pageSize(s: Pick<Grid, 'rows' | 'cols'>) {
   return s.rows * s.cols;
 }

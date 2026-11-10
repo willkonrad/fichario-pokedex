@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Redirect, router, Stack, useIsFocused, useLocalSearchParams, useNavigation, type Href } from 'expo-router';
-import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   AccessibilityInfo,
   Animated,
@@ -73,10 +73,11 @@ import {
   totalSlots,
 } from '@/lib/binder';
 import { entryImageUrl, plainName } from '@/lib/catalog';
-import { changeText } from '@/lib/copy';
-import { formatBRLShort, formatInt } from '@/lib/format';
+import { changeText, mypBlockedNotice } from '@/lib/copy';
+import { formatBRLShort, formatInt, formatWhen } from '@/lib/format';
 import { recentChange } from '@/lib/history';
 import { mypPtImage } from '@/lib/myp-api';
+import { clearMypBlock, mypBlockedUntil, subscribeMypBlock } from '@/lib/myp-queue';
 import { collectionTotals } from '@/lib/quotes';
 import { TAP } from '@/lib/tap-word';
 import { POKEDEX_BINDER, type BinderSettings, type CustomBinder, type Entry } from '@/lib/types';
@@ -1010,6 +1011,21 @@ function useSyncNotice(): HomeNotice | null {
   return null;
 }
 
+/**
+ * Aviso da recusa do MYP (403): as consultas dele ficam paradas por 24 h (myp-queue.ts), e a pessoa sabe por quê.
+ * "Tentar de novo" libera a próxima consulta; outra recusa para tudo de novo.
+ */
+function useMypBlockNotice(): HomeNotice | null {
+  const until = useSyncExternalStore(subscribeMypBlock, mypBlockedUntil, () => 0);
+  if (!until) return null;
+  return {
+    text: mypBlockedNotice(formatWhen(new Date(until).toISOString())),
+    tone: 'warning',
+    icon: 'pricetag-outline',
+    action: { label: 'Tentar de novo', onPress: clearMypBlock },
+  };
+}
+
 function BinderFrame(p: FrameProps) {
   const L = useLayout();
   const insets = useSafeAreaInsets();
@@ -1041,6 +1057,7 @@ function BinderFrame(p: FrameProps) {
   const searchBox = useRef<ViewInstance>(null);
   const blurTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const syncNotice = useSyncNotice();
+  const mypNotice = useMypBlockNotice();
   const keyboard = useKeyboardHeight();
   const change = useRecentChange(p.showPrices, p.hasOtherBinders ? ' na coleção' : '');
   const value = useMemo(() => homeValue(p.entries), [p.entries]);
@@ -1493,6 +1510,7 @@ function BinderFrame(p: FrameProps) {
       {/* Com a busca aberta no celular, o aviso dela fica embaixo do campo, por cima da tela. */}
       {typing ? null : <NoticeSlot notice={p.notice} />}
       <NoticeSlot notice={syncNotice} />
+      <NoticeSlot notice={mypNotice} />
       <NoticeSlot
         notice={
           p.outside.length

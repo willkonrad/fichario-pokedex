@@ -4,7 +4,7 @@ import { AppState, Platform } from 'react-native';
 
 import { registerMypBackground } from '@/components/myp-background';
 import { MYP_API_INTERVAL_MS, mypPriority, onMypPriority } from '@/lib/myp-api';
-import { MypRunStopped, nextMypGroup, runMypGroup } from '@/lib/myp-queue';
+import { loadMypBlock, MypRunStopped, nextMypGroup, runMypGroup, subscribeMypBlock } from '@/lib/myp-queue';
 import { useCollection } from '@/store/collection';
 
 /** Sem nada para buscar, olha de novo a cada 5 min (ou antes, quando a coleção muda). */
@@ -100,8 +100,12 @@ export function MypRefresher() {
 
     // A tela de uma carta sem preço pede a vez dela: acorda a busca, se estiver ociosa.
     onMypPriority(() => wakeRef.current());
+    // A pessoa pediu para tentar o MYP de novo depois de uma recusa (403): acorda a busca.
+    const unsubscribeBlock = subscribeMypBlock(() => wakeRef.current());
 
     (async () => {
+      // A recusa do MYP guardada no aparelho vale antes da primeira consulta (com ela, a fila fica vazia).
+      await loadMypBlock();
       // Sem internet, a fila não anda: a tela volta a apagar sozinha até uma consulta dar certo de novo.
       let offline = false;
       while (alive) {
@@ -122,6 +126,11 @@ export function MypRefresher() {
           current: (id) => entriesRef.current[id],
         });
         if (!alive || step === 'stopped') break;
+        // MYP recusou (403): a fila fica vazia até a pausa acabar (nextMypGroup) e a tela volta a apagar sozinha.
+        if (step === 'blocked') {
+          keepAwake(false);
+          continue;
+        }
         if (step === 'offline') {
           offline = true;
           keepAwake(false);
@@ -137,6 +146,7 @@ export function MypRefresher() {
       stopWaiting?.();
       wakeRef.current = () => {};
       onMypPriority(() => {});
+      unsubscribeBlock();
       keepAwake(false);
     };
   }, [canRun]);

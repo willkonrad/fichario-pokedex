@@ -127,6 +127,20 @@ describe('Liga', () => {
     expect(url(portalLinks({ card: zhCard(), lang: 'zh', condition: 'NM' }).main, 'liga')).toBe('https://www.ligapokemon.com.br/?view=cards/search&card=Roselia');
   });
 
+  it('ZH de treinador (sem espécie): o nome em inglês da gêmea japonesa nas lojas, nunca o nome em chinês', () => {
+    const trainer = zhCard({ dex: 0, name: '博士的研究', number: '070/071' });
+    const r = portalLinks({ card: trainer, lang: 'zh', condition: 'NM', twinName: "Professor's Research" });
+    expect(decodeURIComponent(url(r.main, 'liga'))).toBe("https://www.ligapokemon.com.br/?view=cards/search&card=Professor's Research");
+    expect(decodeURIComponent(url(r.main, 'myp'))).toContain("ProdutoSearch[query]=Professor's Research&");
+    expect(decodeURIComponent(url(r.main, 'ebay'))).toContain("_nkw=Professor's Research 070/071");
+    expect(decodeURIComponent(url(r.main, 'pricecharting'))).toContain("q=Professor's Research 070/071");
+    // Gêmea também com o nome em japonês: não serve; fica o da linha.
+    const ja = portalLinks({ card: trainer, lang: 'zh', condition: 'NM', twinName: '博士の研究' });
+    expect(decodeURIComponent(url(ja.main, 'liga'))).toContain('card=博士的研究');
+    // Com espécie, ela continua na frente.
+    expect(url(portalLinks({ card: zhCard(), lang: 'zh', condition: 'NM', twinName: 'Roselia ex' }).main, 'liga')).toContain('card=Roselia');
+  });
+
   it('promo sem total: só o nome', () => {
     expect(url(portalLinks({ card: lookupCard({ name: 'Pikachu', number: 'SWSH020' }), lang: 'en', condition: 'NM' }).main, 'liga')).toBe('https://www.ligapokemon.com.br/?view=cards/search&card=Pikachu');
   });

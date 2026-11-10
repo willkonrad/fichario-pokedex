@@ -92,6 +92,7 @@ export function useMypNow(card: LookupCard | null, lang: LookupLang): MypNow {
       if (!alive) return;
       if ('offline' in answer) return show({ status: 'unavailable', reason: 'offline' });
       if ('failed' in answer) return show({ status: 'unavailable', reason: 'error' });
+      if ('blocked' in answer) return show({ status: 'unavailable', reason: 'blocked' });
       if ('limitedForMs' in answer) return countDown(answer.limitedForMs, answer.by);
       const p = answer.price;
       // Selo ou Poké Ball sem produto próprio: o preço seria o da carta base, e nunca o de outra versão sem aviso.

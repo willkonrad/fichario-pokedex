@@ -19,6 +19,8 @@ jest.mock('@/lib/myp-queue', () => ({
   MypRunStopped: class extends Error {},
   nextMypGroup: jest.fn(),
   runMypGroup: jest.fn(),
+  loadMypBlock: jest.fn(async () => {}),
+  subscribeMypBlock: jest.fn(() => () => {}),
 }));
 jest.mock('@/lib/myp-api', () => ({ MYP_API_INTERVAL_MS: 6500, mypPriority: () => new Set(), onMypPriority: () => {} }));
 jest.mock('@/store/collection', () => {
@@ -53,4 +55,20 @@ it('sem internet a tela apaga e só fica acesa de novo depois de uma consulta qu
   // Uma consulta deu certo: a próxima carta acende de novo.
   await act(async () => jest.advanceTimersByTimeAsync(6500));
   expect(awake).toHaveBeenCalledTimes(2);
+});
+
+it('MYP recusou (403): a tela apaga e nenhuma carta é consultada enquanto a fila diz que está parada', async () => {
+  awake.mockClear();
+  asleep.mockClear();
+  // Depois da recusa, a fila de verdade fica vazia (nextMypGroup vê a pausa da recusa).
+  jest.mocked(nextMypGroup).mockReset().mockReturnValueOnce([entry({ id: 'a' })]).mockReturnValue(undefined);
+  jest.mocked(runMypGroup).mockReset().mockResolvedValueOnce('blocked');
+  root = createRoot();
+  await act(async () => root!.render(createElement(MypRefresher)));
+  expect(runMypGroup).toHaveBeenCalledTimes(1);
+  expect(awake).toHaveBeenCalledTimes(1);
+  expect(asleep).toHaveBeenCalledTimes(1);
+  await act(async () => jest.advanceTimersByTimeAsync(60 * 60_000));
+  expect(runMypGroup).toHaveBeenCalledTimes(1);
+  expect(awake).toHaveBeenCalledTimes(1);
 });

@@ -1,5 +1,45 @@
 # Notas da versão
 
+## 3.5.0 — Para colecionador, links das lojas e o primeiro APK (10/11/2026)
+
+### Para colecionador (tela da carta)
+- **Bloco novo "Para colecionador"**, logo abaixo do valor: coleção, data de lançamento, série, número impresso, quantas cartas a coleção tem, raridade, ilustrador e o Pokémon com o nome em japonês. O rodapé diz de onde veio cada dado (TCGdex, TCGplayer, PokéAPI), e o ⓘ "Sobre estes dados" explica os limites de cada fonte.
+- **Ano no título**, ao lado da raridade: o ano da coleção (ou da reimpressão, ou da própria carta, nos promos que têm data). Na carta em português aparece "2023 · EN", porque nenhuma fonte tem a data do lançamento no Brasil.
+- **Nada inventado**: promos sem data por carta mostram a faixa da série ("1999–2003") e avisam que a fonte não data cada carta; quando a fonte só sabe o mês (dia 01 que não confere com o catálogo), aparece "05/2007" com o aviso "A fonte não dá o dia."; "Cartas na coleção" diz quantas ficam fora do total impresso sem afirmar como são numeradas; grupos do catálogo que juntam cartas de vários anos ficam sem data.
+- **Número como impresso**: Coleção Clássica com o número da carta original ("4/102"), cartas japonesas antigas sem número (a coleção não tinha), "Yellow A Alternate" sem a data de 2014, que não é a da carta.
+- "Raridade" e "Ilustrador" saíram de "Sobre a carta" e foram para o bloco novo; "Sobre a carta" só aparece quando há algum dado de jogo para mostrar.
+- No leitor de tela, cada dado é uma parada só, com o rótulo junto; o bloco reserva o espaço certo enquanto carrega, para a tela não pular.
+
+### Links das lojas
+- **Carta japonesa com nome em japonês** (kanji ou kana) busca na Liga e no MYP Cards pelo nome do Pokémon em inglês, que é como as lojas cadastram. Antes, o Dark Kadabra japonês abria uma busca vazia.
+- **Busca no MYP Cards já filtrada pelo idioma da carta** (português, inglês, japonês…) quando o app não tem o link exato do produto.
+- **Liga sem número que não está na carta**: Coleção Clássica, "Yellow A Alternate" e japonesas antigas (sem número impresso) buscam só pelo nome; as promos usam o número como impresso.
+- Treinador e energia japoneses ou chineses buscam pelo nome em inglês do produto gêmeo; sem nome em letras latinas, o botão da Liga some e o do MYP Cards abre a página inicial, em vez de uma busca vazia.
+- Os botões "MYP Cards" e "TCGplayer" só abrem endereços do próprio site da loja, mesmo vindos de uma cópia importada.
+- Continua igual: a Liga só aceita busca. O link abre a busca pelo nome e número, que costuma cair na carta; promos e japonesas antigas mostram uma lista.
+
+### MYP Cards: recusa é recusa
+- Se o MYP Cards (ou a proteção do site dele) recusar uma consulta, o app para todas as consultas ao MYP por 24 horas (fila, segundo plano e Consulta de cartas), avisa na tela inicial e oferece "Tentar de novo". A carta não vira "não encontrada" por causa disso. Antes, o app seguia consultando carta por carta.
+
+### Número da carta igual em todo lugar
+- Listas, Relatórios, o espiar da carta na tela inicial e a planilha (CSV) usam o mesmo número impresso da tela da carta: promos sem total inventado ("010" e não "010/89"), galerias como "TG06/TG30" e japonesas antigas sem número.
+
+### Mais rápido
+- **A "Evolução do valor" não fica mais lenta com o tempo**: às 23:55 o servidor guarda o total de cada dia (tabela `price_history_daily`, cron novo `price-totals`), e o gráfico lê esses totais em vez de somar todas as fotos do ano a cada abertura. Medido com um ano de fotos de 1.700 cartas: de 3,5 s para poucos milissegundos. Vem na migração `20261110b_totais_do_dia`; sem ela, o gráfico funciona como antes.
+- **Consulta**: a primeira busca por número, sigla ou treinador (e a primeira leitura da câmera) não trava mais a tela; os mapas são montados aos poucos logo depois de abrir.
+- **Segundo plano mais leve**: a tarefa do MYP Cards com o app fechado só sincroniza quando há carta na fila, e pela sincronização incremental. A completa fica para quando você abre o app (ou para a própria tarefa, se a última completa tem mais de 24 h). Sem carta na fila, a tarefa não lê nada da nuvem.
+
+### Primeiro APK
+- Projeto ligado ao EAS (Expo), com atualizações pelo ar: correções de tela e de regra chegam ao APK instalado sem reinstalar, enquanto a parte nativa não mudar (`runtimeVersion` pelo fingerprint, canal `preview`).
+
+### APK menor (sem mudança na tela)
+- Sem o leitor de código de barras e o leitor de documentos do ML Kit no expo-camera (a câmera do app lê o texto da carta) e sem o GIF/WebP do `<Image>` do React Native (as fotos passam pelo expo-image): cerca de 7 MB a menos, pelo tamanho das bibliotecas.
+- Sem o `expo-symbols`, que punha no APK a fonte Material Symbols (971 KB) sem uso, e sem compilar reanimated, worklets e gesture-handler, que o app não usa (continuam instaladas porque o expo-router as exige). O tamanho final aparece no primeiro build.
+
+### Segurança
+- **Cópia com posição impossível**: número de Pokémon acima do último e bolso além do maior fichário possível contam como cartas ignoradas na importação. Antes, uma posição gigante travava o envio de tudo à nuvem.
+- **Configuração conferida na cópia, no aparelho e na nuvem**: linhas, colunas, espaços por Pokémon e páginas só valem dentro dos limites da tela (8 linhas, 6 colunas, 6 espaços, 500 páginas); fora disso, vale o padrão. Uma cópia forjada com milhares de linhas travava a tela. As datas no futuro de uma cópia importada (da configuração e das cartas: edição, preços e "Meu valor") passam a valer como "agora", para não travar as edições e os preços seguintes.
+
 ## 3.4.0 — Consulta de cartas e adicionar pela câmera (09/11/2026)
 
 ### Consulta de cartas, para leilões
